@@ -1,0 +1,12 @@
+{
+	"name": "cruise-bot",
+	"version": "1.0.0",
+	"description": "Cruise Bot, various functions",
+	"main": "bot.js",
+	"author": "Cruise Brantley",
+	"dependencies": {
+		"discord.io": "github:woor/discord.io#gateway_v6",
+		"public-ip": "^3.0.0",
+		"winston": "^3.2.1"
+	}
+}
