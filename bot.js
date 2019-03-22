@@ -31,29 +31,29 @@ bot.on("ready", evt => {
 });
 
 bot.on("message", (user, userID, channelID, message, evt) => {
-	// Our bot needs to know if it will execute a command
-	// It will listen for messages that will start with `!`
-	if (message.substring(0, 1) == "!") {
-		let args = message.substring(1).split(" ");
-		let cmd = args[0].toLowerCase();
+	if (evt.d.author.bot) return; //ignore bots
+	if (message.substring(0, 1) !== "!") return; //ignore non-commands
 
-		args = args.splice(1);
-		const command = new Command(user, userID, channelID, message, cmd, evt);
-		chatCommand(command);
-	}
+	// Listening for messages that will start with `!`
+	let args = message.substring(1).split(/ +/g); //removes all spaces
+	let cmd = args[0].toLowerCase();
+
+	args = args.splice(1);
+	const command = new Command(user, userID, channelID, message, cmd, evt);
+	chatCommand(command);
 });
 
 bot.on("messageUpdate", (originalMessage, updatedMessage, changer) => {
 	console.log(originalMessage);
 	if (originalMessage != undefined) {
 		logger.info(
-			"\nUser " +
+			"User " +
 				changer.d.author.username +
 				' updated: "' +
 				originalMessage.content +
 				'" to "' +
 				updatedMessage.content +
-				'"\n'
+				'"'
 		);
 	}
 });
@@ -64,7 +64,7 @@ function chatCommand(command) {
 			command.ping(bot, logger);
 			break;
 		case "server":
-			command.serverIP(bot, logger);
+			command.server(bot, logger);
 			break;
 		case "help":
 			command.help(bot, logger);
