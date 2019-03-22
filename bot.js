@@ -31,7 +31,7 @@ bot.on("message", (user, userID, channelID, message, evt) => {
 		let cmd = args[0].toLowerCase();
 
 		args = args.splice(1);
-		const command = new Command(user, userID, channelID, cmd, evt);
+		const command = new Command(user, userID, channelID, message, cmd, evt);
 		chatCommand(command);
 	}
 });
