@@ -17,13 +17,13 @@ const bot = new Discord.Client({
 	autorun: true
 });
 
-bot.on("ready", function(evt) {
+bot.on("ready", evt => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
 	logger.info(bot.username + " - (" + bot.id + ")");
 });
 
-bot.on("message", function(user, userID, channelID, message, evt) {
+bot.on("message", (user, userID, channelID, message, evt) => {
 	// Our bot needs to know if it will execute a command
 	// It will listen for messages that will start with `!`
 	if (message.substring(0, 1) == "!") {
@@ -31,20 +31,7 @@ bot.on("message", function(user, userID, channelID, message, evt) {
 		let cmd = args[0].toLowerCase();
 
 		args = args.splice(1);
-		command = new Command(user, userID, channelID, cmd, evt);
-		chatCommand(command);
-	}
-});
-
-bot.on("message", function(user, userID, channelID, message, evt) {
-	// Our bot needs to know if it will execute a command
-	// It will listen for messages that will start with `!`
-	if (message.substring(0, 1) == "!") {
-		let args = message.substring(1).split(" ");
-		let cmd = args[0].toLowerCase();
-
-		args = args.splice(1);
-		command = new Command(user, userID, channelID, message, cmd, evt);
+		const command = new Command(user, userID, channelID, cmd, evt);
 		chatCommand(command);
 	}
 });
