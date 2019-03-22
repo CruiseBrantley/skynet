@@ -4,15 +4,15 @@ const publicIp = require("public-ip");
 const commandList = ["help", "ping", "server"];
 
 class Command {
-	constructor(user, userID, channelID, cmd, evt) {
+	constructor(user, userID, channelID, message, cmd, evt) {
 		(this.user = user),
 			(this.userID = userID),
 			(this.channelID = channelID),
 			(this.cmd = cmd),
-			(this.evt = evt);
+			(this.evt = evt),
+			(this.message = message);
 	}
-	help() {
-		const { bot } = require("./bot");
+	help(bot) {
 		const message =
 			"Commands are " +
 			commandList.map((e, index) =>
@@ -23,20 +23,26 @@ class Command {
 			message: message
 		});
 	}
-	ping() {
-		const { bot } = require("./bot");
+	ping(bot) {
 		bot.sendMessage({
 			to: this.channelID,
 			message: "Pong!"
 		});
 	}
-	async serverIP() {
-		const { bot } = require("./bot");
+	async serverIP(bot) {
 		const ip = await publicIp.v4();
 		bot.sendMessage({
 			to: this.channelID,
 			message: ip
 		});
+	}
+	info(bot) {
+		console.log("bot:", bot);
+		console.log("evt:", this.evt);
+		console.log("userID:", this.userID);
+		console.log("user:", this.user);
+		console.log("channelID:", this.channelID);
+		console.log("message:", this.message);
 	}
 }
 exports.Command = Command;

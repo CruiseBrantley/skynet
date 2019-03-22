@@ -16,7 +16,6 @@ const bot = new Discord.Client({
 	token: auth.token,
 	autorun: true
 });
-exports.bot = bot;
 
 bot.on("ready", function(evt) {
 	logger.info("Connected");
@@ -37,16 +36,32 @@ bot.on("message", function(user, userID, channelID, message, evt) {
 	}
 });
 
+bot.on("message", function(user, userID, channelID, message, evt) {
+	// Our bot needs to know if it will execute a command
+	// It will listen for messages that will start with `!`
+	if (message.substring(0, 1) == "!") {
+		let args = message.substring(1).split(" ");
+		let cmd = args[0].toLowerCase();
+
+		args = args.splice(1);
+		command = new Command(user, userID, channelID, message, cmd, evt);
+		chatCommand(command);
+	}
+});
+
 function chatCommand(command) {
 	switch (command.cmd) {
 		case "ping":
-			command.ping();
+			command.ping(bot);
 			break;
 		case "server":
-			command.serverIP();
+			command.serverIP(bot);
 			break;
 		case "help":
-			command.help();
+			command.help(bot);
+			break;
+		case "info":
+			command.info(bot);
 			break;
 	}
 }
