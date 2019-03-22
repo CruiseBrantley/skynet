@@ -29,7 +29,7 @@ bot.on("message", function(user, userID, channelID, message, evt) {
 	// It will listen for messages that will start with `!`
 	if (message.substring(0, 1) == "!") {
 		let args = message.substring(1).split(" ");
-		let cmd = args[0];
+		let cmd = args[0].toLowerCase();
 
 		args = args.splice(1);
 		command = new Command(user, userID, channelID, cmd, evt);
@@ -38,7 +38,7 @@ bot.on("message", function(user, userID, channelID, message, evt) {
 });
 
 function chatCommand(command) {
-	switch (command.cmd.toLowerCase()) {
+	switch (command.cmd) {
 		case "ping":
 			command.ping();
 			break;
