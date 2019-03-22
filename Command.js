@@ -12,7 +12,7 @@ class Command {
 			(this.evt = evt),
 			(this.message = message);
 	}
-	help(bot) {
+	help(bot, logger) {
 		const message =
 			"Commands are " +
 			commandList.map((e, index) =>
@@ -23,26 +23,26 @@ class Command {
 			message: message
 		});
 	}
-	ping(bot) {
+	ping(bot, logger) {
 		bot.sendMessage({
 			to: this.channelID,
 			message: "Pong!"
 		});
 	}
-	async serverIP(bot) {
+	async serverIP(bot, logger) {
 		const ip = await publicIp.v4();
 		bot.sendMessage({
 			to: this.channelID,
 			message: ip
 		});
 	}
-	info(bot) {
-		console.log("bot:", bot);
-		console.log("evt:", this.evt);
-		console.log("userID:", this.userID);
-		console.log("user:", this.user);
-		console.log("channelID:", this.channelID);
-		console.log("message:", this.message);
+	info(bot, logger) {
+		console.log(bot);
+		// logger.info("evt:" + this.evt);
+		logger.info("userID:" + this.userID);
+		logger.info("user:" + this.user);
+		logger.info("channelID:" + this.channelID);
+		logger.info("message:" + this.message);
 	}
 }
 exports.Command = Command;

@@ -1,15 +1,22 @@
 const { Command } = require("./Command");
 
 const Discord = require("discord.io");
-const logger = require("winston");
+const winston = require("winston");
 const auth = require("./auth.json");
 
 // Configure logger settings
-logger.remove(logger.transports.Console);
-logger.add(new logger.transports.Console(), {
-	colorize: true
+const logger = winston.createLogger({
+	level: "info",
+	format: winston.format.json(),
+	defaultMeta: { service: "user-service" },
+	transports: [new winston.transports.File({ filename: "combined.log" })]
 });
-logger.level = "debug";
+//debug logging under here, remove for prod
+logger.add(
+	new winston.transports.Console({
+		format: winston.format.simple()
+	})
+);
 
 // Initialize Discord Bot
 const bot = new Discord.Client({
@@ -36,19 +43,34 @@ bot.on("message", (user, userID, channelID, message, evt) => {
 	}
 });
 
+bot.on("messageUpdate", (originalMessage, updatedMessage, changer) => {
+	console.log(originalMessage);
+	if (originalMessage != undefined) {
+		logger.info(
+			"\nUser " +
+				changer.d.author.username +
+				' updated: "' +
+				originalMessage.content +
+				'" to "' +
+				updatedMessage.content +
+				'"\n'
+		);
+	}
+});
+
 function chatCommand(command) {
 	switch (command.cmd) {
 		case "ping":
-			command.ping(bot);
+			command.ping(bot, logger);
 			break;
 		case "server":
-			command.serverIP(bot);
+			command.serverIP(bot, logger);
 			break;
 		case "help":
-			command.help(bot);
+			command.help(bot, logger);
 			break;
 		case "info":
-			command.info(bot);
+			command.info(bot, logger);
 			break;
 	}
 }
