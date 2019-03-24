@@ -6,6 +6,7 @@
 	"author": "Cruise Brantley",
 	"dependencies": {
 		"discord.js": "^11.4.2",
+		"node-tweet-stream": "^2.0.3",
 		"nodemon": "^1.18.10",
 		"public-ip": "^3.0.0",
 		"winston": "^3.2.1"
