@@ -1,48 +1,40 @@
 const publicIp = require("public-ip");
 
 //Set List of commands
-const commandList = ["help", "ping", "server"];
+const commandList = ["help", "ping", "server", "say", "division"];
 
 class Command {
-	constructor(user, userID, channelID, message, cmd, evt) {
-		(this.user = user),
-			(this.userID = userID),
-			(this.channelID = channelID),
-			(this.cmd = cmd),
-			(this.evt = evt),
-			(this.message = message);
+	constructor(message, cmd, args) {
+		this.message = message;
+		this.cmd = cmd;
+		this.args = args;
 	}
-	help(bot, logger) {
+	help() {
 		const message =
 			"Commands are " +
 			commandList.map((e, index) =>
-				index < commandList.length - 1 ? " !" + e : " and !" + e
+				index < commandList.length - 1 ? " `!" + e + "`" : " and `!" + e + "`"
 			);
-		bot.sendMessage({
-			to: this.channelID,
-			message: message
-		});
+		this.message.channel.send(message);
 	}
-	ping(bot, logger) {
-		bot.sendMessage({
-			to: this.channelID,
-			message: "Pong!"
-		});
+	async ping(bot) {
+		const m = await this.message.channel.send("Ping?");
+		m.edit(
+			`Pong! Latency is ${m.createdTimestamp -
+				this.message.createdTimestamp}ms. API Latency is ${Math.round(
+				bot.ping
+			)}ms`
+		);
 	}
-	async serverIP(bot, logger) {
-		const ip = await publicIp.v4();
-		bot.sendMessage({
-			to: this.channelID,
-			message: ip
-		});
+	async server() {
+		this.message.channel.send(
+			`The current server ip address is: ${await publicIp.v4()}`
+		);
 	}
-	info(bot, logger) {
-		console.log(bot);
-		// logger.info("evt:" + this.evt);
-		logger.info("userID:" + this.userID);
-		logger.info("user:" + this.user);
-		logger.info("channelID:" + this.channelID);
-		logger.info("message:" + this.message);
+	say() {
+		const sayMessage = this.args.join(" ");
+		this.message.delete().catch(() => {});
+		this.message.channel.send(sayMessage);
 	}
 }
 exports.Command = Command;

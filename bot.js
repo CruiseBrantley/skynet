@@ -1,6 +1,6 @@
 const { Command } = require("./Command");
 
-const Discord = require("discord.io");
+const Discord = require("discord.js");
 const winston = require("winston");
 const auth = require("./auth.json");
 
@@ -19,36 +19,34 @@ logger.add(
 );
 
 // Initialize Discord Bot
-const bot = new Discord.Client({
-	token: auth.token,
-	autorun: true
-});
+const bot = new Discord.Client();
+bot.login(auth.token);
 
-bot.on("ready", evt => {
+bot.on("ready", () => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
-	logger.info(bot.username + " - (" + bot.id + ")");
+	logger.info(bot.user.username + " - (" + bot.user.id + ")");
+	bot.user.setActivity("Administration, better watch out.");
 });
 
-bot.on("message", (user, userID, channelID, message, evt) => {
-	if (evt.d.author.bot) return; //ignore bots
-	if (message.substring(0, 1) !== "!") return; //ignore non-commands
+bot.on("message", message => {
+	// if (evt.d.author.bot) return; //ignore bots
+	if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
 
 	// Listening for messages that will start with `!`
-	let args = message.substring(1).split(/ +/g); //removes all spaces
+	let args = message.content.substring(1).split(/ +/g); //removes all spaces
 	let cmd = args[0].toLowerCase();
 
 	args = args.splice(1);
-	const command = new Command(user, userID, channelID, message, cmd, evt);
+	const command = new Command(message, cmd, args);
 	chatCommand(command);
 });
 
-bot.on("messageUpdate", (originalMessage, updatedMessage, changer) => {
-	console.log(originalMessage);
+bot.on("messageUpdate", (originalMessage, updatedMessage) => {
 	if (originalMessage != undefined) {
 		logger.info(
 			"User " +
-				changer.d.author.username +
+				originalMessage.author.username +
 				' updated: "' +
 				originalMessage.content +
 				'" to "' +
@@ -61,16 +59,16 @@ bot.on("messageUpdate", (originalMessage, updatedMessage, changer) => {
 function chatCommand(command) {
 	switch (command.cmd) {
 		case "ping":
-			command.ping(bot, logger);
+			command.ping(bot);
 			break;
 		case "server":
 			command.server(bot, logger);
 			break;
 		case "help":
-			command.help(bot, logger);
+			command.help();
 			break;
-		case "info":
-			command.info(bot, logger);
+		case "say":
+			command.say();
 			break;
 	}
 }
