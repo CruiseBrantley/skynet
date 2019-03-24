@@ -4,7 +4,9 @@ const publicIp = require("public-ip");
 const commandList = ["help", "ping", "server", "say", "division"];
 
 class Command {
-	constructor(message, cmd, args) {
+	constructor(bot, logger, message, cmd, args) {
+		this.bot = bot;
+		this.logger = logger;
 		this.message = message;
 		this.cmd = cmd;
 		this.args = args;
@@ -17,12 +19,12 @@ class Command {
 			);
 		this.message.channel.send(message);
 	}
-	async ping(bot) {
+	async ping() {
 		const m = await this.message.channel.send("Ping?");
 		m.edit(
 			`Pong! Latency is ${m.createdTimestamp -
 				this.message.createdTimestamp}ms. API Latency is ${Math.round(
-				bot.ping
+				this.bot.ping
 			)}ms`
 		);
 	}

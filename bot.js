@@ -1,4 +1,6 @@
-const { Command } = require("./Command");
+const { botUpdate } = require("./events/botUpdate");
+const { botMessage } = require("./events/botMessage");
+const { botDelete } = require("./events/botDelete");
 
 const Discord = require("discord.js");
 const winston = require("winston");
@@ -29,46 +31,8 @@ bot.on("ready", () => {
 	bot.user.setActivity("Administration, better watch out.");
 });
 
-bot.on("message", message => {
-	if (message.author.bot) return; //ignore bots
-	if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
+bot.on("message", botMessage(bot, logger));
 
-	// Listening for messages that will start with `!`
-	let args = message.content.substring(1).split(/ +/g); //removes all spaces
-	let cmd = args[0].toLowerCase();
+bot.on("messageUpdate", botUpdate(logger));
 
-	args = args.splice(1);
-	const command = new Command(message, cmd, args);
-	chatCommand(command);
-});
-
-bot.on("messageUpdate", (originalMessage, updatedMessage) => {
-	if (originalMessage != undefined) {
-		logger.info(
-			"User " +
-				originalMessage.author.username +
-				' updated: "' +
-				originalMessage.content +
-				'" to "' +
-				updatedMessage.content +
-				'"'
-		);
-	}
-});
-
-function chatCommand(command) {
-	switch (command.cmd) {
-		case "ping":
-			command.ping(bot);
-			break;
-		case "server":
-			command.server(bot, logger);
-			break;
-		case "help":
-			command.help();
-			break;
-		case "say":
-			command.say();
-			break;
-	}
-}
+bot.on("messageDelete", botDelete(logger));
