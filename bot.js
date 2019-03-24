@@ -30,7 +30,7 @@ bot.on("ready", () => {
 });
 
 bot.on("message", message => {
-	// if (evt.d.author.bot) return; //ignore bots
+	if (message.author.bot) return; //ignore bots
 	if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
 
 	// Listening for messages that will start with `!`
