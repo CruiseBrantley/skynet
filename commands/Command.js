@@ -1,7 +1,7 @@
 const publicIp = require("public-ip");
 
 //Set List of commands
-const commandList = ["help", "ping", "server", "say", "division"];
+const commandList = ["help", "ping", "server", "say"];
 
 class Command {
 	constructor(bot, logger, message, cmd, args) {
