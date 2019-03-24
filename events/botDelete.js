@@ -1,9 +1,9 @@
 function botDelete(logger) {
 	return message => {
-		if (message.author.bot) return; //ignore bots
+		// if (message.author.bot) return; //ignore bots
 		if (message != undefined) {
 			logger.info(
-				`User ${message.author.username} deleted: "${message.content}"`
+				`${message.author.username}'s message was deleted: "${message.content}"`
 			);
 		}
 	};
