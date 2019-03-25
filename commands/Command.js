@@ -13,6 +13,7 @@ class Command {
 		this.args = args;
 	}
 	help() {
+		//ex: !help
 		const message =
 			"Commands are " +
 			commandList.map((e, index) =>
@@ -21,6 +22,7 @@ class Command {
 		this.message.channel.send(message);
 	}
 	async ping() {
+		//ex: !ping
 		const m = await this.message.channel.send("Ping?");
 		m.edit(
 			`Pong! Bot response latency is ${m.createdTimestamp -
@@ -35,6 +37,7 @@ class Command {
 		);
 	}
 	say() {
+		//ex: !say I'm telling the bot what to say.
 		const sayMessage = this.args.join(" ");
 		this.message.delete().catch(() => {
 			this.logger.info(
@@ -44,6 +47,7 @@ class Command {
 		this.message.channel.send(sayMessage);
 	}
 	note() {
+		//ex: !note title="New Title" Here is the content.
 		let title = "Untitled";
 		let text;
 
