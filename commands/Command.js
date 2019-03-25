@@ -47,13 +47,11 @@ class Command {
 		let title = "Untitled";
 		let text;
 
-		console.log(this.args[0]);
-		if (this.args[0]) {
-			if (this.args[0].substring(0, 6).toLowerCase() === "title=") {
-				title = this.args[0].substring(6);
-				this.args.shift();
-			}
-			text = this.args.join(" ");
+		text = this.args.join(" ");
+		if (text.substring(0, 7).toLowerCase() === 'title="') {
+			const textIndex = text.indexOf('"', 8) + 2;
+			title = text.substring(7, textIndex - 2);
+			text = text.substring(textIndex);
 		}
 
 		axios
