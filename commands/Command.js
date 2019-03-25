@@ -22,7 +22,7 @@ class Command {
 	async ping() {
 		const m = await this.message.channel.send("Ping?");
 		m.edit(
-			`Pong! Latency is ${m.createdTimestamp -
+			`Pong! Bot response latency is ${m.createdTimestamp -
 				this.message.createdTimestamp}ms. API Latency is ${Math.round(
 				this.bot.ping
 			)}ms`
@@ -35,7 +35,7 @@ class Command {
 	}
 	say() {
 		const sayMessage = this.args.join(" ");
-		this.message.delete().catch(() => {});
+		this.message.delete().catch(() => {this.logger.info("Encountered an error while deleting: " + this.message.content)});
 		this.message.channel.send(sayMessage);
 	}
 }
