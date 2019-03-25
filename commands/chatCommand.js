@@ -12,6 +12,9 @@ function chatCommand(command) {
 		case "say":
 			command.say();
 			break;
+		case "note":
+			command.note();
+			break;
 	}
 }
 exports.chatCommand = chatCommand;
