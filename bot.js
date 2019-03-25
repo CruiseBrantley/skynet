@@ -2,9 +2,12 @@ const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
 const { botDelete } = require("./events/botDelete");
 
+//env config
+const dotenv = require("dotenv");
+dotenv.config();
+
 const Discord = require("discord.js");
 const winston = require("winston");
-const auth = require("./auth.json");
 
 // Configure logger settings
 const logger = winston.createLogger({
@@ -22,7 +25,7 @@ logger.add(
 
 // Initialize Discord Bot
 const bot = new Discord.Client();
-bot.login(auth.token);
+bot.login(process.env.TOKEN);
 
 bot.on("ready", () => {
 	logger.info("Connected");
