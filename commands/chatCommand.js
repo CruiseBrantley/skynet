@@ -15,6 +15,9 @@ function chatCommand(command) {
 		case "note":
 			command.note();
 			break;
+		case "listnotes":
+			command.listnotes();
+			break;
 	}
 }
 exports.chatCommand = chatCommand;

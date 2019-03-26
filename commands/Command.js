@@ -2,7 +2,7 @@ const publicIp = require("public-ip");
 const axios = require("axios");
 
 //Set List of commands
-const commandList = ["help", "ping", "server", "say", "note"];
+const commandList = ["help", "ping", "server", "say", "note", "listnotes"];
 
 class Command {
 	constructor(bot, logger, message, cmd, args) {
@@ -60,7 +60,7 @@ class Command {
 
 		axios
 			.post(
-				process.env.TESTPOST,
+				process.env.TEST,
 				{ title, text },
 				{
 					headers: {
@@ -70,11 +70,41 @@ class Command {
 				}
 			)
 			.then(response => {
-				if (response) console.log(response.data);
-				else console.log("Something went wrong.");
+				this.message.channel.send(
+					"I've added your note. You can view them online at https://cruisebrantley.com/notes or with !listnotes"
+				);
 			})
 			.catch(err => {
 				console.log(err);
+			});
+	}
+	listnotes() {
+		//ex: !listnotes
+		axios
+			.get(process.env.TEST, {
+				headers: {
+					username: process.env.NOTESUSER,
+					password: process.env.NOTESPASS
+				}
+			})
+			.then(response => {
+				if (response.data.notes.length === 0) {
+					this.message.channel.send(
+						'There aren\'t currently any notes, you could change this with `!note title="New Title" The new note.`'
+					);
+					return;
+				}
+				let newMessage = "```Current Notes:";
+				for (let note of response.data.notes) {
+					note.title === "Untitled"
+						? (newMessage += "\n" + note.text)
+						: (newMessage += "\n" + note.title + ": " + note.text);
+				}
+				newMessage += "```";
+				this.message.channel.send(newMessage);
+			})
+			.catch(error => {
+				console.log(error);
 			});
 	}
 }
