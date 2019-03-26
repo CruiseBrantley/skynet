@@ -60,7 +60,7 @@ class Command {
 
 		axios
 			.post(
-				process.env.TEST,
+				process.env.NOTESPOST,
 				{ title, text },
 				{
 					headers: {
@@ -81,7 +81,7 @@ class Command {
 	listnotes() {
 		//ex: !listnotes
 		axios
-			.get(process.env.TEST, {
+			.get(process.env.NOTESPOST, {
 				headers: {
 					username: process.env.NOTESUSER,
 					password: process.env.NOTESPASS
