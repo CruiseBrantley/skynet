@@ -3,7 +3,6 @@ const { chatCommand } = require("../commands/chatCommand");
 function botMessage(bot, logger) {
 	return message => {
 		if (message.author.bot) return; //ignore bots
-		// if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
 
 		//Callios request
 		if (
@@ -12,6 +11,8 @@ function botMessage(bot, logger) {
 		) {
 			message.channel.send(message.content + " <@110192893502705664>");
 		}
+
+		if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
 
 		// Listening for messages that will start with `!`
 		let args = message.content.substring(1).split(/ +/g); //removes all spaces
