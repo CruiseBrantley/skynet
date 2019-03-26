@@ -71,7 +71,7 @@ class Command {
 			)
 			.then(response => {
 				this.message.channel.send(
-					"I've added your note. You can view them online at https://cruisebrantley.com/notes or with !listnotes"
+					"I've added your note. You can view them with !listnotes or online at https://cruisebrantley.com/ login with `Cruise-bot` `Whatpassword?`"
 				);
 			})
 			.catch(err => {

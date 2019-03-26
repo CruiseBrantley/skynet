@@ -31,7 +31,7 @@ bot.on("ready", () => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
 	logger.info(bot.user.username + " - (" + bot.user.id + ")");
-	bot.user.setActivity("Administration, better watch out");
+	bot.user.setActivity("Botting");
 });
 
 bot.on("message", botMessage(bot, logger));
