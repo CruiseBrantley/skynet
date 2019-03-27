@@ -7,7 +7,7 @@ function botMessage(bot, logger) {
 		//Callios request
 		if (
 			message.content.includes(process.env.CALLIOSPHRASE) &&
-			message.author.id === 213938315408179200
+			message.author.id === "213938315408179200"
 		) {
 			message.channel.send(message.content + " <@110192893502705664>");
 		}
