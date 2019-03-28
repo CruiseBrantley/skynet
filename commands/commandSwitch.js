@@ -18,6 +18,9 @@ function chatCommand(command) {
 		case "listnotes":
 			command.listnotes();
 			break;
+		case "twitter":
+			command.twitter();
+			break;
 	}
 }
 exports.chatCommand = chatCommand;

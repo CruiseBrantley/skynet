@@ -1,16 +1,27 @@
 const publicIp = require("public-ip");
 const axios = require("axios");
+const fs = require("fs");
 
 //Set List of commands
-const commandList = ["help", "ping", "server", "say", "note", "listnotes"];
+const commandList = [
+	"help",
+	"ping",
+	"server",
+	"say",
+	"note",
+	"listnotes",
+	"twitter"
+];
 
 class Command {
-	constructor(bot, logger, message, cmd, args) {
+	constructor(bot, logger, message, cmd, args, topicFile, trackNewTopic) {
 		this.bot = bot;
 		this.logger = logger;
 		this.message = message;
 		this.cmd = cmd;
 		this.args = args;
+		this.topicFile = topicFile;
+		this.trackNewTopic = trackNewTopic;
 	}
 	help() {
 		//ex: !help
@@ -106,6 +117,20 @@ class Command {
 			.catch(error => {
 				console.log(error);
 			});
+	}
+	twitter() {
+		const newTopic = this.args.join(" ");
+		this.topicFile.topic = newTopic;
+		fs.writeFile(
+			process.env.TOPIC_FILENAME,
+			JSON.stringify(this.topicFile, null, 2),
+			err => {
+				if (err) return console.log(err);
+				this.trackNewTopic(newTopic);
+				console.log(JSON.stringify(this.topicFile));
+				console.log(`Wrote "${newTopic}" to ${process.env.TOPIC_FILENAME}`);
+			}
+		);
 	}
 }
 exports.Command = Command;
