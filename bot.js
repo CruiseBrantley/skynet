@@ -1,12 +1,10 @@
+const dotenv = require("dotenv");
+dotenv.config();
 const { configureTwitter, twitterChannelInit } = require("./events/twitter");
 const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
 const { botDelete } = require("./events/botDelete");
-
-//env config
-const dotenv = require("dotenv");
-dotenv.config();
-const topicFile = require(process.env.TOPIC_FILENAME);
+const topicFile = require("./twitterTopic.json");
 
 const Discord = require("discord.js");
 const winston = require("winston");
