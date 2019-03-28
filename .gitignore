@@ -57,7 +57,7 @@ typings/
 # dotenv environment variables file
 auth.json
 .env
-currentTopic.json
+twitterTopic.json
 
 # next.js build output
 .next
