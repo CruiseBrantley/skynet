@@ -1,6 +1,8 @@
 const publicIp = require("public-ip");
 const axios = require("axios");
 const fs = require("fs");
+const { bot, logger, trackNewTopic } = require("../bot.js");
+const { topicFile } = require("../events/twitter.js");
 
 //Set List of commands
 const commandList = [
@@ -14,14 +16,10 @@ const commandList = [
 ];
 
 class Command {
-	constructor(bot, logger, message, cmd, args, topicFile, trackNewTopic) {
-		this.bot = bot;
-		this.logger = logger;
+	constructor(message, cmd, args) {
 		this.message = message;
 		this.cmd = cmd;
 		this.args = args;
-		this.topicFile = topicFile;
-		this.trackNewTopic = trackNewTopic;
 	}
 	help() {
 		//ex: !help
@@ -38,7 +36,7 @@ class Command {
 		m.edit(
 			`Pong! Bot response latency is ${m.createdTimestamp -
 				this.message.createdTimestamp}ms. API Latency is ${Math.round(
-				this.bot.ping
+				bot.ping
 			)}ms`
 		);
 	}
@@ -51,7 +49,7 @@ class Command {
 		//ex: !say I'm telling the bot what to say.
 		const sayMessage = this.args.join(" ");
 		this.message.delete().catch(() => {
-			this.logger.info(
+			logger.info(
 				"Encountered an error while deleting: " + this.message.content
 			);
 		});
@@ -120,17 +118,17 @@ class Command {
 	}
 	twitter() {
 		const newTopic = this.args.join(" ");
-		this.topicFile.topic = newTopic;
+		topicFile.topic = newTopic;
 		fs.writeFile(
 			process.env.TOPIC_FILENAME,
-			JSON.stringify(this.topicFile, null, 2),
+			JSON.stringify(topicFile, null, 2),
 			err => {
 				if (err) return console.log(err);
-				this.trackNewTopic(newTopic);
-				console.log(JSON.stringify(this.topicFile));
+				trackNewTopic(newTopic);
+				console.log(JSON.stringify(topicFile));
 				console.log(`Wrote "${newTopic}" to ${process.env.TOPIC_FILENAME}`);
 			}
 		);
 	}
 }
-exports.Command = Command;
+module.exports.Command = Command;

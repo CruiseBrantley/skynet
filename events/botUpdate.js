@@ -1,4 +1,5 @@
-function botUpdate(logger) {
+const { logger } = require("../bot");
+function botUpdate() {
 	return (originalMessage, updatedMessage) => {
 		if (originalMessage.author.bot) return; //ignore bots
 		if (originalMessage != undefined) {

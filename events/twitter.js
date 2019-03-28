@@ -5,10 +5,13 @@ var Twitter = require("node-tweet-stream"),
 		token: process.env.TWITTER_TOKEN,
 		token_secret: process.env.TWITTER_SECRET
 	});
+const { bot } = require("../bot");
+const topicFile = require("../twitterTopic.json");
+module.exports.topicFile = topicFile;
 let currentTopic;
 
 //configure tweet stream
-const configureTwitter = topicFile => {
+const configureTwitter = () => {
 	if (topicFile === undefined) {
 		console.log(
 			"Cannot access twitterTopic.json, needs a key of topic and value of a string to track.\n",
@@ -20,6 +23,8 @@ const configureTwitter = topicFile => {
 		console.log(topicFile.topic);
 	});
 	currentTopic = topicFile.topic;
+
+	//callback function to update tracking with new topics
 	const trackNewTopic = newTopic => {
 		t.untrackAll();
 		currentTopic = newTopic;
@@ -27,14 +32,14 @@ const configureTwitter = topicFile => {
 		t.track(newTopic);
 	};
 
-	if (topicFile.topic === "stop") return trackNewTopic; //track nothing in this case
+	if (currentTopic === "stop") return trackNewTopic; //track nothing in this case
 
 	t.track(topicFile.topic);
 	return trackNewTopic;
 };
 module.exports.configureTwitter = configureTwitter;
 
-const twitterChannelInit = bot => {
+const twitterChannelInit = () => {
 	t.on("tweet", function(tweet) {
 		bot.channels.get(process.env.TWITTER_CHANNEL).send({
 			embed: {

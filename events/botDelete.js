@@ -1,4 +1,5 @@
-function botDelete(logger) {
+const { logger } = require("../bot");
+function botDelete() {
 	return message => {
 		// if (message.author.bot) return; //ignore bots
 		if (message != undefined) {

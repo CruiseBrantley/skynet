@@ -23,4 +23,4 @@ function chatCommand(command) {
 			break;
 	}
 }
-exports.chatCommand = chatCommand;
+module.exports.chatCommand = chatCommand;

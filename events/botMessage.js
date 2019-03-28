@@ -1,6 +1,6 @@
 const { Command } = require("../commands/Command");
 const { chatCommand } = require("../commands/commandSwitch");
-function botMessage(bot, logger, topicFile, trackNewTopic) {
+function botMessage() {
 	return message => {
 		if (message.author.bot) return; //ignore bots
 
@@ -20,16 +20,8 @@ function botMessage(bot, logger, topicFile, trackNewTopic) {
 		let args = message.content.substring(1).split(/ +/g); //removes all spaces
 		let cmd = args[0].toLowerCase();
 		args = args.splice(1);
-		const command = new Command(
-			bot,
-			logger,
-			message,
-			cmd,
-			args,
-			topicFile,
-			trackNewTopic
-		);
+		const command = new Command(message, cmd, args);
 		chatCommand(command);
 	};
 }
-exports.botMessage = botMessage;
+module.exports.botMessage = botMessage;

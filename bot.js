@@ -1,13 +1,11 @@
 const dotenv = require("dotenv");
 dotenv.config();
-const { configureTwitter, twitterChannelInit } = require("./events/twitter");
-const { botUpdate } = require("./events/botUpdate");
-const { botMessage } = require("./events/botMessage");
-const { botDelete } = require("./events/botDelete");
-const topicFile = require("./twitterTopic.json");
-
 const Discord = require("discord.js");
 const winston = require("winston");
+// Initialize Discord Bot
+const bot = new Discord.Client();
+bot.login(process.env.TOKEN);
+module.exports.bot = bot;
 
 // Configure logger settings
 const logger = winston.createLogger({
@@ -22,13 +20,7 @@ logger.add(
 		format: winston.format.simple()
 	})
 );
-
-//initialize twitter callback changes topic
-const trackNewTopic = configureTwitter(topicFile);
-
-// Initialize Discord Bot
-const bot = new Discord.Client();
-bot.login(process.env.TOKEN);
+module.exports.logger = logger;
 
 bot.on("ready", () => {
 	logger.info("Connected");
@@ -37,10 +29,21 @@ bot.on("ready", () => {
 	bot.user.setActivity("Botting");
 });
 
-twitterChannelInit(bot);
+const { configureTwitter, twitterChannelInit } = require("./events/twitter");
 
-bot.on("message", botMessage(bot, logger, topicFile, trackNewTopic));
+//initialize twitter callback changes topic
+const trackNewTopic = configureTwitter();
+console.log(trackNewTopic);
+module.exports.trackNewTopic = trackNewTopic;
 
-bot.on("messageUpdate", botUpdate(logger));
+const { botUpdate } = require("./events/botUpdate");
+const { botMessage } = require("./events/botMessage");
+const { botDelete } = require("./events/botDelete");
 
-bot.on("messageDelete", botDelete(logger));
+twitterChannelInit();
+
+bot.on("message", botMessage());
+
+bot.on("messageUpdate", botUpdate());
+
+bot.on("messageDelete", botDelete());
