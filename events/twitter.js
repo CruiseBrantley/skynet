@@ -1,5 +1,3 @@
-const dotenv = require("dotenv");
-dotenv.config();
 var Twitter = require("node-tweet-stream"),
 	t = new Twitter({
 		consumer_key: process.env.TWITTER_CONSUMER_KEY,
@@ -13,7 +11,7 @@ let currentTopic;
 const configureTwitter = topicFile => {
 	if (topicFile === undefined) {
 		console.log(
-			"Cannot access currentTopic.json, needs a key of topic and value of a string to track.\n",
+			"Cannot access twitterTopic.json, needs a key of topic and value of a string to track.\n",
 			"Create this file then restart the server for twitter functionality"
 		);
 		return;
@@ -38,7 +36,7 @@ module.exports.configureTwitter = configureTwitter;
 
 const twitterChannelInit = bot => {
 	t.on("tweet", function(tweet) {
-		bot.channels.get("558430903072718868").send({
+		bot.channels.get(process.env.TWITTER_CHANNEL).send({
 			embed: {
 				color: 3447003,
 				fields: [

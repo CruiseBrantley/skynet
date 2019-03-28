@@ -6,10 +6,12 @@ function botMessage(bot, logger, topicFile, trackNewTopic) {
 
 		//Callios request
 		if (
-			message.content.includes(process.env.CALLIOSPHRASE) &&
-			message.author.id === "213938315408179200"
+			message.content.includes(process.env.CALLIOS_PHRASE) &&
+			message.author.id === process.env.CALLIOS_USER_MONITOR
 		) {
-			message.channel.send(message.content + " <@110192893502705664>");
+			message.channel.send(
+				`${message.content} <@${process.env.CALLIOS_USER_MENTION}>`
+			);
 		}
 
 		if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
