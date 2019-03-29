@@ -50,6 +50,6 @@ const configureTwitter = () => {
 		currentTopic = newTopic;
 		if (newTopic !== "stop") t.track(newTopic); //track nothing in this case
 	};
-	return trackNewTopic;
+	module.exports.trackNewTopic = trackNewTopic;
 };
 module.exports.configureTwitter = configureTwitter;

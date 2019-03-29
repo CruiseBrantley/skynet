@@ -1,8 +1,8 @@
 const publicIp = require("public-ip");
 const axios = require("axios");
 const fs = require("fs");
-const { bot, logger, trackNewTopic } = require("../bot.js");
-const { topicFile } = require("../events/twitter.js");
+const { bot, logger } = require("../bot.js");
+const { topicFile, trackNewTopic } = require("../events/twitter.js");
 
 //Set List of commands
 const commandList = [

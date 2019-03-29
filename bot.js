@@ -31,9 +31,8 @@ bot.on("ready", () => {
 
 const { configureTwitter } = require("./events/twitter");
 
-//initialize twitter callback changes topic
-const trackNewTopic = configureTwitter();
-module.exports.trackNewTopic = trackNewTopic;
+//initialize twitter
+configureTwitter();
 
 const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
