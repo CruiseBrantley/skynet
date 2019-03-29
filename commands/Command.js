@@ -12,7 +12,8 @@ const commandList = [
 	"say",
 	"note",
 	"listnotes",
-	"twitter"
+	"twitter",
+	"catfact"
 ];
 
 class Command {
@@ -117,6 +118,7 @@ class Command {
 			});
 	}
 	twitter() {
+		//ex: !twitter Tesla Model 3
 		const newTopic = this.args.join(" ");
 		topicFile.topic = newTopic;
 		fs.writeFile(
@@ -129,6 +131,17 @@ class Command {
 				console.log(`Wrote "${newTopic}" to ${process.env.TOPIC_FILENAME}`);
 			}
 		);
+	}
+	catfact() {
+		//ex: !catfact
+		axios
+			.get(process.env.CATFACT_GET)
+			.then(response => {
+				this.message.channel.send(response.data.fact);
+			})
+			.catch(error => {
+				console.log(error);
+			});
 	}
 }
 module.exports.Command = Command;

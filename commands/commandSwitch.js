@@ -21,6 +21,9 @@ function chatCommand(command) {
 		case "twitter":
 			command.twitter();
 			break;
+		case "catfact":
+			command.catfact();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
