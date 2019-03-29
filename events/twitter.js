@@ -24,22 +24,6 @@ const configureTwitter = () => {
 	});
 	currentTopic = topicFile.topic;
 
-	//callback function to update tracking with new topics
-	const trackNewTopic = newTopic => {
-		t.untrackAll();
-		currentTopic = newTopic;
-		if (newTopic === "stop") return; //track nothing in this case
-		t.track(newTopic);
-	};
-
-	if (currentTopic === "stop") return trackNewTopic; //track nothing in this case
-
-	t.track(topicFile.topic);
-	return trackNewTopic;
-};
-module.exports.configureTwitter = configureTwitter;
-
-const twitterChannelInit = () => {
 	t.on("tweet", function(tweet) {
 		bot.channels.get(process.env.TWITTER_CHANNEL).send({
 			embed: {
@@ -57,5 +41,15 @@ const twitterChannelInit = () => {
 			}
 		});
 	});
+	if (currentTopic !== "stop") {
+		t.track(topicFile.topic);
+	}
+	//callback function to update tracking with new topics
+	const trackNewTopic = newTopic => {
+		t.untrackAll();
+		currentTopic = newTopic;
+		if (newTopic !== "stop") t.track(newTopic); //track nothing in this case
+	};
+	return trackNewTopic;
 };
-module.exports.twitterChannelInit = twitterChannelInit;
+module.exports.configureTwitter = configureTwitter;

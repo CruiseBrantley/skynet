@@ -29,18 +29,17 @@ bot.on("ready", () => {
 	bot.user.setActivity("Botting");
 });
 
-const { configureTwitter, twitterChannelInit } = require("./events/twitter");
+const { configureTwitter } = require("./events/twitter");
 
 //initialize twitter callback changes topic
 const trackNewTopic = configureTwitter();
-console.log(trackNewTopic);
 module.exports.trackNewTopic = trackNewTopic;
 
 const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
 const { botDelete } = require("./events/botDelete");
 
-twitterChannelInit();
+// twitterChannelInit();
 
 bot.on("message", botMessage());
 
