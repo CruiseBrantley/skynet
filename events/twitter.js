@@ -27,6 +27,8 @@ const configureTwitter = () => {
 	t.on("tweet", function(tweet) {
 		bot.channels.get(process.env.TWITTER_CHANNEL).send({
 			embed: {
+				title: "Topic: " + currentTopic,
+				url: tweet.urls,
 				color: 3447003,
 				fields: [
 					{
@@ -35,9 +37,7 @@ const configureTwitter = () => {
 					}
 				],
 				timestamp: new Date(),
-				footer: {
-					text: "Twitter topic: " + currentTopic
-				}
+				footer: { text: "Source: " + tweet.source }
 			}
 		});
 	});
