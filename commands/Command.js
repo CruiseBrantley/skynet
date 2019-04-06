@@ -109,9 +109,8 @@ class Command {
 					note.title === "Untitled"
 						? (newMessage += "\n" + note.text)
 						: (newMessage += "\n" + note.title + ": " + note.text);
-				}
-				newMessage += "```";
-				this.message.channel.send(newMessage);
+				};
+				this.message.channel.send(newMessage + "```");
 			})
 			.catch(error => {
 				console.log(error);
