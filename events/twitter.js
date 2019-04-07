@@ -37,7 +37,11 @@ const configureTwitter = () => {
 					}
 				],
 				timestamp: new Date(),
-				footer: { text: "Source: " + tweet.source }
+
+				//regex to match the innerText of the anchor tag in tweet.source
+				footer: {
+					text: "Source: " + tweet.source.match(/<a [^>]+>([^<]+)<\/a>/)[1]
+				}
 			}
 		});
 	});
