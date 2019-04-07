@@ -29,6 +29,10 @@ bot.on("ready", () => {
 	bot.user.setActivity("Botting");
 });
 
+bot.on("error", err => {
+	logger.info("Encountered an error: ", err);
+});
+
 const { configureTwitter } = require("./events/twitter");
 
 //initialize twitter
