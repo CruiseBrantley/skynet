@@ -26,7 +26,7 @@ bot.on("ready", () => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
 	logger.info(bot.user.username + " - (" + bot.user.id + ")");
-	bot.user.setActivity("Botting");
+	bot.user.setActivity(process.env.ACTIVITY);
 });
 
 bot.on("error", err => {
