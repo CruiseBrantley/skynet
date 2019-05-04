@@ -1,5 +1,7 @@
 const publicIp = require("public-ip");
 const axios = require("axios");
+const googleTTS = require("google-tts-api");
+// const FileReader = require("filereader");
 const fs = require("fs");
 const { bot, logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
@@ -7,6 +9,7 @@ const { topicFile, trackNewTopic } = require("../events/twitter.js");
 //Set List of commands
 const commandList = [
 	"help",
+	"speak",
 	"ping",
 	"server",
 	"say",
@@ -30,6 +33,30 @@ class Command {
 				index < commandList.length - 1 ? " `!" + e + "`" : " and `!" + e + "`"
 			);
 		this.message.channel.send(message);
+	}
+	speak() {
+		//ex: !speak The words to be said in my voice channel
+		const speakMessage = this.args.join(" ");
+		if (speakMessage.length > 200) {
+			//Google translate API has a 200 character limitation
+			this.message.channel.send(
+				`I can only speak up to 200 characters at a time, you entered ${
+					speakMessage.length
+				}.`
+			);
+			return;
+		}
+		googleTTS(speakMessage, "en", 1).then(url => {
+			this.message.member.voice.channel
+				.join()
+				.then(connection => {
+					const dispatcher = connection.play(url);
+					dispatcher.on("end", () => {
+						this.message.member.voice.channel.leave();
+					});
+				})
+				.catch(err => logger.info("Encountered an error: ", err));
+		});
 	}
 	async ping() {
 		//ex: !ping
