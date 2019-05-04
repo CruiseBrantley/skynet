@@ -6,11 +6,13 @@
 	"author": "Cruise Brantley",
 	"dependencies": {
 		"axios": "^0.18.0",
-		"discord.js": "^11.4.2",
+		"discord.js": "github:discordjs/discord.js",
 		"dotenv": "^7.0.0",
+		"google-tts-api": "0.0.4",
+		"node-opus": "^0.3.1",
 		"node-tweet-stream": "^2.0.3",
-		"nodemon": "^1.18.10",
-		"public-ip": "^3.0.0",
+		"nodemon": "^1.19.0",
+		"public-ip": "^3.1.0",
 		"winston": "^3.2.1"
 	}
 }
