@@ -5,6 +5,7 @@ const googleTTS = require("google-tts-api");
 const fs = require("fs");
 const { bot, logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
+let dispatcher = {};
 
 //Set List of commands
 const commandList = [
@@ -40,6 +41,10 @@ class Command {
 	speak() {
 		//ex: !speak The words to be said in my voice channel
 		const speakMessage = this.args.join(" ");
+		if (!speakMessage.length) {
+			this.message.channel.send("I need a message to speak!");
+			return;
+		}
 		if (speakMessage.length > 200) {
 			//Google translate API has a 200 character limitation
 			this.message.channel.send(
@@ -53,7 +58,7 @@ class Command {
 			this.message.member.voice.channel
 				.join()
 				.then(connection => {
-					const dispatcher = connection.play(url);
+					dispatcher = connection.play(url);
 					dispatcher.on("end", () => {
 						this.message.member.voice.channel.leave();
 					});
@@ -94,7 +99,7 @@ class Command {
 			channel
 				.join()
 				.then(connection => {
-					const dispatcher = connection.play(url);
+					dispatcher = connection.play(url);
 					dispatcher.on("end", () => {
 						channel.leave();
 					});
