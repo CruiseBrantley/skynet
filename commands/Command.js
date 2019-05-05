@@ -10,6 +10,7 @@ const { topicFile, trackNewTopic } = require("../events/twitter.js");
 const commandList = [
 	"help",
 	"speak",
+	"speakchannel",
 	"ping",
 	"server",
 	"say",
@@ -25,6 +26,7 @@ class Command {
 		this.cmd = cmd;
 		this.args = args;
 	}
+
 	help() {
 		//ex: !help
 		const message =
@@ -34,6 +36,7 @@ class Command {
 			);
 		this.message.channel.send(message);
 	}
+
 	speak() {
 		//ex: !speak The words to be said in my voice channel
 		const speakMessage = this.args.join(" ");
@@ -58,14 +61,59 @@ class Command {
 				.catch(err => logger.info("Encountered an error: ", err));
 		});
 	}
+
+	speakchannel() {
+		//ex: !speak General The words to be said in General voice channel
+		const channelName = this.args.shift();
+		const speakMessage = this.args.join(" ");
+		if (!speakMessage.length) {
+			this.message.channel.send("I need a message to speak!");
+			return;
+		}
+		if (speakMessage.length > 200) {
+			//Google translate API has a 200 character limitation
+			this.message.channel.send(
+				`I can only speak up to 200 characters at a time, you entered ${
+					speakMessage.length
+				}.`
+			);
+			return;
+		}
+		googleTTS(speakMessage, "en", 1).then(url => {
+			const channel = this.message.guild.channels.find(
+				item =>
+					item.name.toLowerCase() === channelName.toLowerCase() &&
+					item.type === "voice"
+			);
+			if (channel === undefined || null) {
+				this.message.channel.send(
+					"Hmmm, it seems I couldn't find that channel."
+				);
+				return;
+			}
+			channel
+				.join()
+				.then(connection => {
+					const dispatcher = connection.play(url);
+					dispatcher.on("end", () => {
+						channel.leave();
+					});
+				})
+				.catch(err => logger.info("Encountered an error: ", err));
+		});
+		this.message.guild.channels
+			.find(
+				item => item.name.toLowerCase() === "general" && item.type === "voice"
+			)
+			.join();
+	}
+
 	async ping() {
 		//ex: !ping
 		const m = await this.message.channel.send("Ping?");
 		m.edit(
 			`Pong! Bot response latency is ${m.createdTimestamp -
-				this.message.createdTimestamp}ms. API Latency is ${Math.round(
-				bot.ping
-			)}ms`
+				this.message.createdTimestamp}ms.`
 		);
 	}
 	async server() {
@@ -73,6 +121,7 @@ class Command {
 			`The current server ip address is: ${await publicIp.v4()}`
 		);
 	}
+
 	say() {
 		//ex: !say I'm telling the bot what to say.
 		const sayMessage = this.args.join(" ");
@@ -83,6 +132,7 @@ class Command {
 		});
 		this.message.channel.send(sayMessage);
 	}
+
 	note() {
 		//ex: !note title="New Title" Here is the content.
 		let title = "Untitled";
@@ -115,6 +165,7 @@ class Command {
 				console.log(err);
 			});
 	}
+
 	listnotes() {
 		//ex: !listnotes
 		axios
@@ -143,6 +194,7 @@ class Command {
 				console.log(error);
 			});
 	}
+
 	twitter() {
 		//ex: !twitter Tesla Model 3
 		const newTopic = this.args.join(" ");
@@ -158,6 +210,7 @@ class Command {
 			}
 		);
 	}
+
 	catfact() {
 		//ex: !catfact
 		axios
