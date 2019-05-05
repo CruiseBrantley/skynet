@@ -4,15 +4,15 @@ function botMessage() {
 	return message => {
 		if (message.author.bot) return; //ignore bots
 
-		//Callios request
-		if (
-			message.content.includes(process.env.CALLIOS_PHRASE) &&
-			message.author.id === process.env.CALLIOS_USER_MONITOR
-		) {
-			message.channel.send(
-				`${message.content} <@${process.env.CALLIOS_USER_MENTION}>`
-			);
-		}
+		//Callios request - Saving for now
+		// if (
+		// 	message.content.includes(process.env.CALLIOS_PHRASE) &&
+		// 	message.author.id === process.env.CALLIOS_USER_MONITOR
+		// ) {
+		// 	message.channel.send(
+		// 		`${message.content} <@${process.env.CALLIOS_USER_MENTION}>`
+		// 	);
+		// }
 
 		if (message.content.substring(0, 1) !== "!") return; //ignore non-commands
 
