@@ -60,7 +60,6 @@ class Command {
 			return;
 		}
 		volume = Math.round(this.args.shift()) / 10;
-		console.log(volume);
 		dispatcher.setVolume(volume);
 		this.message.channel.send(`Setting current volume to ${volume * 10}.`);
 		return;
