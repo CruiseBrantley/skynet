@@ -10,6 +10,13 @@ function chatCommand(command) {
 		case "speakchannel":
 			command.speakchannel();
 			break;
+		case "py":
+		case "playyoutube":
+			command.playyoutube();
+			break;
+		case "stop":
+			command.stop();
+			break;
 		case "server":
 			command.server();
 			break;

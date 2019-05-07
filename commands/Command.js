@@ -1,7 +1,7 @@
 const publicIp = require("public-ip");
 const axios = require("axios");
 const googleTTS = require("google-tts-api");
-// const FileReader = require("filereader");
+const ytdl = require("ytdl-core");
 const fs = require("fs");
 const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
@@ -12,6 +12,7 @@ const commandList = [
 	"help",
 	"speak",
 	"speakchannel",
+	"playyoutube",
 	"ping",
 	"server",
 	"say",
@@ -36,6 +37,12 @@ class Command {
 				index < commandList.length - 1 ? " `!" + e + "`" : " and `!" + e + "`"
 			);
 		this.message.channel.send(message);
+	}
+
+	stop() {
+		if(dispatcher !== {}){
+			dispatcher.destroy();
+		}
 	}
 
 	speak() {
@@ -105,6 +112,7 @@ class Command {
 					/////////////////////workaround code//////////////////////////////
 					let i = 0;														//
 					while (!dispatcher.player.streamingData.sequence && i < 10) {	//
+						if (i === 0) logger.info("Reached Workaround");				//
 						dispatcher = connection.play(url);							//
 						i++;														//
 					}																//
@@ -112,13 +120,54 @@ class Command {
 						logger.info("Timing out.");									//
 						channel.leave();											//
 					}																//
-					//////////////////////////////////////////////////////////////////
+					/////////////////////workaround code//////////////////////////////
 
 					dispatcher.on("end", () => {
 						channel.leave();
 					});
 				}).catch(err => logger.info("channel join error: ", err));
 		}).catch(err => logger.info("googleTTS error: ", err));
+	}
+
+	playyoutube() {
+		//ex: !playyoutube channel videoURL
+		const channelName = this.args.shift();
+		const url = this.args.shift();
+
+		const channel = this.message.guild.channels.find(item => {
+			return (
+				item.name.toLowerCase() === channelName.toLowerCase() &&
+				item.type === "voice"
+			);
+		});
+		if (channel === undefined || null) {
+			this.message.channel.send(
+				"Hmmm, it seems I couldn't find that channel."
+			);
+			return;
+		}
+		channel
+			.join()
+			.then(connection => {
+				dispatcher = connection.play(ytdl(url, { filter: "audioonly" }));
+
+				/////////////////////workaround code//////////////////////////////
+				let i = 0;														//
+				while (!dispatcher.player.streamingData.sequence && i < 10) {	//
+					if (i === 0) logger.info("Reached Workaround");				//
+					dispatcher = connection.play(url);							//
+					i++;														//														//
+				}																//
+				if (i >= 10) {													//
+					logger.info("Timing out.");									//
+					channel.leave();											//
+				}																//
+				/////////////////////workaround code//////////////////////////////
+
+				dispatcher.on("end", () => {
+					channel.leave();
+				});
+			}).catch(err => logger.info("channel join error: ", err));
 	}
 
 	async ping() {
@@ -175,7 +224,7 @@ class Command {
 				);
 			})
 			.catch(err => {
-				console.log(err);
+				logger.info(err);
 			});
 	}
 
@@ -204,7 +253,7 @@ class Command {
 				this.message.channel.send(newMessage + "```");
 			})
 			.catch(error => {
-				console.log(error);
+				logger.info(error);
 			});
 	}
 
@@ -216,10 +265,10 @@ class Command {
 			process.env.TOPIC_FILENAME,
 			JSON.stringify(topicFile, null, 2),
 			err => {
-				if (err) return console.log(err);
+				if (err) return logger.info(err);
 				trackNewTopic(newTopic);
-				console.log(JSON.stringify(topicFile));
-				console.log(`Wrote "${newTopic}" to ${process.env.TOPIC_FILENAME}`);
+				logger.info(JSON.stringify(topicFile));
+				logger.info(`Wrote "${newTopic}" to ${process.env.TOPIC_FILENAME}`);
 			}
 		);
 	}
@@ -232,7 +281,7 @@ class Command {
 				this.message.channel.send(response.data.fact);
 			})
 			.catch(error => {
-				console.log(error);
+				logger.info(error);
 			});
 	}
 }

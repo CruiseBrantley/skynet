@@ -13,6 +13,7 @@
 		"node-tweet-stream": "^2.0.3",
 		"nodemon": "^1.19.0",
 		"public-ip": "^3.1.0",
-		"winston": "^3.2.1"
+		"winston": "^3.2.1",
+		"ytdl-core": "^0.29.1"
 	}
 }
