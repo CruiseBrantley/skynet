@@ -49,7 +49,7 @@ class Command {
 			//Google translate API has a 200 character limitation
 			this.message.channel.send(
 				`I can only speak up to 200 characters at a time, you entered ${
-					speakMessage.length
+				speakMessage.length
 				}.`
 			);
 			return;
@@ -79,17 +79,18 @@ class Command {
 			//Google translate API has a 200 character limitation
 			this.message.channel.send(
 				`I can only speak up to 200 characters at a time, you entered ${
-					speakMessage.length
+				speakMessage.length
 				}.`
 			);
 			return;
 		}
 		googleTTS(speakMessage, "en", 1).then(url => {
-			const channel = this.message.guild.channels.find(
-				item =>
+			const channel = this.message.guild.channels.find(item => {
+				return (
 					item.name.toLowerCase() === channelName.toLowerCase() &&
 					item.type === "voice"
-			);
+				);
+			});
 			if (channel === undefined || null) {
 				this.message.channel.send(
 					"Hmmm, it seems I couldn't find that channel."
@@ -100,17 +101,24 @@ class Command {
 				.join()
 				.then(connection => {
 					dispatcher = connection.play(url);
+
+					/////////////////////workaround code//////////////////////////////
+					let i = 0;														//
+					while (!dispatcher.player.streamingData.sequence && i < 10) {	//
+						dispatcher = connection.play(url);							//
+						i++;														//
+					}																//
+					if (i >= 10) {													//
+						logger.info("Timing out.");									//
+						channel.leave();											//
+					}																//
+					//////////////////////////////////////////////////////////////////
+
 					dispatcher.on("end", () => {
 						channel.leave();
 					});
-				})
-				.catch(err => logger.info("Encountered an error: ", err));
-		});
-		this.message.guild.channels
-			.find(
-				item => item.name.toLowerCase() === "general" && item.type === "voice"
-			)
-			.join();
+				}).catch(err => logger.info("channel join error: ", err));
+		}).catch(err => logger.info("googleTTS error: ", err));
 	}
 
 	async ping() {
@@ -118,7 +126,7 @@ class Command {
 		const m = await this.message.channel.send("Ping?");
 		m.edit(
 			`Pong! Bot response latency is ${m.createdTimestamp -
-				this.message.createdTimestamp}ms.`
+			this.message.createdTimestamp}ms.`
 		);
 	}
 	async server() {
