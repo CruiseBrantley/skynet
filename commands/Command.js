@@ -12,7 +12,7 @@ const commandList = [
 	"help",
 	"speak",
 	"speakchannel",
-	"playyoutube",
+	"youtube",
 	"ping",
 	"server",
 	"say",
@@ -132,6 +132,10 @@ class Command {
 
 	youtube() {
 		//ex: !playyoutube channel videoURL
+		if(this.args.length < 2){
+			this.message.channel.send("You need to supply both the channel and the video URL.");
+			return;
+		}
 		const channelName = this.args.shift();
 		const url = this.args.shift();
 
@@ -150,14 +154,14 @@ class Command {
 		channel
 			.join()
 			.then(connection => {
-				dispatcher = connection.play(ytdl(url, { filter: "audioonly" }));
+				dispatcher = connection.play(ytdl(url, { filter: "audioonly" }), { volume: volume });
 
 				/////////////////////workaround code//////////////////////////////
 				let i = 0;														//
 				while (!dispatcher.player.streamingData.sequence && i < 10) {	//
 					if (i === 0) logger.info("Reached Workaround");				//
 					dispatcher = connection.play(url);							//
-					i++;														//														//
+					i++;														//
 				}																//
 				if (i >= 10) {													//
 					logger.info("Timing out.");									//
