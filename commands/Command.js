@@ -6,10 +6,13 @@ const fs = require("fs");
 const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 let dispatcher = {};
+let volume = .5;
 
 //Set List of commands
 const commandList = [
 	"help",
+	"stop",
+	"volume",
 	"speak",
 	"speakchannel",
 	"youtube",
@@ -44,6 +47,23 @@ class Command {
 			dispatcher.destroy();
 			this.message.member.voice.channel.leave();
 		}
+	}
+
+	volume() {
+		if (this.args.length === 0) {
+			this.message.channel.send(`The current volume is set to ${volume * 10}.`);
+			return;
+		}
+
+		if (!(this.args[0] >= 0 && this.args[0] <= 10)) {
+			this.message.channel.send("The Volume must be between 0 and 10.");
+			return;
+		}
+		volume = Math.round(this.args.shift()) / 10;
+		console.log(volume);
+		dispatcher.setVolume(volume);
+		this.message.channel.send(`Setting current volume to ${volume * 10}.`);
+		return;
 	}
 
 	speak() {
