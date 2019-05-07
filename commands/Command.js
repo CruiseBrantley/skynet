@@ -129,7 +129,7 @@ class Command {
 		}).catch(err => logger.info("googleTTS error: ", err));
 	}
 
-	playyoutube() {
+	youtube() {
 		//ex: !playyoutube channel videoURL
 		const channelName = this.args.shift();
 		const url = this.args.shift();
