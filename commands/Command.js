@@ -3,7 +3,7 @@ const axios = require("axios");
 const googleTTS = require("google-tts-api");
 // const FileReader = require("filereader");
 const fs = require("fs");
-const { bot, logger } = require("../bot.js");
+const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 let dispatcher = {};
 
