@@ -3,6 +3,10 @@ function chatCommand(command) {
 		case "ping":
 			command.ping();
 			break;
+		case "v":
+		case "volume":
+			command.volume();
+			break;
 		case "speak":
 			command.speak();
 			break;
