@@ -40,8 +40,9 @@ class Command {
 	}
 
 	stop() {
-		if(dispatcher !== {}){
+		if (dispatcher !== {}) {
 			dispatcher.destroy();
+			this.message.member.voice.channel.leave();
 		}
 	}
 
