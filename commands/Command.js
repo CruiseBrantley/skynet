@@ -11,13 +11,13 @@ let volume = .5;
 //Set List of commands
 const commandList = [
 	"help",
-	"stop",
-	"volume",
 	"speak",
 	"speakchannel",
 	"youtube",
 	"volume",
 	"stop",
+	"pause",
+	"resume",
 	"ping",
 	"server",
 	"say",
@@ -65,17 +65,17 @@ class Command {
 
 	volume() {
 		if (this.args.length === 0) {
-			this.message.channel.send(`The current volume is set to ${volume * 10}.`);
+			this.message.channel.send(`The current volume is set to ${volume}.`);
 			return;
 		}
 
-		if (!(this.args[0] >= 0 && this.args[0] <= 10)) {
-			this.message.channel.send("The Volume must be between 0 and 10.");
+		if (!(this.args[0] >= 0 && this.args[0] <= 2)) {
+			this.message.channel.send("The Volume must be between 0 and 2 (default is .5).");
 			return;
 		}
-		volume = Math.round(this.args.shift()) / 10;
+		volume = this.args.shift();
 		dispatcher.setVolume(volume);
-		this.message.channel.send(`Setting current volume to ${volume * 10}.`);
+		this.message.channel.send(`Setting current volume to ${volume}.`);
 		return;
 	}
 
@@ -165,7 +165,7 @@ class Command {
 
 	youtube() {
 		//ex: !playyoutube channel videoURL
-		if(this.args.length < 2){
+		if (this.args.length < 2) {
 			this.message.channel.send("You need to supply both the channel and the video URL.");
 			return;
 		}
@@ -187,7 +187,7 @@ class Command {
 		channel
 			.join()
 			.then(connection => {
-				dispatcher = connection.play(ytdl(url, { filter: "audioonly" }), { volume: volume });
+				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume });
 
 				/////////////////////workaround code//////////////////////////////
 				let i = 0;														//
