@@ -51,6 +51,18 @@ class Command {
 		}
 	}
 
+	pause() {
+		if (dispatcher !== {}) {
+			dispatcher.pause();
+		}
+	}
+
+	resume() {
+		if (dispatcher !== {}) {
+			dispatcher.resume();
+		}
+	}
+
 	volume() {
 		if (this.args.length === 0) {
 			this.message.channel.send(`The current volume is set to ${volume * 10}.`);
