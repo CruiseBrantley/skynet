@@ -16,6 +16,8 @@ const commandList = [
 	"speak",
 	"speakchannel",
 	"youtube",
+	"volume",
+	"stop",
 	"ping",
 	"server",
 	"say",
