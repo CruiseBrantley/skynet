@@ -19,7 +19,6 @@ const commandList = [
 	"pause",
 	"resume",
 	"ping",
-	"server",
 	"say",
 	"note",
 	"listnotes",
