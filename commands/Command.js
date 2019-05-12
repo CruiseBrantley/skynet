@@ -164,26 +164,33 @@ class Command {
 	}
 
 	youtube() {
+		//ex: !playyoutube videoURL
 		//ex: !playyoutube channel videoURL
+		let channelName;
+		let channel;
+		if (this.args.length < 1) {
+			this.message.channel.send("You can to optionally supply a channel name, but a video URL is required.");
+			return;
+		}
 		if (this.args.length < 2) {
-			this.message.channel.send("You need to supply both the channel and the video URL.");
-			return;
-		}
-		const channelName = this.args.shift();
-		const url = this.args.shift();
+			channel = this.message.member.voice.channel;
+		} else {
+			channelName = this.args.shift();
 
-		const channel = this.message.guild.channels.find(item => {
-			return (
-				item.name.toLowerCase() === channelName.toLowerCase() &&
-				item.type === "voice"
-			);
-		});
-		if (channel === undefined || null) {
-			this.message.channel.send(
-				"Hmmm, it seems I couldn't find that channel."
-			);
-			return;
+			channel = this.message.guild.channels.find(item => {
+				return (
+					item.name.toLowerCase() === channelName.toLowerCase() &&
+					item.type === "voice"
+				);
+			});
+			if (channel === undefined || null) {
+				this.message.channel.send(
+					"Hmmm, it seems I couldn't find that channel."
+				);
+				return;
+			}
 		}
+		const url = this.args.shift();
 		channel
 			.join()
 			.then(connection => {
