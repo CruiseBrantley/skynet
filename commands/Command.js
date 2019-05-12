@@ -303,7 +303,7 @@ class Command {
 	}
 
 	twitter() {
-		//ex: !twitter Tesla Model 3
+		//ex: !twitter Topics being tweeted
 		const newTopic = this.args.join(" ");
 		topicFile.topic = newTopic;
 		fs.writeFile(
