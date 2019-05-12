@@ -6,7 +6,7 @@ const fs = require("fs");
 const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 let dispatcher = {};
-let volume = .5;
+let volume = 5;
 
 //Set List of commands
 const commandList = [
@@ -70,11 +70,11 @@ class Command {
 		}
 
 		if (!(this.args[0] >= 0 && this.args[0] <= 2)) {
-			this.message.channel.send("The Volume must be between 0 and 2 (default is .5).");
+			this.message.channel.send("The Volume must be between 0 and 20 (default is 5).");
 			return;
 		}
 		volume = this.args.shift();
-		dispatcher.setVolume(volume);
+		dispatcher.setVolume(volume / 10);
 		this.message.channel.send(`Setting current volume to ${volume}.`);
 		return;
 	}
@@ -109,7 +109,7 @@ class Command {
 	}
 
 	speakchannel() {
-		//ex: !speak General The words to be said in General voice channel
+		//ex: !sc General The words to be said in General voice channel
 		const channelName = this.args.shift();
 		const speakMessage = this.args.join(" ");
 		if (!speakMessage.length) {
@@ -194,7 +194,7 @@ class Command {
 		channel
 			.join()
 			.then(connection => {
-				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume });
+				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10 });
 
 				/////////////////////workaround code//////////////////////////////
 				let i = 0;														//
