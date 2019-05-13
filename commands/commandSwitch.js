@@ -45,6 +45,7 @@ function chatCommand(command) {
 			command.note();
 			break;
 		case "listnotes":
+		case "ln":
 			command.listnotes();
 			break;
 		case "twitter":
