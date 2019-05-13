@@ -198,15 +198,14 @@ class Command {
 	}
 
 	youtube() {
-		//ex: !playyoutube videoURL
-		//ex: !playyoutube channel videoURL
+		//ex: !youtube videoURL
+		//ex: !youtube channel videoURL
 		let channelName;
 		let channel;
 		if (this.args.length < 1) {
 			this.message.channel.send("You can to optionally supply a channel name, but a video URL is required.");
 			return;
-		}
-		if (this.args.length < 2) {
+		} else if (this.args.length < 2) {
 			channel = this.message.member.voice.channel;
 		} else {
 			channelName = this.args.shift();
@@ -217,12 +216,12 @@ class Command {
 					item.type === "voice"
 				);
 			});
-			if (channel === undefined || null) {
-				this.message.channel.send(
-					"Hmmm, it seems I couldn't find that channel."
-				);
-				return;
-			}
+		}
+		if (channel === undefined || channel.length < 1) {
+			this.message.channel.send(
+				"Hmmm, it seems I couldn't find that channel. You need to join a voice channel or specify a valid channel name."
+			);
+			return;
 		}
 		const url = this.args.shift();
 		channel
