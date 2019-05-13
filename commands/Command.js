@@ -2,6 +2,7 @@ const publicIp = require("public-ip");
 const axios = require("axios");
 const googleTTS = require("google-tts-api");
 const ytdl = require("ytdl-core");
+const youtubeSearch = require("youtube-search");
 const fs = require("fs");
 const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
@@ -13,6 +14,7 @@ const commandList = [
 	"help",
 	"speak",
 	"speakchannel",
+	"search",
 	"youtube",
 	"volume",
 	"stop",
@@ -160,6 +162,39 @@ class Command {
 					});
 				}).catch(err => logger.info("channel join error: ", err));
 		}).catch(err => logger.info("googleTTS error: ", err));
+	}
+
+	searchyoutube() {
+		//ex: !searchyoutube The query goes here
+		const query = this.args.join(" ");
+		const opts = {
+			maxResults: 3,
+			key: process.env.YOUTUBE_KEY,
+			type: "video"
+		};
+
+		youtubeSearch(query, opts, (err, results) => {
+			if (err) return logger.info("youtubeSearch error: ", err);
+			results.forEach(result => {
+				this.message.channel.send({
+					embed: {
+						"author": {
+							"name": result.channelTitle,
+						},
+						"title": result.title,
+						"description": result.description,
+						"url": result.link,
+						"color": 2116863,
+						"timestamp": result.publishedAt,
+						"thumbnail": {
+							"url": result.thumbnails.default.url
+						}, "footer": {
+							"text": "!yt " + result.link
+						}
+					}
+				})
+			})
+		})
 	}
 
 	youtube() {

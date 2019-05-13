@@ -14,6 +14,11 @@ function chatCommand(command) {
 		case "youtube":
 			command.youtube();
 			break;
+		case "syt":
+		case "searchyoutube":
+		case "search":
+			command.searchyoutube();
+			break;
 		case "v":
 		case "volume":
 			command.volume();
