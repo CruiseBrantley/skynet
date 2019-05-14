@@ -194,7 +194,7 @@ class Command {
 			if(index === 0) return "!yt red";
 			if(index === 1) return "!yt orange";
 			if(index === 2) return "!yt yellow";
-	}
+		}
 	}
 
 	youtube() {
