@@ -8,6 +8,7 @@ const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 let dispatcher = {};
 let volume = 5;
+let lastSearch = [];
 
 //Set List of commands
 const commandList = [
@@ -175,7 +176,8 @@ class Command {
 
 		youtubeSearch(query, opts, (err, results) => {
 			if (err) return logger.info("youtubeSearch error: ", err);
-			results.forEach(result => {
+			lastSearch = results;
+			results.forEach((result, index) => {
 				this.message.channel.send({
 					embed: {
 						"author": {
@@ -184,17 +186,29 @@ class Command {
 						"title": result.title,
 						"description": result.description,
 						"url": result.link,
-						"color": 2116863,
+						"color": colorFunc(index),
 						"timestamp": result.publishedAt,
 						"thumbnail": {
 							"url": result.thumbnails.default.url
 						}, "footer": {
-							"text": "!yt " + result.link
+							"text": footerFunc(index)
 						}
 					}
 				})
 			})
 		})
+
+		function colorFunc(index) {
+			if(index === 0) return 15794179;
+			if(index === 1) return 16748032;
+			if(index === 2) return 16773120;
+		}
+
+		function footerFunc(index) {
+			if(index === 0) return "!yt red";
+			if(index === 1) return "!yt orange";
+			if(index === 2) return "!yt yellow";
+	}
 	}
 
 	youtube() {
@@ -223,7 +237,12 @@ class Command {
 			);
 			return;
 		}
-		const url = this.args.shift();
+		let url = this.args.shift();
+
+		if(url === "red") url = lastSearch[0].link;
+		if(url === "orange") url = lastSearch[1].link;
+		if(url === "yellow") url = lastSearch[2].link;
+
 		channel
 			.join()
 			.then(connection => {
