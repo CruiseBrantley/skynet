@@ -25,7 +25,6 @@ const commandList = [
 	"say",
 	"note",
 	"listnotes",
-	"twitter",
 	"catfact"
 ];
 
@@ -145,19 +144,6 @@ class Command {
 				.then(connection => {
 					dispatcher = connection.play(url);
 
-					/////////////////////workaround code//////////////////////////////
-					let i = 0;														//
-					while (!dispatcher.player.streamingData.sequence && i < 10) {	//
-						if (i === 0) logger.info("Reached Workaround");				//
-						dispatcher = connection.play(url);							//
-						i++;														//
-					}																//
-					if (i >= 10) {													//
-						logger.info("Timing out.");									//
-						channel.leave();											//
-					}																//
-					/////////////////////workaround code//////////////////////////////
-
 					dispatcher.on("end", () => {
 						channel.leave();
 					});
@@ -247,19 +233,6 @@ class Command {
 			.join()
 			.then(connection => {
 				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10 });
-
-				/////////////////////workaround code//////////////////////////////
-				let i = 0;														//
-				while (!dispatcher.player.streamingData.sequence && i < 10) {	//
-					if (i === 0) logger.info("Reached Workaround");				//
-					dispatcher = connection.play(url);							//
-					i++;														//
-				}																//
-				if (i >= 10) {													//
-					logger.info("Timing out.");									//
-					channel.leave();											//
-				}																//
-				/////////////////////workaround code//////////////////////////////
 
 				dispatcher.on("end", () => {
 					channel.leave();
