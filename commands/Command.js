@@ -71,7 +71,7 @@ class Command {
 			return;
 		}
 
-		if (!(this.args[0] >= 0 && this.args[0] <= 2)) {
+		if (!(this.args[0] >= 0 && this.args[0] <= 20)) {
 			this.message.channel.send("The Volume must be between 0 and 20 (default is 5).");
 			return;
 		}
