@@ -5,8 +5,10 @@ const ytdl = require("ytdl-core");
 const youtubeSearch = require("youtube-search");
 const fs = require("fs");
 const { logger } = require("../bot.js");
+const { bot } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 let dispatcher = {};
+let channel;
 let volume = 5;
 let lastSearch = [];
 
@@ -48,7 +50,8 @@ class Command {
 	stop() {
 		if (dispatcher !== {}) {
 			dispatcher.destroy();
-			this.message.member.voice.channel.leave();
+			bot.user.setActivity(process.env.ACTIVITY);
+			channel.leave();
 		}
 	}
 
@@ -201,7 +204,6 @@ class Command {
 		//ex: !youtube videoURL
 		//ex: !youtube channel videoURL
 		let channelName;
-		let channel;
 		if (this.args.length < 1) {
 			this.message.channel.send("You can to optionally supply a channel name, but a video URL is required.");
 			return;
@@ -233,8 +235,10 @@ class Command {
 			.join()
 			.then(connection => {
 				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10, passes: 2 });
+				bot.user.setActivity("YouTube.");
 
 				dispatcher.on("end", () => {
+					bot.user.setActivity(process.env.ACTIVITY);
 					channel.leave();
 				});
 			}).catch(err => logger.info("channel join error: ", err));
