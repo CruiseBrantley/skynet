@@ -225,9 +225,9 @@ class Command {
 		}
 		let url = this.args.shift();
 
-		if(url === "red") url = lastSearch[0].link;
-		if(url === "orange") url = lastSearch[1].link;
-		if(url === "yellow") url = lastSearch[2].link;
+		if(url === "red" && lastSearch) url = lastSearch[0].link;
+		if(url === "orange" && lastSearch) url = lastSearch[1].link;
+		if(url === "yellow" && lastSearch) url = lastSearch[2].link;
 
 		channel
 			.join()
