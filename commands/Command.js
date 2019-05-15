@@ -185,15 +185,15 @@ class Command {
 		})
 
 		function colorFunc(index) {
-			if(index === 0) return 15794179;
-			if(index === 1) return 16748032;
-			if(index === 2) return 16773120;
+			if (index === 0) return 15794179;
+			if (index === 1) return 16748032;
+			if (index === 2) return 16773120;
 		}
 
 		function footerFunc(index) {
-			if(index === 0) return "!yt red";
-			if(index === 1) return "!yt orange";
-			if(index === 2) return "!yt yellow";
+			if (index === 0) return "!yt red";
+			if (index === 1) return "!yt orange";
+			if (index === 2) return "!yt yellow";
 		}
 	}
 
