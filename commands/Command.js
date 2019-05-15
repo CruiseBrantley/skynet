@@ -232,7 +232,7 @@ class Command {
 		channel
 			.join()
 			.then(connection => {
-				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10 });
+				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10, passes: 2 });
 
 				dispatcher.on("end", () => {
 					channel.leave();
