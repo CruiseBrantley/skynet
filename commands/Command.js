@@ -161,6 +161,10 @@ class Command {
 	searchyoutube() {
 		//ex: !searchyoutube The query goes here
 		const query = this.args.join(" ");
+		if (!query) {
+			this.message.channel.send("You need to supply something to search for.");
+			return;
+		}
 		const opts = {
 			maxResults: 3,
 			key: process.env.YOUTUBE_KEY,
