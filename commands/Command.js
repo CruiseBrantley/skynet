@@ -7,6 +7,7 @@ const fs = require("fs");
 const { logger } = require("../bot.js");
 const { bot } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
+const decode = require('unescape');
 let dispatcher = {};
 let channel;
 let volume = 5;
@@ -173,10 +174,10 @@ class Command {
 				this.message.channel.send({
 					embed: {
 						"author": {
-							"name": result.channelTitle,
+							"name": decode(result.channelTitle),
 						},
-						"title": result.title,
-						"description": result.description,
+						"title": decode(result.title),
+						"description": decode(result.description),
 						"url": result.link,
 						"color": colorFunc(index),
 						"timestamp": result.publishedAt,
