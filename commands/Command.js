@@ -264,7 +264,7 @@ class Command {
 
 	say() {
 		//ex: !say I'm telling the bot what to say.
-		const sayMessage = this.args.join(" ");
+		const sayMessage = this.args.join(" ") || " ";
 		this.message.delete().catch(() => {
 			logger.info(
 				"Encountered an error while deleting: " + this.message.content
