@@ -11,6 +11,7 @@ let dispatcher = {};
 let channel;
 let volume = 5;
 let lastSearch = [];
+let gameSessionID = 0;
 
 //Set List of commands
 const commandList = [
@@ -27,7 +28,9 @@ const commandList = [
 	"say",
 	"note",
 	"listnotes",
-	"catfact"
+	"catfact",
+	"setSession",
+	"session"
 ];
 
 class Command {
@@ -357,6 +360,18 @@ class Command {
 			.catch(error => {
 				logger.info(error);
 			});
+	}
+
+	setsession() {
+		if (this.args.length > 0 && this.message.member.permissions.has("ADMINISTRATOR")) {
+			gameSessionID = this.args.shift();
+			return;
+		}
+		this.message.channel.send("You need to include a sessionID, you must also have admin permissions to set sessionID.");
+	}
+
+	session() {
+		this.message.channel.send(`The current Session ID is: ${gameSessionID}`);
 	}
 }
 module.exports.Command = Command;

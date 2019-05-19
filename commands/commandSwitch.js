@@ -54,6 +54,12 @@ function chatCommand(command) {
 		case "catfact":
 			command.catfact();
 			break;
+		case "setsession":
+			command.setsession();
+			break;
+		case "session":
+			command.session();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
