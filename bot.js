@@ -21,12 +21,14 @@ logger.add(
 	})
 );
 module.exports.logger = logger;
+const { streamSchedule } = require("./events/streamSchedule");
 
 bot.on("ready", () => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
 	logger.info(bot.user.username + " - (" + bot.user.id + ")");
 	bot.user.setActivity(process.env.ACTIVITY);
+	streamSchedule();
 });
 
 bot.on("error", err => {
