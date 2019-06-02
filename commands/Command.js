@@ -227,7 +227,7 @@ class Command {
 				);
 			});
 		}
-		if (channel === undefined || channel.length < 1) {
+		if (channel === undefined || channel === null || channel.length < 1) {
 			this.message.channel.send(
 				"Hmmm, it seems I couldn't find that channel. You need to join a voice channel or specify a valid channel name."
 			);
