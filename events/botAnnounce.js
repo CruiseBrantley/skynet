@@ -1,5 +1,4 @@
-const { logger } = require("../bot");
-const { bot } = require("../bot.js");
+const { logger, bot } = require("../bot");
 
 function botAnnounce() {
 	return () => {
