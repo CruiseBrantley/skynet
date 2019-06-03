@@ -7,6 +7,11 @@ const bot = new Discord.Client();
 bot.login(process.env.TOKEN);
 module.exports.bot = bot;
 
+// Initialize Twitch Client
+const TwitchClient = require('twitch').default;
+const twitchClient = TwitchClient.withClientCredentials(process.env.TWITCH_CLIENTID, process.env.TWITCH_SECRET);
+module.exports.twitchClient = twitchClient;
+
 // Configure logger settings
 const logger = winston.createLogger({
 	level: "info",
