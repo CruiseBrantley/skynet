@@ -11,7 +11,6 @@ const moment = require("moment");
 const { Twitch } = require("../events/twitch.js");
 const twitch = new Twitch();
 let dispatcher = {};
-let streamStart = null;
 let channel;
 let volume = 5;
 let lastSearch = [];
