@@ -60,6 +60,9 @@ function chatCommand(command) {
 		case "session":
 			command.session();
 			break;
+		case "uptime":
+			command.uptime();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
