@@ -6,8 +6,12 @@ const youtubeSearch = require("youtube-search");
 const fs = require("fs");
 const { logger, bot } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
-const decode = require('unescape');
+const decode = require("unescape");
+const moment = require("moment");
+const { Twitch } = require("../events/twitch.js");
+const twitch = new Twitch();
 let dispatcher = {};
+let streamStart = null;
 let channel;
 let volume = 5;
 let lastSearch = [];
@@ -376,6 +380,16 @@ class Command {
 
 	session() {
 		this.message.channel.send(`The current Session ID is: ${gameSessionID}`);
+	}
+
+	uptime() {
+		twitch.streamProperties("fire_raven").then(properties => {
+			if (properties === null) {
+				this.message.channel.send("Fireraven is not currently streaming.");
+				return;
+			}
+			this.message.channel.send(`Fireraven has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
+		})
 	}
 }
 module.exports.Command = Command;
