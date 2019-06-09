@@ -1,17 +1,27 @@
-const { twitchClient, WebHookListener, bot } = require("../bot.js");
-let listener;
-let subscription;
-WebHookListener.create(twitchClient, { port: 8090 }).then(async (res) => {
-	listener = res;
+const { twitchClient, bot, logger } = require("../bot.js");
+const WebHookListener = require('twitch-webhooks').default;
+const userId = process.env.FIRERAVEN_ID;
+
+const listenerInit = async () => {
+	listener = await WebHookListener.create(twitchClient, { port: 8090 });
 	listener.listen();
-	subscription = await listener.subscribeToStreamChanges(process.env.FIRERAVEN_ID, async (stream) => {
+	return subscription(listener);
+}
+
+const subscription = async (listener) => {
+	return await listener.subscribeToStreamChanges(userId, async (stream) => {
 		if (stream) {
 			bot.channels.get("579407168831225869").send(`${stream.userDisplayName} just went live: ${stream.title}`);
 		} else {
-			bot.channels.get("579407168831225869").send(`${stream.userDisplayName} just went offline.`);
+			// no stream, no display name
+			const user = await twitchClient.helix.users.getUserById(userId);
+			bot.channels.get("579407168831225869").send(`${user.displayName} just went offline.`);
 		}
 	});
-});
+}
+
+listenerInit().then(res => { })
+	.catch((err) => logger.info("listenerErr: ", err))
 
 class Twitch {
 	constructor() { }
