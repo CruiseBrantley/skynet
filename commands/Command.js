@@ -388,12 +388,23 @@ class Command {
 	}
 
 	uptime() {
-		twitch.streamProperties("fire_raven").then(properties => {
+		if (this.args.length < 1) {
+			twitch.streamProperties("fire_raven").then(properties => {
+				if (properties === null) {
+					this.message.channel.send("Fireraven is not currently streaming.");
+					return;
+				}
+				this.message.channel.send(`Fireraven has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
+			})
+			return;
+		}
+		const user = this.args.shift();
+		twitch.streamProperties(user).then(properties => {
 			if (properties === null) {
-				this.message.channel.send("Fireraven is not currently streaming.");
+				this.message.channel.send(`${user} is not currently streaming.`);
 				return;
 			}
-			this.message.channel.send(`Fireraven has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
+			this.message.channel.send(`${user} has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
 		})
 	}
 
