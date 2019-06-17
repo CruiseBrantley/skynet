@@ -84,10 +84,10 @@ class Command {
 			return;
 		}
 		volume = this.args.shift();
-		if (dispatcher !== {}) {
+		if (dispatcher.hasOwnProperty("setVolume")) {
 			dispatcher.setVolume(volume / 10);
-			this.message.channel.send(`Setting current volume to ${volume}.`);
 		}
+		this.message.channel.send(`Setting current volume to ${volume}.`);
 	}
 
 	speak() {
