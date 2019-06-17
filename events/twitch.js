@@ -3,7 +3,7 @@ const WebHookListener = require('twitch-webhooks').default;
 const userId = process.env.FIRERAVEN_ID;
 
 const listenerInit = async () => {
-	listener = await WebHookListener.create(twitchClient, { port: 8090 });
+	listener = await WebHookListener.create(twitchClient, { port: 8443 });
 	listener.listen();
 	return subscription(listener);
 }
