@@ -84,9 +84,10 @@ class Command {
 			return;
 		}
 		volume = this.args.shift();
-		dispatcher.setVolume(volume / 10);
-		this.message.channel.send(`Setting current volume to ${volume}.`);
-		return;
+		if (dispatcher !== {}) {
+			dispatcher.setVolume(volume / 10);
+			this.message.channel.send(`Setting current volume to ${volume}.`);
+		}
 	}
 
 	speak() {
