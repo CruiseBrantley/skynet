@@ -396,5 +396,18 @@ class Command {
 			this.message.channel.send(`Fireraven has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
 		})
 	}
+
+	islive() {
+		if (this.args.length > 0) {
+			const user = this.args.shift();
+			twitch.isStreamLive(user).then(res => {
+				this.message.channel.send(`${user} ${res ? "is" : "is not"} online.`);
+			}).catch(e => {
+				logger.info("There was an error in isStreamLive: ", e);
+			})
+		} else {
+			this.message.channel.send("You need to give me a username to search for!");
+		}
+	}
 }
 module.exports.Command = Command;

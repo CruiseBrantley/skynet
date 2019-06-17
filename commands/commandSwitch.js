@@ -63,6 +63,9 @@ function chatCommand(command) {
 		case "uptime":
 			command.uptime();
 			break;
+		case "islive":
+			command.islive();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
