@@ -417,7 +417,11 @@ class Command {
 				logger.info("There was an error in isStreamLive: ", e);
 			})
 		} else {
-			this.message.channel.send("You need to give me a username to search for!");
+			twitch.isStreamLive("fire_raven").then(res => {
+				this.message.channel.send(`Fireraven ${res ? "is" : "is not"} online.`);
+			}).catch(e => {
+				logger.info("There was an error in isStreamLive: ", e);
+			})
 		}
 	}
 }
