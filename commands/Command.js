@@ -92,6 +92,11 @@ class Command {
 
 	speak() {
 		//ex: !speak The words to be said in my voice channel
+		if (!this.message.member.voice.channel) {
+			this.message.channel.send("You need to be in a voice channel, try !speakchannel (!sc) to send your message to a channel you're not currently in.");
+			return;
+		}
+
 		const speakMessage = this.args.join(" ");
 		if (!speakMessage.length) {
 			this.message.channel.send("I need a message to speak!");
