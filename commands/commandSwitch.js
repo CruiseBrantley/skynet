@@ -66,6 +66,9 @@ function chatCommand(command) {
 		case "islive":
 			command.islive();
 			break;
+		case "vote":
+			command.vote();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
