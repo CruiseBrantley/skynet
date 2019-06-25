@@ -58,6 +58,7 @@ typings/
 auth.json
 .env
 twitterTopic.json
+voteTopic.json
 
 # next.js build output
 .next
