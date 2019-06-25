@@ -363,6 +363,60 @@ class Command {
 		);
 	}
 
+	vote() {
+		if (this.message.channel.id !== "592718526083498014") {
+			this.message.channel.send("This command can only be used from the `retro-gaming` channel.");
+			return;
+		}
+
+		const voteTopic = require("../voteTopic.json");
+		const options = voteTopic.options || {};
+		const hasVoted = voteTopic.hasVoted || [];
+
+		if (options.titles.length > options.votes.length) options.votes = new Array(options.titles.length).fill(0);
+		const embed = {
+			"title": "__The current voting options are:__",
+			"color": 3076886,
+			"fields": options.titles.map((e, index) => {
+				return { name: e, value: `**Votes**: ${options.votes[index]}`, inline: true }
+			})
+		}
+		if (this.args.length < 1) {
+			// this.message.channel.send({ embed })
+			this.message.channel.send(`\`\`\`md\n# The current voting record is:\n${options.titles.map((e, index) => String(`[${e}`).padEnd(50, " ") + `](Votes:	${options.votes[index]})\n`).join('')}\`\`\``);
+			return;
+		}
+		const vote = this.args.join(" ");
+		// if (vote === "results") {
+		// 	this.message.channel.send(`Results stand as follows: `)
+		// 	for (let i = 0; i < options.titles.length; i++) {
+		// 		this.message.channel.send(`${options.titles[i]}: ${options.votes[i]} vote${options.votes[i] > 1 ? "s" : ""}.`);
+		// 	}
+		// 	return;
+		// }
+		if (hasVoted.includes(this.message.member.user.id)) {
+			this.message.channel.send("I'm sorry, you may only vote once.");
+			return;
+		}
+		const search = options.titles.findIndex(item => item.toLowerCase() === vote.toLowerCase())
+		if (search !== -1) {
+			options.votes[search]++;
+			hasVoted.push(this.message.member.user.id);
+			this.message.channel.send(`Your vote for \`${options.titles[search]}\` has been recorded, to see results use \`!vote\``)
+			fs.writeFile(
+				process.env.VOTE_FILENAME,
+				JSON.stringify(voteTopic, null, 2),
+				err => {
+					if (err) return logger.info(err);
+					logger.info(JSON.stringify(voteTopic));
+					logger.info(`Recorded vote for ${options.titles[search]}`);
+				}
+			);
+			return;
+		}
+		console.log(vote);
+	}
+
 	catfact() {
 		//ex: !catfact
 		axios
