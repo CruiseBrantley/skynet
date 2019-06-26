@@ -364,7 +364,7 @@ class Command {
 	}
 
 	vote() {
-		if (this.message.channel.id !== "592718526083498014") {
+		if (!(this.message.channel.id === "592718526083498014" || this.message.channel.id === "579568174392147968")) {
 			this.message.channel.send("This command can only be used from the `retro-gaming` channel.");
 			return;
 		}
@@ -373,48 +373,44 @@ class Command {
 		const options = voteTopic.options || {};
 		const hasVoted = voteTopic.hasVoted || [];
 
-		if (options.titles.length > options.votes.length) options.votes = new Array(options.titles.length).fill(0);
 		const embed = {
 			"title": "__The current voting options are:__",
 			"color": 3076886,
-			"fields": options.titles.map((e, index) => {
-				return { name: e, value: `**Votes**: ${options.votes[index]}`, inline: true }
+			"fields": options.map(e => {
+				return { name: e.title, value: `**Votes**: ${e.votes}`, inline: true }
 			})
 		}
+
 		if (this.args.length < 1) {
 			// this.message.channel.send({ embed })
-			this.message.channel.send(`\`\`\`md\n# The current voting record is:\n${options.titles.map((e, index) => String(`[${e}`).padEnd(50, " ") + `](Votes:	${options.votes[index]})\n`).join('')}\`\`\``);
+			this.message.channel.send(`\`\`\`md\n# The current voting record is:\n${options.map(e => String(`[${e.title}`).padEnd(50, " ") + `](Votes:	${e.votes})\n`).join('')}\`\`\``);
 			return;
 		}
 		const vote = this.args.join(" ");
-		// if (vote === "results") {
-		// 	this.message.channel.send(`Results stand as follows: `)
-		// 	for (let i = 0; i < options.titles.length; i++) {
-		// 		this.message.channel.send(`${options.titles[i]}: ${options.votes[i]} vote${options.votes[i] > 1 ? "s" : ""}.`);
-		// 	}
-		// 	return;
-		// }
 		if (hasVoted.includes(this.message.member.user.id)) {
 			this.message.channel.send("I'm sorry, you may only vote once.");
 			return;
 		}
-		const search = options.titles.findIndex(item => item.toLowerCase() === vote.toLowerCase())
+		const search = options.findIndex(item => item.title.toLowerCase() === vote.toLowerCase());
 		if (search !== -1) {
-			options.votes[search]++;
+			options[search].votes++;
 			hasVoted.push(this.message.member.user.id);
-			this.message.channel.send(`Your vote for \`${options.titles[search]}\` has been recorded, to see results use \`!vote\``)
+			this.message.channel.send(`Your vote for \`${options[search].title}\` has been recorded, to see results use \`!vote\``);
+			const sortedOptions = options.sort((item1, item2) => parseInt(item1.votes) < parseInt(item2.votes) ? 1 : -1);
+			const writeableStruct = {};
+			writeableStruct.options = sortedOptions;
+			writeableStruct.hasVoted = hasVoted;
 			fs.writeFile(
 				process.env.VOTE_FILENAME,
-				JSON.stringify(voteTopic, null, 2),
+				JSON.stringify(writeableStruct, null, 2),
 				err => {
 					if (err) return logger.info(err);
-					logger.info(JSON.stringify(voteTopic));
-					logger.info(`Recorded vote for ${options.titles[search]}`);
+					logger.info(`Recorded vote.`);
 				}
 			);
 			return;
 		}
-		console.log(vote);
+		this.message.channel.send("I couldn't find that option, you have to be exact but capitalization doesn't matter.");
 	}
 
 	catfact() {
