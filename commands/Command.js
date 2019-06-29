@@ -418,6 +418,45 @@ class Command {
 		this.message.channel.send("I couldn't find that option.");
 	}
 
+	unvote() {
+		if (!(this.message.channel.id === "592718526083498014" || this.message.channel.id === "579568174392147968")) {
+			this.message.channel.send("This command can only be used from the `retro-gaming` channel.");
+			return;
+		}
+
+		const voteTopic = require("../voteTopic.json");
+		const options = voteTopic || [];
+
+		function hasVoted(value) {
+			for (let i = 0; i < options.length; i++) {
+				const votedIndex = options[i].hasVoted.indexOf(value);
+				if (votedIndex !== -1) {
+					return [i, votedIndex];
+				}
+			}
+			return [-1, -1];
+		}
+
+		const [search, hasVotedIndex] = hasVoted(this.message.member.user.id);
+		console.log(search, hasVotedIndex)
+		if (search !== -1) {
+			options[search].votes--;
+			options[search].hasVoted.splice(hasVotedIndex, 1);
+			fs.writeFile(
+				process.env.VOTE_FILENAME,
+				JSON.stringify(options, null, 2),
+				err => {
+					if (err) return logger.info(err);
+					logger.info("Reset Votes.");
+				}
+			);
+		} else {
+			this.message.channel.send("You haven't even voted...");
+			return;
+		}
+		this.message.channel.send("Your vote has been reset.");
+	}
+
 	}
 
 	catfact() {
