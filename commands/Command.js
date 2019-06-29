@@ -370,39 +370,44 @@ class Command {
 		}
 
 		const voteTopic = require("../voteTopic.json");
-		const options = voteTopic.options || {};
-		const hasVoted = voteTopic.hasVoted || [];
-
-		const embed = {
-			"title": "__The current voting options are:__",
-			"color": 3076886,
-			"fields": options.map(e => {
-				return { name: e.title, value: `**Votes**: ${e.votes}`, inline: true }
-			})
-		}
+		const options = voteTopic || [];
 
 		if (this.args.length < 1) {
-			// this.message.channel.send({ embed })
 			this.message.channel.send(`\`\`\`md\n# The current voting record is:\n${options.map(e => String(`[${e.title}`).padEnd(50, " ") + `](Votes:	${e.votes})\n`).join('')}\`\`\``);
 			return;
 		}
 		const vote = this.args.join(" ");
-		if (hasVoted.includes(this.message.member.user.id)) {
-			this.message.channel.send("I'm sorry, you may only vote once.");
+
+		function hasVoted(value) {
+			for (let option of options) {
+				if (option.hasVoted.includes(value)) {
+					return option.title;
+				}
+			}
+			return false;
+		}
+
+		let titleVotedFor = hasVoted(this.message.member.user.id)
+		if (titleVotedFor) {
+			this.message.channel.send(`I'm sorry, you've already voted for \`${titleVotedFor}\`.`);
 			return;
 		}
-		const search = options.findIndex(item => item.title.toLowerCase() === vote.toLowerCase());
+
+		function findMatchIndex(search) {
+			for (let i = 0; i < options.length; i++) {
+				if (options[i].title.toLowerCase().includes(search.toLowerCase())) return i;
+			}
+			return -1;
+		}
+		const search = findMatchIndex(vote);
 		if (search !== -1) {
 			options[search].votes++;
-			hasVoted.push(this.message.member.user.id);
+			options[search].hasVoted.push(this.message.member.user.id);
 			this.message.channel.send(`Your vote for \`${options[search].title}\` has been recorded, to see results use \`!vote\``);
 			const sortedOptions = options.sort((item1, item2) => parseInt(item1.votes) < parseInt(item2.votes) ? 1 : -1);
-			const writeableStruct = {};
-			writeableStruct.options = sortedOptions;
-			writeableStruct.hasVoted = hasVoted;
 			fs.writeFile(
 				process.env.VOTE_FILENAME,
-				JSON.stringify(writeableStruct, null, 2),
+				JSON.stringify(sortedOptions, null, 2),
 				err => {
 					if (err) return logger.info(err);
 					logger.info(`Recorded vote.`);
@@ -410,7 +415,9 @@ class Command {
 			);
 			return;
 		}
-		this.message.channel.send("I couldn't find that option, you have to be exact but capitalization doesn't matter.");
+		this.message.channel.send("I couldn't find that option.");
+	}
+
 	}
 
 	catfact() {
