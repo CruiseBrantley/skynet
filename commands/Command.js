@@ -481,6 +481,68 @@ class Command {
 		this.message.channel.send("You must have admin permissions to reset the vote.");
 	}
 
+	addoption() {
+		if (this.message.member.permissions.has("ADMINISTRATOR")) {
+			const voteTopic = require("../voteTopic.json");
+			const options = voteTopic || [];
+
+			if (this.args.length > 0) {
+				const newTitle = {
+					title: this.args.join(" "),
+					votes: 0,
+					hasVoted: []
+				}
+				options.push(newTitle);
+
+				fs.writeFile(
+					process.env.VOTE_FILENAME,
+					JSON.stringify(options, null, 2),
+					err => {
+						if (err) return logger.info(err);
+						logger.info("Reset Votes.");
+					}
+				);
+				this.message.channel.send(`\`${newTitle.title}\` was added successfully.`);
+			} else this.message.channel.send("You need to specify something to add.");
+			return;
+		}
+		this.message.channel.send("You must have admin permissions to modify vote options.");
+	}
+
+	removeoption() {
+		if (this.message.member.permissions.has("ADMINISTRATOR")) {
+			const voteTopic = require("../voteTopic.json");
+			const options = voteTopic || [];
+
+			const toBeRemoved = this.args.join(" ");
+			let flag = false;
+			if (this.args.length > 0) {
+				for (let i = 0; i < options.length; i++) {
+					if (options[i].title.toLowerCase() === toBeRemoved.toLowerCase()) {
+						flag = true;
+						options.splice(i, 1);
+					}
+				}
+				if(!flag){
+					this.message.channel.send(`Couldn't find ${toBeRemoved}.`);
+					return;
+				}
+
+				fs.writeFile(
+					process.env.VOTE_FILENAME,
+					JSON.stringify(options, null, 2),
+					err => {
+						if (err) return logger.info(err);
+						logger.info("Reset Votes.");
+					}
+				);
+				this.message.channel.send(`\`${toBeRemoved}\` was removed successfully.`);
+			} else this.message.channel.send("You need to specify something to remove.");
+			return;
+		}
+		this.message.channel.send("You must have admin permissions to modify vote options.");
+	}
+
 	catfact() {
 		//ex: !catfact
 		axios

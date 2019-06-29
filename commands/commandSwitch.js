@@ -75,6 +75,12 @@ function chatCommand(command) {
 		case "votereset":
 			command.votereset();
 			break;
+		case "addoption":
+			command.addoption();
+			break;
+		case "removeoption":
+			command.removeoption();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
