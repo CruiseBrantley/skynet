@@ -67,12 +67,15 @@ function chatCommand(command) {
 			command.islive();
 			break;
 		case "vote":
+		case "votes":
 			command.vote();
 			break;
 		case "unvote":
 			command.unvote();
 			break;
 		case "votereset":
+		case "resetvotes":
+		case "resetvote":
 			command.votereset();
 			break;
 		case "addoption":
