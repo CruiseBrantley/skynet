@@ -459,12 +459,6 @@ class Command {
 
 	votereset() {
 		if (this.message.member.permissions.has("ADMINISTRATOR")) {
-
-			if (!(this.message.channel.id === "592718526083498014" || this.message.channel.id === "579568174392147968")) {
-				this.message.channel.send("This command can only be used from the `retro-gaming` channel.");
-				return;
-			}
-
 			const voteTopic = require("../voteTopic.json");
 			const options = voteTopic || [];
 
