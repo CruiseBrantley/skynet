@@ -457,6 +457,34 @@ class Command {
 		this.message.channel.send("Your vote has been reset.");
 	}
 
+	votereset() {
+		if (this.message.member.permissions.has("ADMINISTRATOR")) {
+
+			if (!(this.message.channel.id === "592718526083498014" || this.message.channel.id === "579568174392147968")) {
+				this.message.channel.send("This command can only be used from the `retro-gaming` channel.");
+				return;
+			}
+
+			const voteTopic = require("../voteTopic.json");
+			const options = voteTopic || [];
+
+			for (let option of options) {
+				option.votes = 0;
+				option.hasVoted = [];
+			}
+
+			fs.writeFile(
+				process.env.VOTE_FILENAME,
+				JSON.stringify(options, null, 2),
+				err => {
+					if (err) return logger.info(err);
+					logger.info("Reset Votes.");
+				}
+			);
+			this.message.channel.send("The vote count has been reset.");
+			return;
+		}
+		this.message.channel.send("You must have admin permissions to reset the vote.");
 	}
 
 	catfact() {
