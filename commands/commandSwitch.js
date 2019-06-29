@@ -69,6 +69,12 @@ function chatCommand(command) {
 		case "vote":
 			command.vote();
 			break;
+		case "unvote":
+			command.unvote();
+			break;
+		case "votereset":
+			command.votereset();
+			break;
 	}
 }
 module.exports.chatCommand = chatCommand;
