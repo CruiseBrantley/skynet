@@ -14,28 +14,31 @@ let currentTopic;
 const configureTwitter = () => {
 	if (topicFile === undefined) {
 		console.log(
-			"Cannot access twitterTopic.json, needs a key of topic and value of a string to track.\n",
+			"Cannot access twitterTopic.json, needs an object with key of topic and value of a string to track.\n",
 			"Create this file then restart the server for twitter functionality"
 		);
 		return;
 	}
-	t.on("error", function(err) {
+	t.on("error", function (err) {
 		console.log(topicFile.topic);
 	});
 	currentTopic = topicFile.topic;
 
-	t.on("tweet", function(tweet) {
+	t.on("tweet", function (tweet) {
+		console.log(tweet);
 		bot.channels.get(process.env.TWITTER_CHANNEL).send({
+			content: `https://twitter.com/${tweet.user.screen_name}/status/${tweet.id_str}`,
 			embed: {
-				title: "Topic: " + currentTopic,
-				url: tweet.urls,
+				thumbnail: {
+					url: tweet.user.profile_image_url
+				},
+				url: `https://twitter.com/${tweet.user.screen_name}`,
 				color: 3447003,
-				fields: [
-					{
-						name: tweet.user.screen_name,
-						value: tweet.text
-					}
-				],
+				author: {
+					name: tweet.user.name
+				},
+				title: tweet.user.screen_name,
+				description: tweet.text,
 				timestamp: new Date(),
 
 				//regex to match the innerText of the anchor tag in tweet.source
