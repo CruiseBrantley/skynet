@@ -277,12 +277,14 @@ class Command {
 	say() {
 		//ex: !say I'm telling the bot what to say.
 		const sayMessage = this.args.join(" ") || " ";
-		this.message.delete().catch(() => {
-			logger.info(
-				"Encountered an error while deleting: " + this.message.content
-			);
-		});
-		this.message.channel.send(sayMessage);
+		if (this.message.member.permissions.has("ADMINISTRATOR")) {
+			this.message.delete().catch(() => {
+				logger.info(
+					"Encountered an error while deleting: " + this.message.content
+				);
+			});
+			this.message.channel.send(sayMessage);
+		}
 	}
 
 	note() {
@@ -523,7 +525,7 @@ class Command {
 						options.splice(i, 1);
 					}
 				}
-				if(!flag){
+				if (!flag) {
 					this.message.channel.send(`Couldn't find ${toBeRemoved}.`);
 					return;
 				}
