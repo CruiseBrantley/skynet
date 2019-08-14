@@ -4,8 +4,16 @@ const Discord = require("discord.js");
 const winston = require("winston");
 // Initialize Discord Bot
 const bot = new Discord.Client();
-bot.login(process.env.TOKEN);
-module.exports.bot = bot;
+const aFunc = async () => {
+	try {
+		await bot.login(process.env.TOKEN);
+		module.exports.bot = bot;
+	} catch (err) {
+		console.error("Bot Failed Logging in: ", err)
+		process.exit()
+	}
+}
+aFunc()
 
 // Initialize Twitch Client
 const TwitchClient = require('twitch').default;
