@@ -48,9 +48,6 @@ function chatCommand(command) {
 		case "ln":
 			command.listnotes();
 			break;
-		case "twitter":
-			command.twitter();
-			break;
 		case "catfact":
 			command.catfact();
 			break;
