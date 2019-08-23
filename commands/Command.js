@@ -16,41 +16,11 @@ let volume = 5;
 let lastSearch = [];
 let gameSessionID = 0;
 
-//Set List of commands
-const commandList = [
-	"help",
-	"speak",
-	"speakchannel",
-	"search",
-	"youtube",
-	"volume",
-	"stop",
-	"pause",
-	"resume",
-	"ping",
-	"say",
-	"note",
-	"listnotes",
-	"catfact",
-	"setSession",
-	"session"
-];
-
 class Command {
 	constructor(message, cmd, args) {
 		this.message = message;
 		this.cmd = cmd;
 		this.args = args;
-	}
-
-	help() {
-		//ex: !help
-		const message =
-			"Commands are " +
-			commandList.map((e, index) =>
-				index < commandList.length - 1 ? " `!" + e + "`" : " and `!" + e + "`"
-			);
-		this.message.channel.send(message);
 	}
 
 	stop() {
@@ -92,8 +62,13 @@ class Command {
 
 	speak() {
 		//ex: !speak The words to be said in my voice channel
-		if (!this.message.member.voice.channel) {
-			this.message.channel.send("You need to be in a voice channel, try !speakchannel (!sc) to send your message to a channel you're not currently in.");
+		try {
+			if (!this.message.member.voice.channel) {
+				this.message.channel.send("You need to be in a voice channel, try !speakchannel (!sc) to send your message to a channel you're not currently in.");
+				return;
+			}
+		} catch (err) {
+			console.log(err)
 			return;
 		}
 
@@ -126,19 +101,26 @@ class Command {
 
 	speakchannel() {
 		//ex: !sc General The words to be said in General voice channel
-		const channelName = this.args.shift();
-		const speakMessage = this.args.join(" ");
-		if (!speakMessage.length) {
-			this.message.channel.send("I need a message to speak!");
-			return;
-		}
-		if (speakMessage.length > 200) {
-			//Google translate API has a 200 character limitation
-			this.message.channel.send(
-				`I can only speak up to 200 characters at a time, you entered ${
-				speakMessage.length
-				}.`
-			);
+		let channelName;
+		let	speakMessage;
+		try {
+			channelName = this.args.shift();
+			speakMessage = this.args.join(" ");
+			if (!speakMessage.length) {
+				this.message.channel.send("I need a message to speak!");
+				return;
+			}
+			if (speakMessage.length > 200) {
+				//Google translate API has a 200 character limitation
+				this.message.channel.send(
+					`I can only speak up to 200 characters at a time, you entered ${
+					speakMessage.length
+					}.`
+				);
+				return;
+			}
+		} catch (err) {
+			console.log(err)
 			return;
 		}
 		googleTTS(speakMessage, "en", 1).then(url => {
