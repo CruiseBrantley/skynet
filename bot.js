@@ -48,11 +48,6 @@ bot.on("error", err => {
 	logger.info("Encountered an error: ", err);
 });
 
-const { configureTwitter } = require("./events/twitter");
-
-//initialize twitter
-configureTwitter();
-
 const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
 const { botDelete } = require("./events/botDelete");
