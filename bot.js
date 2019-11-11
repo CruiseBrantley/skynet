@@ -7,7 +7,7 @@ const bot = new Discord.Client();
 const aFunc = async () => {
 	try {
 		await bot.login(process.env.TOKEN);
-		module.exports.bot = bot;
+		return bot;
 	} catch (err) {
 		console.error("Bot Failed Logging in: ", err)
 		process.exit()
@@ -45,6 +45,9 @@ const { botUpdate } = require("./events/botUpdate");
 const { botMessage } = require("./events/botMessage");
 const { botDelete } = require("./events/botDelete");
 
+const { server } = require("./server/server")
+server(bot)
+
 // twitterChannelInit();
 
 bot.on("message", botMessage());
@@ -52,3 +55,5 @@ bot.on("message", botMessage());
 bot.on("messageUpdate", botUpdate());
 
 bot.on("messageDelete", botDelete());
+
+module.exports.bot = bot
