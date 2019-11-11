@@ -14,7 +14,6 @@ function chatCommand(command) {
 		case "youtube":
 			command.youtube();
 			break;
-		case "syt":
 		case "searchyoutube":
 		case "search":
 			command.searchyoutube();
@@ -56,12 +55,6 @@ function chatCommand(command) {
 			break;
 		case "session":
 			command.session();
-			break;
-		case "uptime":
-			command.uptime();
-			break;
-		case "islive":
-			command.islive();
 			break;
 		case "vote":
 		case "votes":

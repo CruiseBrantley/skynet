@@ -15,11 +15,6 @@ const aFunc = async () => {
 }
 aFunc()
 
-// Initialize Twitch Client
-const TwitchClient = require('twitch').default;
-const twitchClient = TwitchClient.withClientCredentials(process.env.TWITCH_CLIENTID, process.env.TWITCH_SECRET);
-module.exports.twitchClient = twitchClient;
-
 // Configure logger settings
 const logger = winston.createLogger({
 	level: "info",
@@ -34,14 +29,12 @@ logger.add(
 	})
 );
 module.exports.logger = logger;
-const { streamSchedule } = require("./events/streamSchedule");
 
 bot.on("ready", () => {
 	logger.info("Connected");
 	logger.info("Logged in as: ");
 	logger.info(bot.user.username + " - (" + bot.user.id + ")");
 	bot.user.setActivity(process.env.ACTIVITY);
-	streamSchedule();
 });
 
 bot.on("error", err => {

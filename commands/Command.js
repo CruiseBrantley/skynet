@@ -8,8 +8,6 @@ const { logger, bot } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 const decode = require("unescape");
 const moment = require("moment");
-const { Twitch } = require("../events/twitch.js");
-const twitch = new Twitch();
 let dispatcher = {};
 let channel;
 let volume = 5;
@@ -102,7 +100,7 @@ class Command {
 	speakchannel() {
 		//ex: !sc General The words to be said in General voice channel
 		let channelName;
-		let	speakMessage;
+		let speakMessage;
 		try {
 			channelName = this.args.shift();
 			speakMessage = this.args.join(" ");
@@ -549,44 +547,6 @@ class Command {
 
 	session() {
 		this.message.channel.send(`The current Session ID is: ${gameSessionID}`);
-	}
-
-	uptime() {
-		if (this.args.length < 1) {
-			twitch.streamProperties("fire_raven").then(properties => {
-				if (properties === null) {
-					this.message.channel.send("Fireraven is not currently streaming.");
-					return;
-				}
-				this.message.channel.send(`Fireraven has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
-			})
-			return;
-		}
-		const user = this.args.shift();
-		twitch.streamProperties(user).then(properties => {
-			if (properties === null) {
-				this.message.channel.send(`${user} is not currently streaming.`);
-				return;
-			}
-			this.message.channel.send(`${user} has been streaming since ${moment(properties._data.created_at).fromNow()}.`);
-		})
-	}
-
-	islive() {
-		if (this.args.length > 0) {
-			const user = this.args.shift();
-			twitch.isStreamLive(user).then(res => {
-				this.message.channel.send(`${user} ${res ? "is" : "is not"} online.`);
-			}).catch(e => {
-				logger.info("There was an error in isStreamLive: ", e);
-			})
-		} else {
-			twitch.isStreamLive("fire_raven").then(res => {
-				this.message.channel.send(`Fireraven ${res ? "is" : "is not"} online.`);
-			}).catch(e => {
-				logger.info("There was an error in isStreamLive: ", e);
-			})
-		}
 	}
 }
 module.exports.Command = Command;
