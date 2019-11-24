@@ -1,7 +1,7 @@
 const axios = require('axios')
 const publicIp = require('public-ip')
 const bodyParser = require('body-parser')
-const { botAnnounce } = require("../events/botAnnounce");
+const { botAnnounce } = require("../events/botAnnounce")
 const { logger } = require("../bot")
 const express = require('express')
 const server = express()
@@ -27,6 +27,7 @@ function subscribeAll() {
 	subscribe(process.env.FIRERAVEN_ID)
 	subscribe(process.env.CYPHANE_ID)
 	subscribe(process.env.CHA_ID)
+	subscribe(process.env.SIRI4N_ID)
 }
 
 module.exports.server = function setupServer(bot) {
@@ -43,7 +44,7 @@ module.exports.server = function setupServer(bot) {
 	server.post('/', async (req, res) => {
 		logger.info("Post: " + req.body)
 		if (req.body && req.body.data && req.body.data.length > 0 && req.body.data[0].id !== streamID) {
-			botAnnounce(bot, req.body.data[0].user_name, req.body.data[0].title)
+			botAnnounce(bot, req.body.data[0])
 			streamID = req.body.data[0].id
 		}
 		res.status(200).type('text/plain').send(req.query['hub.challenge'])
