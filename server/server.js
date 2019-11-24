@@ -5,7 +5,7 @@ const { botAnnounce } = require("../events/botAnnounce");
 const { logger } = require("../bot")
 const express = require('express')
 const server = express()
-const port = 3000
+const port = process.env.TWITCH_LISTEN_PORT
 
 server.use(bodyParser.json())
 
