@@ -25,8 +25,7 @@ const configureTwitter = () => {
 	currentTopic = topicFile.topic;
 
 	t.on("tweet", function (tweet) {
-		bot.channels.get(process.env.TWITTER_CHANNEL).send({
-			content: `https://twitter.com/${tweet.user.screen_name}/status/${tweet.id_str}`,
+		bot.channels.get(process.env.TWITTER_CHANNEL).send(`https://twitter.com/${tweet.user.screen_name}/status/${tweet.id_str}`, {
 			embed: {
 				thumbnail: {
 					url: tweet.user.profile_image_url
