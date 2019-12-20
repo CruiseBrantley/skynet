@@ -50,7 +50,7 @@ server(bot)
 
 // twitterChannelInit();
 
-bot.on("message", botMessage());
+bot.on("message", botMessage(bot));
 
 bot.on("messageUpdate", botUpdate());
 

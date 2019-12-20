@@ -4,10 +4,9 @@ const googleTTS = require("google-tts-api");
 const ytdl = require("ytdl-core");
 const youtubeSearch = require("youtube-search");
 const fs = require("fs");
-const { logger, bot } = require("../bot.js");
+const { logger } = require("../bot.js");
 const { topicFile, trackNewTopic } = require("../events/twitter.js");
 const decode = require("unescape");
-const moment = require("moment");
 let dispatcher = {};
 let channel;
 let volume = 5;
@@ -15,16 +14,17 @@ let lastSearch = [];
 let gameSessionID = 0;
 
 class Command {
-	constructor(message, cmd, args) {
+	constructor(message, cmd, args, bot) {
 		this.message = message;
 		this.cmd = cmd;
 		this.args = args;
+		this.bot = bot;
 	}
 
 	stop() {
-		if (dispatcher !== {}) {
+		if (dispatcher.destroy) {
 			dispatcher.destroy();
-			bot.user.setActivity(process.env.ACTIVITY);
+			this.bot.user.setActivity(process.env.ACTIVITY);
 			channel.leave();
 		}
 	}
@@ -61,7 +61,15 @@ class Command {
 	speak() {
 		//ex: !speak The words to be said in my voice channel
 		try {
-			if (!this.message.member.voice.channel) {
+			let channelName = this.message.member.voiceChannelID;
+
+			channel = this.message.guild.channels.find(item => {
+				return (
+					item.id === channelName &&
+					item.type === "voice"
+				);
+			});
+			if (!channel) {
 				this.message.channel.send("You need to be in a voice channel, try !speakchannel (!sc) to send your message to a channel you're not currently in.");
 				return;
 			}
@@ -85,12 +93,14 @@ class Command {
 			return;
 		}
 		googleTTS(speakMessage, "en", 1).then(url => {
-			this.message.member.voice.channel
+			channel
 				.join()
 				.then(connection => {
-					dispatcher = connection.play(url);
+					dispatcher = connection.playStream(url);
 					dispatcher.on("end", () => {
-						this.message.member.voice.channel.leave();
+						setTimeout(() => {
+							connection.disconnect();
+						}, 2000)
 					});
 				})
 				.catch(err => logger.info("Encountered an error: ", err));
@@ -137,7 +147,7 @@ class Command {
 			channel
 				.join()
 				.then(connection => {
-					dispatcher = connection.play(url);
+					dispatcher = connection.playStream(url);
 
 					dispatcher.on("end", () => {
 						channel.leave();
@@ -204,7 +214,15 @@ class Command {
 			this.message.channel.send("You can to optionally supply a channel name, but a video URL is required.");
 			return;
 		} else if (this.args.length < 2) {
-			channel = this.message.member.voice.channel;
+			// channel = this.message.member.voice.channel;
+			channelName = this.message.member.voiceChannelID;
+
+			channel = this.message.guild.channels.find(item => {
+				return (
+					item.id === channelName &&
+					item.type === "voice"
+				);
+			});
 		} else {
 			channelName = this.args.shift();
 
@@ -223,21 +241,56 @@ class Command {
 		}
 		let url = this.args.shift();
 
-		if (url === "red" && lastSearch) url = lastSearch[0].link;
-		if (url === "orange" && lastSearch) url = lastSearch[1].link;
-		if (url === "yellow" && lastSearch) url = lastSearch[2].link;
+		if (url === "red" && lastSearch.length) url = lastSearch[0].link;
+		if (url === "orange" && lastSearch.length) url = lastSearch[1].link;
+		if (url === "yellow" && lastSearch.length) url = lastSearch[2].link;
 
 		channel
 			.join()
 			.then(connection => {
-				dispatcher = connection.play(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10, passes: 2 });
-				bot.user.setActivity("YouTube.");
+				dispatcher = connection.playStream(ytdl(url, { filter: "audioonly", quality: 'highestaudio' }), { volume: volume / 10, passes: 2 });
+				this.bot.user.setActivity("YouTube.");
 
 				dispatcher.on("end", () => {
-					bot.user.setActivity(process.env.ACTIVITY);
-					channel.leave();
+					this.bot.user.setActivity(process.env.ACTIVITY);
+					connection.disconnect();
 				});
 			}).catch(err => logger.info("channel join error: ", err));
+	}
+
+	playvideo() {
+		const query = this.args.join(" ");
+		if (!query) {
+			this.message.channel.send("You need to supply something to search for.");
+			return;
+		}
+		const opts = {
+			maxResults: 1,
+			key: process.env.YOUTUBE_KEY,
+			type: "video"
+		};
+
+		youtubeSearch(query, opts, (err, result) => {
+			if (err) return logger.info("playvideo error: ", err);
+			result = result[0]
+			this.message.channel.send({
+				embed: {
+					"author": {
+						"name": decode(result.channelTitle),
+					},
+					"title": decode(result.title),
+					"description": decode(result.description),
+					"url": result.link,
+					"color": colorFunc(index),
+					"timestamp": result.publishedAt,
+					"thumbnail": {
+						"url": result.thumbnails.default.url
+					}, "footer": {
+						"text": footerFunc(index)
+					}
+				}
+			})
+		})
 	}
 
 	async ping() {
@@ -420,7 +473,6 @@ class Command {
 		}
 
 		const [search, hasVotedIndex] = hasVoted(this.message.member.user.id);
-		console.log(search, hasVotedIndex)
 		if (search !== -1) {
 			options[search].votes--;
 			options[search].hasVoted.splice(hasVotedIndex, 1);
