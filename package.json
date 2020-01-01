@@ -17,6 +17,7 @@
 		"node-tweet-stream": "^2.0.3",
 		"nodemon": "^1.19.4",
 		"public-ip": "^3.2.0",
+		"snekfetch": "^4.0.4",
 		"twitch": "^2.2.8",
 		"twitch-webhooks": "^2.2.8",
 		"unescape": "^1.0.1",
