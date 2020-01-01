@@ -15,7 +15,7 @@ function botUpdate() {
 				);
 			}
 		} catch (err) {
-			console.log("botUpdate error: ", err);
+			logger.info("botUpdate error: ", err);
 		}
 	};
 }

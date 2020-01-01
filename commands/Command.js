@@ -74,7 +74,7 @@ class Command {
 				return;
 			}
 		} catch (err) {
-			console.log(err)
+			logger.info(err)
 			return;
 		}
 
@@ -128,7 +128,7 @@ class Command {
 				return;
 			}
 		} catch (err) {
-			console.log(err)
+			logger.info(err)
 			return;
 		}
 		googleTTS(speakMessage, "en", 1).then(url => {
