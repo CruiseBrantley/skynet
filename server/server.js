@@ -30,11 +30,24 @@ function subscribeAll() {
 	subscribe(process.env.SIRI4N_ID)
 }
 
-module.exports.server = function setupServer(bot) {
+async function getGameInfo(id) {
+	return axios.get(`https://api.twitch.tv/helix/games?id=${id}`, { headers: { 'Client-ID': process.env.TWITCH_CLIENTID } })
+		.then(res => {
+			if (res && res.data && res.data.data && res.data.data.length) {
+				const response = res.data.data[0]
+				logger.info(`Looked up data for: ${response.name}`)
+				return { game_name: response.name, game_image: response.box_art_url }
+			}
+			logger.info("Response wasn't right, or there was no game:\n ", res)
+		})
+		.catch(err => logger.info(err))
+}
+
+function setupServer(bot) {
 	subscribeAll()
 	setInterval(() => {
 		subscribeAll()
-	}, 8640000)
+	}, 86400 * 100) // s to ms
 
 	server.get('/', async (req, res) => {
 		logger.info("Get: " + req.query['hub.challenge'])
@@ -44,8 +57,11 @@ module.exports.server = function setupServer(bot) {
 	server.post('/', async (req, res) => {
 		logger.info("Post: " + req.body)
 		if (req.body && req.body.data && req.body.data.length > 0 && req.body.data[0].id !== streamID) {
-			botAnnounce(bot, req.body.data[0])
-			streamID = req.body.data[0].id
+			const response = req.body.data[0]
+			const gameInfo = await getGameInfo(response.game_id)
+			const betterResponse = { ...response, ...gameInfo }
+			botAnnounce(bot, betterResponse)
+			streamID = betterResponse.id
 		}
 		res.status(200).type('text/plain').send(req.query['hub.challenge'])
 	})
@@ -53,3 +69,5 @@ module.exports.server = function setupServer(bot) {
 	server.listen(port, () => logger.info(`Twitch updates listening on port: ${port}!`))
 	return server
 }
+
+module.exports.server = setupServer
