@@ -11,7 +11,7 @@ async function botAnnounce(bot, data) {
 		fs.writeFileSync('image.jpg', image.body, 'binary')
 
 		try {
-			bot.channels.get(process.env.TEST_CHANNEL).send(
+			bot.channels.get(process.env.ANNOUNCE_CHANNEL).send(
 				`@everyone ${data.user_name} has gone Live! https://www.twitch.tv/${data.user_name}`,
 				{
 					embed: {
