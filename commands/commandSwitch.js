@@ -34,9 +34,6 @@ function chatCommand(command) {
 		case "server":
 			command.server();
 			break;
-		case "help":
-			command.help();
-			break;
 		case "say":
 			command.say();
 			break;
