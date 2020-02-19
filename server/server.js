@@ -20,7 +20,7 @@ async function subscribe(id) {
 	}
 	axios.post('https://api.twitch.tv/helix/webhooks/hub', data, { headers: { 'Client-ID': process.env.TWITCH_CLIENTID } })
 		.then(res => logger.info('Successfully subscribed to Twitch Updates for ' + id))
-		.catch(err => logger.info(err))
+		.catch(err => logger.info('Failed Subscribing for' + id))
 }
 
 function subscribeAll() {
@@ -40,7 +40,7 @@ async function getGameInfo(id) {
 			}
 			logger.info("Response wasn't right, or there was no game:\n ", res)
 		})
-		.catch(err => logger.info(err))
+		.catch(err => logger.info("Couldn't get game info: " + err))
 }
 
 function setupServer(bot) {
@@ -55,7 +55,7 @@ function setupServer(bot) {
 	})
 
 	server.post('/', async (req, res) => {
-		logger.info("Post: " + req.body)
+		logger.info("Post Received.")
 		if (req.body && req.body.data && req.body.data.length > 0 && req.body.data[0].id !== streamID) {
 			const response = req.body.data[0]
 			const gameInfo = await getGameInfo(response.game_id)
