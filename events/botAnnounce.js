@@ -2,6 +2,20 @@ const fetch = require('snekfetch');
 const { logger } = require("../bot");
 const fs = require('fs')
 
+const fireraven = process.env.FIRERAVEN_ID
+const cyphane = process.env.CYPHANE_ID
+const cha = process.env.CHA_ID
+
+const cyphaneFriends = [fireraven, cha]
+const fireFriends = [cyphane, cha]
+
+const streamCases = [
+	{ case: [fireraven], channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL }, 		//Case FireRaven
+	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL },	//Case FireRaven Friend
+	{ case: [cyphane], channel: process.env.CYPHANE_ANNOUNCE_CHANNEL },				//Case Cyphane
+	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL },//Case Cyphane Friend
+]																					//ToDo: Maybe I should rewrite as Switch Statement
+
 async function botAnnounce(bot, data) {
 	try {
 		let image = await fetch.get(data.game_image
@@ -10,24 +24,30 @@ async function botAnnounce(bot, data) {
 
 		fs.writeFileSync('image.jpg', image.body, 'binary')
 
-		try {
-			bot.channels.get(process.env.ANNOUNCE_CHANNEL).send(
-				`@everyone ${data.user_name} has gone Live! https://www.twitch.tv/${data.user_name}`,
-				{
-					embed: {
-						author: {
-							name: `${data.user_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''}on Twitch!`
-						},
-						url: `https://www.twitch.tv/${data.user_name}`,
-						title: data.title,
-						image: {
-							url: 'attachment://image.jpg'
-						},
-						timestamp: data.started_at
-					}, files: [{ attachment: 'image.jpg', name: 'image.jpg' }]
-				});
-		} catch (err) {
-			logger.info("botAnnounce error: ", err);
+		for (const streamCase of streamCases) {
+			if (streamCase.case.includes(data.user_id)) announce(streamCase.channel)
+		}
+
+		function announce(channel) {
+			try {
+				bot.channels.get(channel).send(
+					`@everyone ${data.user_name} has gone Live! https://www.twitch.tv/${data.user_name}`,
+					{
+						embed: {
+							author: {
+								name: `${data.user_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''}on Twitch!`
+							},
+							url: `https://www.twitch.tv/${data.user_name}`,
+							title: data.title,
+							image: {
+								url: 'attachment://image.jpg'
+							},
+							timestamp: data.started_at
+						}, files: [{ attachment: 'image.jpg', name: 'image.jpg' }]
+					});
+			} catch (err) {
+				logger.info("botAnnounce error: ", err);
+			}
 		}
 	} catch (err) {
 		logger.info("Error downloading image", err)
