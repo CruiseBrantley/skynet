@@ -62,14 +62,13 @@ function chatCommand(command) {
 			break;
 		case "votereset":
 		case "resetvotes":
-		case "resetvote":
 			command.votereset();
 			break;
-		case "addoption":
-			command.addoption();
+		case "voteadd":
+			command.voteadd();
 			break;
-		case "removeoption":
-			command.removeoption();
+		case "voteremove":
+			command.voteremove();
 			break;
 	}
 }
