@@ -1,6 +1,6 @@
 const fs = require("fs")
 const { logger } = require("../bot.js")
-let voteTopic = require("../voteTopic.json")
+let voteTopic = {}
 
 function eligibleChannel(message) {
 	// if (!(message.channel.id === "592718526083498014" || message.channel.id === "579568174392147968")) {
@@ -21,9 +21,9 @@ function hasVoted(options, value) {
 }
 
 function vote(message, args) {
+	voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 	if (!eligibleChannel(message)) return
 
-	voteTopic = require("../voteTopic.json")
 	let options = voteTopic[message.channel.guild.id] || []
 
 	if (args.length < 1) {
@@ -64,6 +64,7 @@ function vote(message, args) {
 }
 
 function unvote(message, args) {
+	voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 	if (!eligibleChannel(message)) return
 
 	let options = voteTopic[message.channel.guild.id] || [];
@@ -87,7 +88,7 @@ function unvote(message, args) {
 
 function votereset(message, args) {
 	if (message.member.permissions.has("ADMINISTRATOR")) {
-		voteTopic = require("../voteTopic.json");
+		voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 		let options = voteTopic[message.channel.guild.id] || [];
 
 		for (let option of options) {
@@ -110,7 +111,7 @@ function votereset(message, args) {
 
 function voteadd(message, args) {
 	if (message.member.permissions.has("ADMINISTRATOR")) {
-		voteTopic = require("../voteTopic.json");
+		voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 		let options = voteTopic[message.channel.guild.id] || [];
 
 		if (args.length > 0) {
@@ -136,7 +137,7 @@ function voteadd(message, args) {
 
 function voteremove(message, args) {
 	if (message.member.permissions.has("ADMINISTRATOR")) {
-		voteTopic = require("../voteTopic.json");
+		voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 		let options = voteTopic[message.channel.guild.id] || [];
 
 		const toBeRemoved = args.join(" ");
@@ -168,9 +169,9 @@ function voteremove(message, args) {
 	message.channel.send("You must have admin permissions to modify vote options.");
 }
 
-function voteremoveall(message, args) {
+function voteclear(message, args) {
 	if (message.member.permissions.has("ADMINISTRATOR")) {
-		voteTopic = require("../voteTopic.json")
+		voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
 		fs.writeFile(
 			process.env.VOTE_FILENAME,
 			JSON.stringify({ ...voteTopic, [message.channel.guild.id]: [] }, null, 2),
@@ -178,7 +179,7 @@ function voteremoveall(message, args) {
 				if (err) return logger.info(err)
 			}
 		)
-		message.channel.send(`Removed all options.`)
+		message.channel.send(`Cleared all options vote options.`)
 		return
 	}
 	message.channel.send("You must have admin permissions to modify vote options.");
@@ -189,4 +190,4 @@ module.exports.unvote = unvote
 module.exports.votereset = votereset
 module.exports.voteadd = voteadd
 module.exports.voteremove = voteremove
-module.exports.voteremoveall = voteremoveall
+module.exports.voteclear = voteclear

@@ -1,4 +1,4 @@
-const { vote, unvote, votereset, voteadd, voteremove, voteremoveall } = require('./vote')
+const { vote, unvote, votereset, voteadd, voteremove, voteclear } = require('./vote')
 
 const publicIp = require("public-ip");
 const axios = require("axios");
@@ -405,7 +405,7 @@ class Command {
 	votereset() { votereset(this.message, this.args) }
 	voteadd() { voteadd(this.message, this.args) }
 	voteremove() { voteremove(this.message, this.args) }
-	voteremoveall() { voteremoveall(this.message, this.args) }
+	voteclear() { voteclear(this.message, this.args) }
 
 	catfact() {
 		//ex: !catfact
