@@ -115,12 +115,7 @@ function voteadd(message, args) {
 		let options = voteTopic[message.channel.guild.id] || [];
 
 		if (args.length > 0) {
-			const newTitle = {
-				title: args.join(" "),
-				hasVoted: []
-			}
-			options.push(newTitle);
-
+			args.join(" ").split(',').forEach(each => options.push({ title: each.trim(), hasVoted: [] }))
 			fs.writeFile(
 				process.env.VOTE_FILENAME,
 				JSON.stringify({ ...voteTopic, [message.channel.guild.id]: options }, null, 2),
@@ -128,7 +123,7 @@ function voteadd(message, args) {
 					if (err) return logger.info(err)
 				}
 			);
-			message.channel.send(`\`${newTitle.title}\` was added successfully.`);
+			message.channel.send(`Added successfully.`);
 		} else message.channel.send("You need to specify something to add.");
 		return;
 	}
