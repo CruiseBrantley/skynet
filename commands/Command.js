@@ -1,4 +1,5 @@
 const { vote, unvote, votereset, voteadd, voteremove, voteclear } = require('./vote')
+const { wafflehouse } = require('./wafflehouse')
 
 const publicIp = require("public-ip");
 const axios = require("axios");
@@ -430,5 +431,7 @@ class Command {
 	session() {
 		this.message.channel.send(`The current Session ID is: ${gameSessionID}`);
 	}
+
+	wafflehouse() { wafflehouse(this.message) }
 }
 module.exports.Command = Command;

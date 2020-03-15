@@ -73,6 +73,10 @@ function chatCommand(command) {
 		case "voteclear":
 			command.voteclear();
 			break;
+		case "whi":
+		case "wafflehouse":
+		case "wafflehouseindex":
+			command.wafflehouse();
 	}
 }
 module.exports.chatCommand = chatCommand;
