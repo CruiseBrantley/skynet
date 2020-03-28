@@ -11,11 +11,11 @@ const cyphaneFriends = [fireraven, cha, bfd]
 const fireFriends = [cyphane, cha]
 
 const streamCases = [
-	{ case: fireraven, channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL }, 		//Case FireRaven
-	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL },	//Case FireRaven Friend
-	{ case: cyphane, channel: process.env.CYPHANE_ANNOUNCE_CHANNEL },				//Case Cyphane
-	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL },//Case Cyphane Friend
-]																					//ToDo: Maybe I should rewrite as Switch Statement
+	{ case: [fireraven], channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL, type: 'main' }, 				//Case FireRaven
+	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL, type: 'friends' },	//Case FireRaven Friend
+	{ case: [cyphane], channel: process.env.CYPHANE_ANNOUNCE_CHANNEL, type: 'main' },					//Case Cyphane
+	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL, type: 'friends' },	//Case Cyphane Friend
+]																										//ToDo: Maybe I should rewrite as Switch Statement
 
 async function botAnnounce(bot, data) {
 	try {
@@ -26,8 +26,8 @@ async function botAnnounce(bot, data) {
 		fs.writeFileSync('image.jpg', image.body, 'binary')
 
 		for (const streamCase of streamCases) {
-			if (streamCase.case === data.user_id) mainAnnounce(streamCase.channel)
-			else if (typeof streamCase.case === array && streamCase.case.includes(data.user_id)) friendAnnounce(streamCase.channel)
+			if (streamCase.type === 'main' && streamCase.case.includes(data.user_id)) mainAnnounce(streamCase.channel)
+			else if (typeof streamCase.type === 'friends' && streamCase.case.includes(data.user_id)) friendAnnounce(streamCase.channel)
 		}
 
 		function mainAnnounce(channel) {
