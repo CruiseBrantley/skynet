@@ -12,9 +12,9 @@ const fireFriends = [cyphane, cha]
 
 const streamCases = [
 	{ case: [fireraven], channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL, type: 'main' }, 				//Case FireRaven
-	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL, type: 'friends' },	//Case FireRaven Friend
+	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL, type: 'friend' },	//Case FireRaven Friend
 	{ case: [cyphane], channel: process.env.CYPHANE_ANNOUNCE_CHANNEL, type: 'main' },					//Case Cyphane
-	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL, type: 'friends' },	//Case Cyphane Friend
+	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL, type: 'friend' },	//Case Cyphane Friend
 ]																										//ToDo: Maybe I should rewrite as Switch Statement
 
 async function botAnnounce(bot, data) {
@@ -27,7 +27,7 @@ async function botAnnounce(bot, data) {
 
 		for (const streamCase of streamCases) {
 			if (streamCase.type === 'main' && streamCase.case.includes(data.user_id)) mainAnnounce(streamCase.channel)
-			else if (typeof streamCase.type === 'friends' && streamCase.case.includes(data.user_id)) friendAnnounce(streamCase.channel)
+			else if (streamCase.type === 'friend' && streamCase.case.includes(data.user_id)) friendAnnounce(streamCase.channel)
 		}
 
 		function mainAnnounce(channel) {
