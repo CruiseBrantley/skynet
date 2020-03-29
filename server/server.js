@@ -28,6 +28,7 @@ function subscribeAll() {
 	subscribe(process.env.CYPHANE_ID)
 	subscribe(process.env.CHA_ID)
 	subscribe(process.env.SIRI4N_ID)
+	subscribe(process.env.BFD_ID)
 }
 
 async function getGameInfo(id) {

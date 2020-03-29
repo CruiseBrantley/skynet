@@ -12,7 +12,7 @@ const fireFriends = [cyphane, cha]
 
 const streamCases = [
 	{ case: [fireraven], channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL, type: 'main' }, 				//Case FireRaven
-	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL, type: 'friend' },	//Case FireRaven Friend
+	{ case: fireFriends, channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL, type: 'friend' },		//Case FireRaven Friend
 	{ case: [cyphane], channel: process.env.CYPHANE_ANNOUNCE_CHANNEL, type: 'main' },					//Case Cyphane
 	{ case: cyphaneFriends, channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL, type: 'friend' },	//Case Cyphane Friend
 ]																										//ToDo: Maybe I should rewrite as Switch Statement
