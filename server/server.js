@@ -47,15 +47,19 @@ async function getGameInfo(id) {
 function setupServer(bot) {
 	subscribeAll()
 	setInterval(() => {
+		// Twitch times out subscriptions, this ensures they're renewed
 		subscribeAll()
 	}, 86400 * 100) // s to ms
 
 	server.get('/', async (req, res) => {
+		// Called on initial subscription
 		logger.info("Get: " + req.query['hub.challenge'])
 		res.status(200).type('text/plain').send(req.query['hub.challenge'])
 	})
 
 	server.post('/', async (req, res) => {
+		// Called when new stream is detected
+		// streamID is kept to ensure there aren't duplicate updates
 		logger.info("Post Received.")
 		if (req.body && req.body.data && req.body.data.length > 0 && req.body.data[0].id !== streamID) {
 			const response = req.body.data[0]
