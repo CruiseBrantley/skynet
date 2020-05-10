@@ -62,3 +62,6 @@ voteTopic.json
 
 # next.js build output
 .next
+
+# temp game image
+image.jpg
