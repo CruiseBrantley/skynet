@@ -36,7 +36,7 @@ function discordBot() {
 		logger.info("Connected");
 		logger.info("Logged in as: ");
 		logger.info(bot.user.username + " - (" + bot.user.id + ")");
-		bot.user.setActivity(process.env.ACTIVITY, { type: 'LISTENING' });
+		bot.user.setActivity('for John Connor', { type: 'LISTENING' });
 	});
 
 	bot.on("error", err => {
