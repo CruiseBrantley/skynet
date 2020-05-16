@@ -77,4 +77,4 @@ async function botAnnounce(bot, data) {
 		logger.info("Error downloading image", err)
 	}
 }
-exports.botAnnounce = botAnnounce;
+module.exports = botAnnounce
