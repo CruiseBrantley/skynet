@@ -1,7 +1,8 @@
 const dotenv = require("dotenv");
 dotenv.config();
 const Discord = require("discord.js");
-const winston = require("winston");
+const logger = require("./logger")
+const server = require("./server/server")
 
 function discordBot() {
 	// Initialize Discord Bot
@@ -16,21 +17,6 @@ function discordBot() {
 		}
 	}
 	aFunc()
-
-	// Configure logger settings
-	const logger = winston.createLogger({
-		level: "info",
-		format: winston.format.json(),
-		defaultMeta: { service: "user-service" },
-		transports: [new winston.transports.File({ filename: "./logs/combined.log" })]
-	});
-	//debug logging under here, remove for prod
-	logger.add(
-		new winston.transports.Console({
-			format: winston.format.simple()
-		})
-	);
-	module.exports.logger = logger;
 
 	bot.on("ready", () => {
 		logger.info("Connected");
@@ -47,7 +33,6 @@ function discordBot() {
 	const { botMessage } = require("./events/botMessage");
 	const { botDelete } = require("./events/botDelete");
 
-	const { server } = require("./server/server")
 	server(bot)
 
 	// twitterChannelInit();
