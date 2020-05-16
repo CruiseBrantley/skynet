@@ -1,5 +1,5 @@
 {
-	"name": "Skynet",
+	"name": "skynet",
 	"version": "1.0.0",
 	"description": "Skynet, various functions",
 	"main": "bot.js",
@@ -24,5 +24,11 @@
 		"winston": "^3.2.1",
 		"youtube-search": "^1.1.4",
 		"ytdl-core": "^0.29.7"
+	},
+	"scripts": {
+		"test": "jest"
+	},
+	"jest": {
+		"testURL": "http://localhost"
 	}
 }
