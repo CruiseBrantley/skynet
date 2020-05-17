@@ -30,5 +30,8 @@
 	},
 	"jest": {
 		"testURL": "http://localhost"
+	},
+	"standard": {
+		"env": [ "jest" ]
 	}
 }
