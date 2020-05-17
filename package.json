@@ -25,6 +25,9 @@
 		"youtube-search": "^1.1.4",
 		"ytdl-core": "^0.29.7"
 	},
+	"devDependencies": {
+		"jest": "^26.0.1"
+	},
 	"scripts": {
 		"test": "jest"
 	},
@@ -32,6 +35,8 @@
 		"testURL": "http://localhost"
 	},
 	"standard": {
-		"env": [ "jest" ]
+		"env": [
+			"jest"
+		]
 	}
 }
