@@ -56,8 +56,9 @@ function vote (message, args) {
   const search = findMatchIndex(vote)
   if (search !== -1) {
     options[search].hasVoted.push(message.member.user.id)
+    const votedFor = options[search].title
     message.channel.send(
-      `Your vote for \`${options[search].title}\` has been recorded, to see results use \`!vote\``
+      `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\``
     )
     const sortedOptions = options.sort((item1, item2) =>
       parseInt(item1.hasVoted.length) < parseInt(item2.hasVoted.length) ? 1 : -1
@@ -71,7 +72,7 @@ function vote (message, args) {
       ),
       err => {
         if (err) return logger.info(err)
-        logger.info(`Recorded vote for ${options[search].title}.`)
+        logger.info(`Recorded vote for ${votedFor}.`)
       }
     )
     return
