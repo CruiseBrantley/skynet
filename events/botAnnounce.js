@@ -2,17 +2,19 @@ const fetch = require('snekfetch')
 const logger = require('../logger')
 const fs = require('fs')
 
-const fireraven = [process.env.FIRERAVEN_ID]
-const cyphane = [process.env.CYPHANE_ID]
-const cha = [process.env.CHA_ID]
-const bfd = [process.env.BFD_ID]
+const fireraven = process.env.FIRERAVEN_ID
+const cyphane = process.env.CYPHANE_ID
+const cha = process.env.CHA_ID
+const bfd = process.env.BFD_ID
+const siri4n = process.env.SIRI4N_ID
 
 const cyphaneFriends = [fireraven, cha, bfd]
 const fireFriends = [cyphane, cha]
+const siri4nFriends = [siri4n]
 
-const streamCases = [
+const prodCases = [
   {
-    case: fireraven,
+    case: [fireraven],
     channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL,
     type: 'main'
   }, // Case FireRaven
@@ -22,7 +24,7 @@ const streamCases = [
     type: 'friend'
   }, // Case FireRaven Friend
   {
-    case: cyphane,
+    case: [cyphane],
     channel: process.env.CYPHANE_ANNOUNCE_CHANNEL,
     type: 'main'
   }, // Case Cyphane
@@ -32,6 +34,21 @@ const streamCases = [
     type: 'friend'
   } // Case Cyphane Friend
 ]
+
+const testCases = [
+  {
+    case: [siri4n],
+    channel: process.env.TEST_CHANNEL,
+    type: 'main'
+  },
+  {
+    case: siri4nFriends,
+    channel: process.env.TEST_CHANNEL,
+    type: 'friend'
+  }
+]
+
+const streamCases = process.env.NODE_ENV === 'dev' ? testCases : prodCases
 
 function announce (bot, data, channel, type) {
   try {
@@ -76,8 +93,9 @@ async function botAnnounce (bot, data) {
     fs.writeFileSync('image.jpg', image.body, 'binary')
 
     for (const streamCase of streamCases)
-      if (streamCase.case.includes(data.user_id))
+      if (streamCase.case.includes(data.user_id)) {
         announce(bot, data, streamCase.channel, streamCase.type)
+      }
   } catch (err) {
     logger.info('Error downloading image', err)
   }
