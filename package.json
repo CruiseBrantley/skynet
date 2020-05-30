@@ -31,7 +31,8 @@
 	},
 	"scripts": {
 		"test": "jest",
-		"test-env": "cross-env NODE_ENV=dev node bot.js"
+		"dev-env": "cross-env NODE_ENV=dev node bot.js",
+		"run": "node bot.js"
 	},
 	"jest": {
 		"testURL": "http://localhost"
