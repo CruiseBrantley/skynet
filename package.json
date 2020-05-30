@@ -26,10 +26,12 @@
 		"ytdl-core": "^0.29.7"
 	},
 	"devDependencies": {
+		"cross-env": "^7.0.2",
 		"jest": "^26.0.1"
 	},
 	"scripts": {
-		"test": "jest"
+		"test": "jest",
+		"test-env": "cross-env NODE_ENV=dev node bot.js"
 	},
 	"jest": {
 		"testURL": "http://localhost"

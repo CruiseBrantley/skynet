@@ -6,6 +6,8 @@ const server = require('./server/server')
 
 function discordBot () {
   // Initialize Discord Bot
+  if (process.env.NODE_ENV !== 'dev') process.env.NODE_ENV = 'prod'
+  console.log("Current ENV:", process.env.NODE_ENV)
   const bot = new Discord.Client()
   const aFunc = async () => {
     try {
