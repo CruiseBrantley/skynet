@@ -6,6 +6,7 @@ const fireraven = process.env.FIRERAVEN_ID
 const cyphane = process.env.CYPHANE_ID
 const cha = process.env.CHA_ID
 const bfd = process.env.BFD_ID
+const dale = process.env.DALE_ID
 const siri4n = process.env.SIRI4N_ID
 
 const cyphaneFriends = [fireraven, cha, bfd]
@@ -32,7 +33,11 @@ const prodCases = [
     case: cyphaneFriends,
     channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL,
     type: 'friend'
-  } // Case Cyphane Friend
+  }, // Case Cyphane Friend
+  {
+    case: [dale],
+    channel: process.env.DALE_ANNOUNCE_CHANNEL
+  } // Case Dale
 ]
 
 const testCases = [
