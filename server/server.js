@@ -41,6 +41,7 @@ async function subscribeAll () {
   subscribe(process.env.CHA_ID)
   subscribe(process.env.SIRI4N_ID)
   subscribe(process.env.BFD_ID)
+  subscribe(process.env.DALE_ID)
 }
 
 function getGameInfo (id) {
