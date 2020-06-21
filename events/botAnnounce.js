@@ -36,7 +36,8 @@ const prodCases = [
   }, // Case Cyphane Friend
   {
     case: [dale],
-    channel: process.env.DALE_ANNOUNCE_CHANNEL
+    channel: process.env.DALE_ANNOUNCE_CHANNEL,
+    type: 'main'
   } // Case Dale
 ]
 
