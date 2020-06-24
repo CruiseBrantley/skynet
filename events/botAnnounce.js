@@ -38,7 +38,12 @@ const prodCases = [
     case: [dale],
     channel: process.env.DALE_ANNOUNCE_CHANNEL,
     type: 'main'
-  } // Case Dale
+  }, // Case Dale
+  {
+    case: [bfd],
+    channel: process.env.BFD_ANNOUNCE_CHANNEL,
+    type: 'main'
+  }
 ]
 
 const testCases = [
