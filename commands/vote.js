@@ -12,75 +12,90 @@ function eligibleChannel (message) {
 
 function hasVoted (options, value) {
   for (let i = 0; i < options.length; i++) {
-    const votedIndex = options[i].hasVoted.indexOf(value)
-    if (votedIndex !== -1) {
-      return [options[i].title, votedIndex, i]
+    if (options[i].hasVoted) {
+      const votedIndex = options[i].hasVoted.indexOf(value)
+      if (votedIndex !== -1) {
+        return [options[i].title, votedIndex, i]
+      }
     }
   }
   return false
 }
 
-function vote (message, args) {
-  voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
+async function vote (message, args, database) {
+  // voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
+  // const options = voteTopic[message.channel.guild.id] || []
+
   if (!eligibleChannel(message)) return
-
-  const options = voteTopic[message.channel.guild.id] || []
-
-  if (args.length < 1) {
-    return message.channel.send(
-      `\`\`\`md\n# The current voting record is:\n${options
-        .map(
-          e =>
-            String(`[${e.title}`).padEnd(50, ' ') + // eslint-disable-next-line
-            `](Votes:	${e.hasVoted.length})\n`
-        )
-        .join('')}\`\`\``
-    )
-  }
-  const vote = args.join(' ')
-
-  const titleVotedFor = hasVoted(options, message.member.user.id)
-  if (titleVotedFor) {
-    message.channel.send(
-      `I'm sorry, you've already voted for \`${titleVotedFor[0]}\`.`
-    )
-    return
-  }
-
-  function findMatchIndex (vote) {
-    for (let i = 0; i < options.length; i++) {
-      if (options[i].title.toLowerCase().includes(vote.toLowerCase())) return i
+  try {
+    const ref = database.ref(message.channel.guild.id)
+    const data = await ref.once('value')
+    const options = data.val()
+    console.log(options)
+    if (args.length < 1) {
+      return message.channel.send(
+        `\`\`\`md\n# The current voting record is:\n${options
+          .map(
+            e =>
+              String(`[${e.title}`).padEnd(50, ' ') + // eslint-disable-next-line
+              `](Votes:	${e.hasVoted.length})\n`
+          )
+          .join('')}\`\`\``
+      )
     }
-    return -1
-  }
-  const search = findMatchIndex(vote)
-  if (search !== -1) {
-    options[search].hasVoted.push(message.member.user.id)
-    const votedFor = options[search].title
-    message.channel.send(
-      `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\``
-    )
-    const sortedOptions = options.sort((item1, item2) =>
-      parseInt(item1.hasVoted.length) < parseInt(item2.hasVoted.length) ? 1 : -1
-    )
-    fs.writeFile(
-      process.env.VOTE_FILENAME,
-      JSON.stringify(
-        { ...voteTopic, [message.channel.guild.id]: sortedOptions },
-        null,
-        2
-      ),
-      err => {
-        if (err) return logger.info(err)
-        logger.info(`Recorded vote for ${votedFor}.`)
+    const vote = args.join(' ')
+
+    const titleVotedFor = hasVoted(options, message.member.user.id)
+    if (titleVotedFor) {
+      message.channel.send(
+        `I'm sorry, you've already voted for \`${titleVotedFor[0]}\`.`
+      )
+      return
+    }
+
+    function findMatchIndex (vote) {
+      for (let i = 0; i < options.length; i++) {
+        if (options[i].title.toLowerCase().includes(vote.toLowerCase()))
+          return i
       }
-    )
-    return
+      return -1
+    }
+    const search = findMatchIndex(vote)
+    if (search !== -1) {
+      if (!options[search].hasVoted) options[search].hasVoted = []
+      options[search].hasVoted.push(message.member.user.id)
+      const votedFor = options[search].title
+      message.channel.send(
+        `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\``
+      )
+      const sortedOptions = options.sort((item1, item2) =>
+        parseInt(item1.hasVoted && item1.hasVoted.length) <
+        parseInt(item2.hasVoted && item2.hasVoted.length)
+          ? 1
+          : -1
+      )
+      // fs.writeFile(
+      //   process.env.VOTE_FILENAME,
+      //   JSON.stringify(
+      //     { ...voteTopic, [message.channel.guild.id]: sortedOptions },
+      //     null,
+      //     2
+      //   ),
+      //   err => {
+      //     if (err) return logger.info(err)
+      //     logger.info(`Recorded vote for ${votedFor}.`)
+      //   }
+      // )
+      ref.set({ [message.channel.guild.id]: sortedOptions })
+      return
+    }
+    message.channel.send("I couldn't find that option.")
+  } catch (err) {
+    logger.error('There was a voting error: ', err)
   }
-  message.channel.send("I couldn't find that option.")
 }
 
-function unvote (message, args) {
+function unvote (message, args, database) {
   voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
   if (!eligibleChannel(message)) return
 
@@ -107,7 +122,7 @@ function unvote (message, args) {
   message.channel.send('Your vote has been reset.')
 }
 
-function votereset (message, args) {
+function votereset (message, args, database) {
   if (message.member.permissions.has('ADMINISTRATOR')) {
     voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
     const options = voteTopic[message.channel.guild.id] || []
@@ -134,7 +149,7 @@ function votereset (message, args) {
   message.channel.send('You must have admin permissions to reset the vote.')
 }
 
-function voteadd (message, args) {
+function voteadd (message, args, database) {
   if (message.member.permissions.has('ADMINISTRATOR')) {
     voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
     const options = voteTopic[message.channel.guild.id] || []
@@ -164,7 +179,7 @@ function voteadd (message, args) {
   )
 }
 
-function voteremove (message, args) {
+function voteremove (message, args, database) {
   if (message.member.permissions.has('ADMINISTRATOR')) {
     voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
     const options = voteTopic[message.channel.guild.id] || []
@@ -204,7 +219,7 @@ function voteremove (message, args) {
   )
 }
 
-function voteclear (message, args) {
+function voteclear (message, args, database) {
   if (message.member.permissions.has('ADMINISTRATOR')) {
     voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
     fs.writeFile(

@@ -65,3 +65,6 @@ voteTopic.json
 
 # temp game image
 image.jpg
+
+# firebase
+service-account.json
