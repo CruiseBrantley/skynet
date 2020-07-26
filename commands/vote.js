@@ -54,12 +54,21 @@ async function vote (message, args, database) {
     }
 
     function findMatchIndex (vote) {
+      let duplicate = false
+      let found = -1
       for (let i = 0; i < options.length; i++) {
-        if (options[i].title.toLowerCase().includes(vote.toLowerCase()))
-          return i
+        if (options[i].title.toLowerCase().includes(vote.toLowerCase())){
+          if (found === -1){
+            found = i
+          } else {
+            duplicate = true
+          }
+        }
       }
-      return -1
+      if (duplicate) return options[i].findIndex( item => item.title.toLowerCase() === vote.toLowerCase() )
+      return found
     }
+    
     const search = findMatchIndex(vote)
     if (search !== -1) {
       if (!options[search].hasVoted) options[search].hasVoted = []
