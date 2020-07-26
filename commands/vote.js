@@ -19,7 +19,7 @@ function hasVoted (options, value) {
       }
     }
   }
-  return false
+  return ['not voted', -1, -1]
 }
 
 async function vote (message, args, database) {
@@ -52,20 +52,23 @@ async function vote (message, args, database) {
       )
       return
     }
-
+    
     function findMatchIndex (vote) {
       let duplicate = false
       let found = -1
       for (let i = 0; i < options.length; i++) {
-        if (options[i].title.toLowerCase().includes(vote.toLowerCase())){
-          if (found === -1){
+        if (options[i].title.toLowerCase().includes(vote.toLowerCase())) {
+          if (found === -1) {
             found = i
           } else {
             duplicate = true
           }
         }
       }
-      if (duplicate) return options[i].findIndex( item => item.title.toLowerCase() === vote.toLowerCase() )
+      if (duplicate)
+        return options.findIndex(
+          item => item.title.toLowerCase() === vote.toLowerCase()
+        )
       return found
     }
     
@@ -167,7 +170,15 @@ function voteadd (message, args, database) {
       args
         .join(' ')
         .split(',')
-        .forEach(each => options.push({ title: each.trim(), hasVoted: [] }))
+        .forEach(each => {
+          if (
+            options.findIndex(
+              item => item.title.toLowerCase() === each.toLowerCase()
+            ) === -1
+          )
+            options.push({ title: each.trim(), hasVoted: [] })
+        })
+
       fs.writeFile(
         process.env.VOTE_FILENAME,
         JSON.stringify(
