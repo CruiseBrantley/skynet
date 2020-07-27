@@ -23,36 +23,35 @@ function hasVoted (options, value) {
 }
 
 async function vote (message, args, database) {
-  // voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
-  // const options = voteTopic[message.channel.guild.id] || []
-
   if (!eligibleChannel(message)) return
   try {
     const ref = database.ref(message.channel.guild.id)
     const data = await ref.once('value')
     const options = data.val()
-    console.log(options)
     if (args.length < 1) {
       return message.channel.send(
-        `\`\`\`md\n# The current voting record is:\n${options
-          .map(
-            e =>
-              String(`[${e.title}`).padEnd(50, ' ') + // eslint-disable-next-line
-              `](Votes:	${e.hasVoted.length})\n`
-          )
-          .join('')}\`\`\``
+        `\`\`\`md\n# The current voting record is:\n${(options || '') &&
+          options
+            .map(
+              e =>
+                String(`[${e.title}`).padEnd(50, ' ') + // eslint-disable-next-line
+                `](Votes:	${
+                  e.hasVoted && e.hasVoted.length ? e.hasVoted.length : 0
+                })\n`
+            )
+            .join('')}\`\`\``
       )
     }
     const vote = args.join(' ')
 
     const titleVotedFor = hasVoted(options, message.member.user.id)
-    if (titleVotedFor) {
+    if (titleVotedFor[1] !== -1) {
       message.channel.send(
         `I'm sorry, you've already voted for \`${titleVotedFor[0]}\`.`
       )
       return
     }
-    
+
     function findMatchIndex (vote) {
       let duplicate = false
       let found = -1
@@ -71,7 +70,7 @@ async function vote (message, args, database) {
         )
       return found
     }
-    
+
     const search = findMatchIndex(vote)
     if (search !== -1) {
       if (!options[search].hasVoted) options[search].hasVoted = []
@@ -81,24 +80,12 @@ async function vote (message, args, database) {
         `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\``
       )
       const sortedOptions = options.sort((item1, item2) =>
-        parseInt(item1.hasVoted && item1.hasVoted.length) <
-        parseInt(item2.hasVoted && item2.hasVoted.length)
+        ((item1.hasVoted && item1.hasVoted.length) || 0) <
+        ((item2.hasVoted && item2.hasVoted.length) || 0)
           ? 1
           : -1
       )
-      // fs.writeFile(
-      //   process.env.VOTE_FILENAME,
-      //   JSON.stringify(
-      //     { ...voteTopic, [message.channel.guild.id]: sortedOptions },
-      //     null,
-      //     2
-      //   ),
-      //   err => {
-      //     if (err) return logger.info(err)
-      //     logger.info(`Recorded vote for ${votedFor}.`)
-      //   }
-      // )
-      ref.set({ [message.channel.guild.id]: sortedOptions })
+      ref.set(sortedOptions)
       return
     }
     message.channel.send("I couldn't find that option.")
@@ -107,154 +94,136 @@ async function vote (message, args, database) {
   }
 }
 
-function unvote (message, args, database) {
-  voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
+async function unvote (message, args, database) {
   if (!eligibleChannel(message)) return
+  try {
+    const ref = database.ref(message.channel.guild.id)
+    const data = await ref.once('value')
+    const options = data.val()
 
-  const options = voteTopic[message.channel.guild.id] || []
-
-  const [, votedIndex, titleIndex] = hasVoted(options, message.member.user.id)
-  if (titleIndex !== undefined && titleIndex !== -1) {
-    options[titleIndex].hasVoted.splice(votedIndex, 1)
-    fs.writeFile(
-      process.env.VOTE_FILENAME,
-      JSON.stringify(
-        { ...voteTopic, [message.channel.guild.id]: options },
-        null,
-        2
-      ),
-      err => {
-        if (err) return logger.info(err)
-      }
-    )
-  } else {
-    message.channel.send("You haven't even voted...")
-    return
-  }
-  message.channel.send('Your vote has been reset.')
-}
-
-function votereset (message, args, database) {
-  if (message.member.permissions.has('ADMINISTRATOR')) {
-    voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
-    const options = voteTopic[message.channel.guild.id] || []
-
-    for (const option of options) {
-      option.hasVoted = []
+    const [, votedIndex, titleIndex] = hasVoted(options, message.member.user.id)
+    if (titleIndex !== undefined && titleIndex !== -1) {
+      options[titleIndex].hasVoted.splice(votedIndex, 1)
+      const sortedOptions = options.sort((item1, item2) =>
+        ((item1.hasVoted && item1.hasVoted.length) || 0) <
+        ((item2.hasVoted && item2.hasVoted.length) || 0)
+          ? 1
+          : -1
+      )
+      ref.set(sortedOptions)
+    } else {
+      message.channel.send("You haven't even voted...")
+      return
     }
+    message.channel.send('Your vote has been reset.')
+  } catch (err) {
+    logger.error('There was an unvote error: ', err)
+  }
+}
 
-    fs.writeFile(
-      process.env.VOTE_FILENAME,
-      JSON.stringify(
-        { ...voteTopic, [message.channel.guild.id]: options },
-        null,
-        2
-      ),
-      err => {
-        if (err) return logger.info(err)
-        logger.info('Reset Votes.')
+async function votereset (message, args, database) {
+  try {
+    if (message.member.permissions.has('ADMINISTRATOR')) {
+      const ref = database.ref(message.channel.guild.id)
+      const data = await ref.once('value')
+      const options = data.val()
+
+      for (const option of options) {
+        option.hasVoted = []
       }
+
+      ref.set(options)
+      message.channel.send('The vote count has been reset.')
+      return
+    }
+    message.channel.send('You must have admin permissions to reset the vote.')
+  } catch (err) {
+    logger.error('There was a votereset error: ', err)
+  }
+}
+
+async function voteadd (message, args, database) {
+  try {
+    if (message.member.permissions.has('ADMINISTRATOR')) {
+      const ref = database.ref(message.channel.guild.id)
+      const data = await ref.once('value')
+      let options = data.val()
+      if (!options) options = []
+
+      if (args.length > 0) {
+        args
+          .join(' ')
+          .split(',')
+          .forEach(each => {
+            if (
+              options.findIndex(
+                item => item.title.toLowerCase() === each.toLowerCase()
+              ) === -1
+            )
+              options.push({ title: each.trim(), hasVoted: [] })
+          })
+
+        ref.set(options)
+        message.channel.send('Added successfully.')
+      } else message.channel.send('You need to specify something to add.')
+      return
+    }
+    message.channel.send(
+      'You must have admin permissions to modify vote options.'
     )
-    message.channel.send('The vote count has been reset.')
-    return
+  } catch (err) {
+    logger.error('There was a voteadd error: ', err)
   }
-  message.channel.send('You must have admin permissions to reset the vote.')
 }
 
-function voteadd (message, args, database) {
-  if (message.member.permissions.has('ADMINISTRATOR')) {
-    voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
-    const options = voteTopic[message.channel.guild.id] || []
+async function voteremove (message, args, database) {
+  try {
+    if (message.member.permissions.has('ADMINISTRATOR')) {
+      const ref = database.ref(message.channel.guild.id)
+      const data = await ref.once('value')
+      const options = data.val()
 
-    if (args.length > 0) {
-      args
-        .join(' ')
-        .split(',')
-        .forEach(each => {
-          if (
-            options.findIndex(
-              item => item.title.toLowerCase() === each.toLowerCase()
-            ) === -1
-          )
-            options.push({ title: each.trim(), hasVoted: [] })
-        })
-
-      fs.writeFile(
-        process.env.VOTE_FILENAME,
-        JSON.stringify(
-          { ...voteTopic, [message.channel.guild.id]: options },
-          null,
-          2
-        ),
-        err => {
-          if (err) return logger.info(err)
+      const toBeRemoved = args.join(' ')
+      let flag = false
+      if (args.length > 0) {
+        for (let i = 0; i < options.length; i++) {
+          if (options[i].title.toLowerCase() === toBeRemoved.toLowerCase()) {
+            flag = true
+            options.splice(i, 1)
+          }
         }
-      )
-      message.channel.send('Added successfully.')
-    } else message.channel.send('You need to specify something to add.')
-    return
-  }
-  message.channel.send(
-    'You must have admin permissions to modify vote options.'
-  )
-}
-
-function voteremove (message, args, database) {
-  if (message.member.permissions.has('ADMINISTRATOR')) {
-    voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
-    const options = voteTopic[message.channel.guild.id] || []
-
-    const toBeRemoved = args.join(' ')
-    let flag = false
-    if (args.length > 0) {
-      for (let i = 0; i < options.length; i++) {
-        if (options[i].title.toLowerCase() === toBeRemoved.toLowerCase()) {
-          flag = true
-          options.splice(i, 1)
+        if (!flag) {
+          message.channel.send(`Couldn't find ${toBeRemoved}.`)
+          return
         }
-      }
-      if (!flag) {
-        message.channel.send(`Couldn't find ${toBeRemoved}.`)
-        return
-      }
 
-      fs.writeFile(
-        process.env.VOTE_FILENAME,
-        JSON.stringify(
-          { ...voteTopic, [message.channel.guild.id]: options },
-          null,
-          2
-        ),
-        err => {
-          if (err) return logger.info(err)
-          logger.info('Reset Votes.')
-        }
-      )
-      message.channel.send(`\`${toBeRemoved}\` was removed successfully.`)
-    } else message.channel.send('You need to specify something to remove.')
-    return
-  }
-  message.channel.send(
-    'You must have admin permissions to modify vote options.'
-  )
-}
-
-function voteclear (message, args, database) {
-  if (message.member.permissions.has('ADMINISTRATOR')) {
-    voteTopic = JSON.parse(fs.readFileSync('./voteTopic.json'))
-    fs.writeFile(
-      process.env.VOTE_FILENAME,
-      JSON.stringify({ ...voteTopic, [message.channel.guild.id]: [] }, null, 2),
-      err => {
-        if (err) return logger.info(err)
-      }
+        ref.set(options)
+        message.channel.send(`\`${toBeRemoved}\` was removed successfully.`)
+      } else message.channel.send('You need to specify something to remove.')
+      return
+    }
+    message.channel.send(
+      'You must have admin permissions to modify vote options.'
     )
-    message.channel.send('Cleared all options vote options.')
-    return
+  } catch (err) {
+    logger.error('There was a voteremove error: ', err)
   }
-  message.channel.send(
-    'You must have admin permissions to modify vote options.'
-  )
+}
+
+async function voteclear (message, args, database) {
+  try {
+    if (message.member.permissions.has('ADMINISTRATOR')) {
+      const ref = database.ref(message.channel.guild.id)
+      ref.set([])
+      message.channel.send('Cleared all options vote options.')
+      return
+    }
+    message.channel.send(
+      'You must have admin permissions to modify vote options.'
+    )
+  } catch (err) {
+    logger.error('There was a voteclear error: ', err)
+  }
 }
 
 module.exports = {
