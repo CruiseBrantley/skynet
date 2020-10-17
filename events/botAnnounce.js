@@ -7,9 +7,10 @@ const cyphane = process.env.CYPHANE_ID
 const cha = process.env.CHA_ID
 const bfd = process.env.BFD_ID
 const dale = process.env.DALE_ID
+const iaj = process.env.I_AM_JEFF_ID
 const siri4n = process.env.SIRI4N_ID
 
-const cyphaneFriends = [fireraven, cha, bfd]
+const cyphaneFriends = [fireraven, cha, bfd, iaj]
 const fireFriends = [cyphane, cha]
 const siri4nFriends = [siri4n]
 

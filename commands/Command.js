@@ -17,11 +17,12 @@ let lastSearch = []
 let gameSessionID = 0
 
 class Command {
-  constructor (message, cmd, args, bot) {
+  constructor (message, cmd, args, bot, database) {
     this.message = message
     this.cmd = cmd
     this.args = args
     this.bot = bot
+    this.database = database
   }
 
   stop () {
@@ -396,27 +397,27 @@ class Command {
   }
 
   vote () {
-    vote.vote(this.message, this.args)
+    vote.vote(this.message, this.args, this.database)
   }
 
   unvote () {
-    vote.unvote(this.message, this.args)
+    vote.unvote(this.message, this.args, this.database)
   }
 
   votereset () {
-    vote.votereset(this.message, this.args)
+    vote.votereset(this.message, this.args, this.database)
   }
 
   voteadd () {
-    vote.voteadd(this.message, this.args)
+    vote.voteadd(this.message, this.args, this.database)
   }
 
   voteremove () {
-    vote.voteremove(this.message, this.args)
+    vote.voteremove(this.message, this.args, this.database)
   }
 
   voteclear () {
-    vote.voteclear(this.message, this.args)
+    vote.voteclear(this.message, this.args, this.database)
   }
 
   catfact () {
