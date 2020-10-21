@@ -343,7 +343,7 @@ class Command {
       )
       .then(response => {
         this.message.channel.send(
-          "I've added your note. You can view them with !listnotes or online at https://cruise-notes.firebaseapp.com/ login with `Cruise-bot` `Whatpassword?`"
+          "I've added your note. You can view them with !listnotes or online at https://cruise-notes.web.app/ login with `Cruise-bot` `Whatpassword?`"
         )
       })
       .catch(err => {
