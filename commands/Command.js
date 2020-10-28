@@ -4,7 +4,7 @@ const wafflehouse = require('./wafflehouse')
 const publicIp = require('public-ip')
 const axios = require('axios')
 const googleTTS = require('google-tts-api')
-const ytdl = require('ytdl-core')
+const ytdl = require('ytdl-core-discord')
 const youtubeSearch = require('youtube-search')
 const fs = require('fs')
 const logger = require('../logger')
@@ -239,9 +239,9 @@ class Command {
 
     channel
       .join()
-      .then(connection => {
-        dispatcher = connection.playStream(
-          ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }),
+      .then(async connection => {
+        dispatcher = connection.playOpusStream(
+          await ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }),
           { volume: volume / 10, passes: 2 }
         )
         this.bot.user.setActivity('YouTube.')

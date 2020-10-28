@@ -4,7 +4,8 @@ const winston = require('winston')
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.json(),
-  defaultMeta: { service: 'user-service' },
+  colorize: true,
+  // defaultMeta: { service: 'user-service' },
   transports: [new winston.transports.File({ filename: './logs/combined.log' })]
 })
 // debug logging under here, remove for prod
