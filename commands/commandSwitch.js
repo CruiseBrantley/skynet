@@ -18,6 +18,9 @@ function chatCommand (command) {
     case 'search':
       command.searchyoutube()
       break
+    case 'ytpl':
+      command.youtubeplaylist()
+      break
     case 'v':
     case 'volume':
       command.volume()

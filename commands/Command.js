@@ -6,6 +6,7 @@ const axios = require('axios')
 const googleTTS = require('google-tts-api')
 const ytdl = require('ytdl-core-discord')
 const youtubeSearch = require('youtube-search')
+const ytpl = require('ytpl');
 const fs = require('fs')
 const logger = require('../logger')
 const { topicFile, trackNewTopic } = require('../events/twitter.js')
@@ -252,6 +253,41 @@ class Command {
         })
       })
       .catch(err => logger.info('channel join error: ', err))
+  }
+
+  async youtubeplaylist () {
+    const query = this.args.join(' ')
+    if (!query) {
+      this.message.channel.send('You need to supply a playlist.')
+      return
+    }
+    const channelName = this.message.member.voiceChannelID
+    channel = this.message.guild.channels.find(item => {
+      return item.id === channelName && item.type === 'voice'
+    })
+
+    const playVideo = async (url, connection) => connection.playOpusStream( await ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }), { volume: volume / 10, passes: 2 })
+
+    async function startPlaylist(playlist, connection) {
+      if (playlist.length == 0) {
+        return
+      }
+      dispatcher = await playVideo(playlist.shift().url_simple, connection)
+      dispatcher.on('end', async () => {
+        if (playlist.length === 0) {
+          this.bot.user.setActivity(process.env.ACTIVITY)
+          connection.disconnect()
+          return
+        }
+        
+        await startPlaylist(playlist, connection)
+      })
+    }
+
+    const playlist = await ytpl(query)
+    const connection = await channel.join()
+    this.bot.user.setActivity('YouTube.')
+    await startPlaylist(playlist.items, connection)
   }
 
   playvideo () {
