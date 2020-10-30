@@ -6,7 +6,7 @@ const axios = require('axios')
 const googleTTS = require('google-tts-api')
 const ytdl = require('ytdl-core-discord')
 const youtubeSearch = require('youtube-search')
-const ytpl = require('ytpl');
+const ytpl = require('ytpl')
 const fs = require('fs')
 const logger = require('../logger')
 const { topicFile, trackNewTopic } = require('../events/twitter.js')
@@ -70,7 +70,7 @@ class Command {
     try {
       const channelName = this.message.member.voiceChannelID
 
-      channel = this.message.guild.channels.find(item => {
+      channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
       })
       if (!channel) {
@@ -100,7 +100,7 @@ class Command {
       channel
         .join()
         .then(connection => {
-          dispatcher = connection.playStream(url)
+          dispatcher = connection.play(url)
           dispatcher.on('end', () => {
             setTimeout(() => {
               connection.disconnect()
@@ -135,7 +135,7 @@ class Command {
     }
     googleTTS(speakMessage, 'en', 1)
       .then(url => {
-        const channel = this.message.guild.channels.find(item => {
+        const channel = this.message.guild.channels.cache.find(item => {
           return (
             item.name.toLowerCase() === channelName.toLowerCase() &&
             item.type === 'voice'
@@ -150,7 +150,7 @@ class Command {
         channel
           .join()
           .then(connection => {
-            dispatcher = connection.playStream(url)
+            dispatcher = connection.play(url)
 
             dispatcher.on('end', () => {
               channel.leave()
@@ -200,7 +200,15 @@ class Command {
     })
   }
 
-  youtube () {
+  async playVideo (url, connection) {
+    return connection.play(await ytdl(url, { highWaterMark: 1 << 25 }), {
+      type: 'opus',
+      volume: volume / 10,
+      passes: 2
+    })
+  }
+
+  async youtube () {
     // ex: !youtube videoURL
     // ex: !youtube channel videoURL
     let channelName
@@ -211,15 +219,14 @@ class Command {
       return
     } else if (this.args.length < 2) {
       // channel = this.message.member.voice.channel;
-      channelName = this.message.member.voiceChannelID
-
-      channel = this.message.guild.channels.find(item => {
+      channelName = this.message.member.voice.channelID
+      channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
       })
     } else {
       channelName = this.args.shift()
 
-      channel = this.message.guild.channels.find(item => {
+      channel = this.message.guild.channels.cache.find(item => {
         return (
           item.name.toLowerCase() === channelName.toLowerCase() &&
           item.type === 'voice'
@@ -238,92 +245,76 @@ class Command {
     if (url === 'orange' && lastSearch.length) url = lastSearch[1].link
     if (url === 'yellow' && lastSearch.length) url = lastSearch[2].link
 
-    channel
-      .join()
-      .then(async connection => {
-        dispatcher = connection.playOpusStream(
-          await ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }),
-          { volume: volume / 10, passes: 2 }
-        )
-        this.bot.user.setActivity('YouTube.')
+    try {
+      const connection = await channel.join()
+      dispatcher = await this.playVideo(url, connection)
+      this.bot.user.setActivity('YouTube.')
 
-        dispatcher.on('end', () => {
-          this.bot.user.setActivity(process.env.ACTIVITY)
-          connection.disconnect()
-        })
+      dispatcher.on('finish', () => {
+        this.bot.user.setActivity(process.env.ACTIVITY)
+        connection.disconnect()
       })
-      .catch(err => logger.info('channel join error: ', err))
+    } catch (err) {
+      if (err.message.includes('permission'))
+        this.message.channel.send(
+          "I don't yet have permission to join this voice channel."
+        )
+      else logger.info('channel join error: ', err)
+    }
   }
 
   async youtubeplaylist () {
-    const query = this.args.join(' ')
+    let query
+    if (this.args.length) query = this.args.join(' ')
     if (!query) {
       this.message.channel.send('You need to supply a playlist.')
       return
     }
     const channelName = this.message.member.voiceChannelID
-    channel = this.message.guild.channels.find(item => {
-      return item.id === channelName && item.type === 'voice'
-    })
+    if (this.args.length < 1) {
+      this.message.channel.send(
+        'You can to optionally supply a channel name, but a video URL is required.'
+      )
+      return
+    } else {
+      channelName = this.args.shift()
 
-    const playVideo = async (url, connection) => connection.playOpusStream( await ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }), { volume: volume / 10, passes: 2 })
+      channel = this.message.guild.channels.cache.find(item => {
+        return (
+          item.name.toLowerCase() === channelName.toLowerCase() &&
+          item.type === 'voice'
+        )
+      })
+    }
 
-    async function startPlaylist(playlist, connection) {
+    async function startPlaylist (playlist, connection) {
       if (playlist.length == 0) {
         return
       }
-      dispatcher = await playVideo(playlist.shift().url_simple, connection)
+      dispatcher = await this.playVideo(playlist.shift().url_simple, connection)
       dispatcher.on('end', async () => {
         if (playlist.length === 0) {
           this.bot.user.setActivity(process.env.ACTIVITY)
           connection.disconnect()
           return
         }
-        
+
         await startPlaylist(playlist, connection)
       })
     }
 
-    const playlist = await ytpl(query)
-    const connection = await channel.join()
-    this.bot.user.setActivity('YouTube.')
-    await startPlaylist(playlist.items, connection)
-  }
-
-  playvideo () {
-    const query = this.args.join(' ')
-    if (!query) {
-      this.message.channel.send('You need to supply something to search for.')
-      return
+    try {
+      const playlist = await ytpl(query)
+      const connection = await channel.join()
+      this.bot.user.setActivity('YouTube.')
+      await startPlaylist(playlist.items, connection)
+    } catch (err) {
+      if (err.message.includes('permission'))
+        this.message.channel.send(
+          "I don't yet have permission to join this voice channel."
+        )
+      else logger.info('channel join error: ', err)
     }
-    const opts = {
-      maxResults: 1,
-      key: process.env.YOUTUBE_KEY,
-      type: 'video'
-    }
-
-    youtubeSearch(query, opts, (err, result) => {
-      if (err) return logger.info('playvideo error: ', err)
-      result = result[0]
-      this.message.channel.send({
-        embed: {
-          author: {
-            name: decode(result.channelTitle)
-          },
-          title: decode(result.title),
-          description: decode(result.description),
-          url: result.link,
-          color: colorFunc(0),
-          timestamp: result.publishedAt,
-          thumbnail: {
-            url: result.thumbnails.default.url
-          },
-          footer: {
-            text: footerFunc(0)
-          }
-        }
-      })
-    })
   }
 
   async ping () {
