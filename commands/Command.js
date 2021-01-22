@@ -1,10 +1,10 @@
 const vote = require('./vote')
 const wafflehouse = require('./wafflehouse')
+const playVideo = require('./playVideo')
 
 const publicIp = require('public-ip')
 const axios = require('axios')
 const googleTTS = require('google-tts-api')
-const ytdl = require('ytdl-core-discord')
 const youtubeSearch = require('youtube-search')
 const ytpl = require('ytpl')
 const fs = require('fs')
@@ -13,7 +13,7 @@ const { topicFile, trackNewTopic } = require('../events/twitter.js')
 const decode = require('unescape')
 let dispatcher = {}
 let channel
-let volume = 5
+let volume = 0.2
 let lastSearch = []
 let gameSessionID = 0
 
@@ -68,7 +68,7 @@ class Command {
   speak () {
     // ex: !speak The words to be said in my voice channel
     try {
-      const channelName = this.message.member.voiceChannelID
+      const channelName = this.message.member.voice.channelID
 
       channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
@@ -200,14 +200,6 @@ class Command {
     })
   }
 
-  async playVideo (url, connection) {
-    return connection.play(await ytdl(url, { highWaterMark: 1 << 25 }), {
-      type: 'opus',
-      volume: volume / 10,
-      passes: 2
-    })
-  }
-
   async youtube () {
     // ex: !youtube videoURL
     // ex: !youtube channel videoURL
@@ -247,7 +239,7 @@ class Command {
 
     try {
       const connection = await channel.join()
-      dispatcher = await this.playVideo(url, connection)
+      dispatcher = await playVideo(url, connection, volume)
       this.bot.user.setActivity('YouTube.')
 
       dispatcher.on('finish', () => {
@@ -263,27 +255,48 @@ class Command {
     }
   }
 
+  async skipsong () {
+    if (playlist.length) {
+      dispatch = await playVideo(
+        playlist.shift().url_simple,
+        connection,
+        volume
+      )
+    }
+  }
+
   async youtubeplaylist () {
     let query
+    let channel
+    let channelName
+
     if (this.args.length) query = this.args.join(' ')
+
     if (!query) {
       this.message.channel.send('You need to supply a playlist.')
       return
     }
-    const channelName = this.message.member.voiceChannelID
-    if (this.args.length < 1) {
-      this.message.channel.send(
-        'You can to optionally supply a channel name, but a video URL is required.'
-      )
-      return
-    } else {
-      channelName = this.args.shift()
 
+    if (query.substring(0, 9).toLowerCase() === 'channel="') {
+      const queryIndex = query.indexOf('"', 11) + 2
+      channelName = query.substring(9, queryIndex - 2)
+      query = query.substring(queryIndex)
+    }
+
+    if (this.args.length < 1) {
+      this.message.channel.send('This command requires a video URL.')
+      return
+    } else if (channelName) {
       channel = this.message.guild.channels.cache.find(item => {
         return (
           item.name.toLowerCase() === channelName.toLowerCase() &&
           item.type === 'voice'
         )
+      })
+    } else {
+      channelName = this.message.member.voice.channelID
+      channel = this.message.guild.channels.cache.find(item => {
+        return item.id === channelName && item.type === 'voice'
       })
     }
 
@@ -291,22 +304,41 @@ class Command {
       if (playlist.length == 0) {
         return
       }
-      dispatcher = await this.playVideo(playlist.shift().url_simple, connection)
-      dispatcher.on('end', async () => {
+      dispatcher = await playVideo(
+        playlist.shift().url_simple,
+        connection,
+        volume
+      )
+
+      dispatcher.on('speaking', async speaking => {
+        if (!speaking) console.log('Dispatcher !Speaking Called')
         if (playlist.length === 0) {
           this.bot.user.setActivity(process.env.ACTIVITY)
           connection.disconnect()
           return
         }
 
-        await startPlaylist(playlist, connection)
+        if (!speaking) await startPlaylist(playlist, connection)
+      })
+
+      dispatcher.on('error', async err => {
+        console.log('Dispatcher Error:', err)
+        dispatcher = await playVideo(
+          playlist.shift().url_simple,
+          connection,
+          volume
+        )
       })
     }
 
     try {
+      console.log('Before Playlist', query)
       const playlist = await ytpl(query)
+      console.log('Playlist, Check')
       const connection = await channel.join()
+      console.log('Connection, Check')
       this.bot.user.setActivity('YouTube.')
+      console.log('Playlist Items Length:', playlist.items.length)
       await startPlaylist(playlist.items, connection)
     } catch (err) {
       if (err.message.includes('permission'))
