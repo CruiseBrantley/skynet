@@ -258,7 +258,7 @@ class Command {
   async skipsong () {
     if (playlist.length) {
       dispatch = await playVideo(
-        playlist.shift().url_simple,
+        playlist.shift().shortUrl,
         connection,
         volume
       )
@@ -305,7 +305,7 @@ class Command {
         return
       }
       dispatcher = await playVideo(
-        playlist.shift().url_simple,
+        playlist.shift().shortUrl,
         connection,
         volume
       )
@@ -324,7 +324,7 @@ class Command {
       dispatcher.on('error', async err => {
         console.log('Dispatcher Error:', err)
         dispatcher = await playVideo(
-          playlist.shift().url_simple,
+          playlist.shift().shortUrl,
           connection,
           volume
         )
@@ -332,11 +332,8 @@ class Command {
     }
 
     try {
-      console.log('Before Playlist', query)
       const playlist = await ytpl(query)
-      console.log('Playlist, Check')
       const connection = await channel.join()
-      console.log('Connection, Check')
       this.bot.user.setActivity('YouTube.')
       console.log('Playlist Items Length:', playlist.items.length)
       await startPlaylist(playlist.items, connection)
