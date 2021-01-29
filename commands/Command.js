@@ -311,8 +311,7 @@ class Command {
       )
 
       dispatcher.on('speaking', async speaking => {
-        if (!speaking) console.log('Dispatcher !Speaking Called')
-        if (playlist.length === 0) {
+        if (!speaking || playlist.length === 0) {
           this.bot.user.setActivity(process.env.ACTIVITY)
           connection.disconnect()
           return
