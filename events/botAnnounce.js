@@ -64,8 +64,9 @@ const streamCases = process.env.NODE_ENV === 'dev' ? testCases : prodCases
 
 function announce (bot, data, channel, type) {
   try {
-    bot.channels
-      .get(channel)
+    bot.channels.cache.find(item => {
+      return item.id === channel
+    })
       .send(
         `${type === 'friend' ? '' : '@everyone'} ${
           data.user_name
