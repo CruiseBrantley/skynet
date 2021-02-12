@@ -77,7 +77,7 @@ async function vote (message, args, database) {
       options[search].hasVoted.push(message.member.user.id)
       const votedFor = options[search].title
       message.channel.send(
-        `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\` or visit https://skynet-voting.web.app/`
+        `Your vote for \`${votedFor}\` has been recorded, to see results use \`!vote\` or visit <https://skynet-voting.web.app/>`
       )
       const sortedOptions = options.sort((item1, item2) =>
         ((item1.hasVoted && item1.hasVoted.length) || 0) <
