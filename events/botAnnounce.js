@@ -11,7 +11,7 @@ const iaj = process.env.I_AM_JEFF_ID
 const siri4n = process.env.SIRI4N_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha]
+const fireFriends = [cyphane, cha, siri4n]
 const siri4nFriends = [siri4n]
 
 const prodCases = [
