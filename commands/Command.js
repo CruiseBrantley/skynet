@@ -202,44 +202,55 @@ class Command {
 
   async youtube () {
     // ex: !youtube videoURL
-    // ex: !youtube channel videoURL
+    // ex: !youtube channel="Channel Name" videoURL
+    let query
+    let channel
     let channelName
-    if (this.args.length < 1) {
-      this.message.channel.send(
-        'You can to optionally supply a channel name, but a video URL is required.'
-      )
-      return
-    } else if (this.args.length < 2) {
-      // channel = this.message.member.voice.channel;
-      channelName = this.message.member.voice.channelID
-      channel = this.message.guild.channels.cache.find(item => {
-        return item.id === channelName && item.type === 'voice'
-      })
-    } else {
-      channelName = this.args.shift()
 
+    if (this.args.length) query = this.args.join(' ')
+
+    if (!query) {
+      this.message.channel.send('You need to supply a video.')
+      return
+    }
+
+    if (query.substring(0, 9).toLowerCase() === 'channel="') {
+      const queryIndex = query.indexOf('"', 11) + 2
+      channelName = query.substring(9, queryIndex - 2)
+      query = query.substring(queryIndex)
+    }
+
+    if (this.args.length < 1) {
+      this.message.channel.send('This command requires a video URL.')
+      return
+    } else if (channelName) {
       channel = this.message.guild.channels.cache.find(item => {
         return (
           item.name.toLowerCase() === channelName.toLowerCase() &&
           item.type === 'voice'
         )
       })
+    } else {
+      channelName = this.message.member.voice.channelID
+      channel = this.message.guild.channels.cache.find(item => {
+        return item.id === channelName && item.type === 'voice'
+      })
     }
+
     if (channel === undefined || channel === null || channel.length < 1) {
       this.message.channel.send(
         "Hmmm, it seems I couldn't find that channel. You need to join a voice channel or specify a valid channel name."
       )
       return
     }
-    let url = this.args.shift()
 
-    if (url === 'red' && lastSearch.length) url = lastSearch[0].link
-    if (url === 'orange' && lastSearch.length) url = lastSearch[1].link
-    if (url === 'yellow' && lastSearch.length) url = lastSearch[2].link
+    if (query === 'red' && lastSearch.length) query = lastSearch[0].link
+    if (query === 'orange' && lastSearch.length) query = lastSearch[1].link
+    if (query === 'yellow' && lastSearch.length) query = lastSearch[2].link
 
     try {
       const connection = await channel.join()
-      dispatcher = await playVideo(url, connection, volume)
+      dispatcher = await playVideo(query, connection, volume)
       this.bot.user.setActivity('YouTube.')
 
       dispatcher.on('finish', () => {
