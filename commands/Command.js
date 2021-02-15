@@ -204,8 +204,8 @@ class Command {
     // ex: !youtube videoURL
     // ex: !youtube channel="Channel Name" videoURL
     let query
-    let channel
     let channelName
+    channel = undefined
 
     if (this.args.length) query = this.args.join(' ')
 
@@ -278,8 +278,8 @@ class Command {
 
   async youtubeplaylist () {
     let query
-    let channel
     let channelName
+    channel = undefined
 
     if (this.args.length) query = this.args.join(' ')
 
