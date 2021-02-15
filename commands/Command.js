@@ -13,7 +13,7 @@ const { topicFile, trackNewTopic } = require('../events/twitter.js')
 const decode = require('unescape')
 let dispatcher = {}
 let channel
-let volume = 0.2
+let volume = 5
 let lastSearch = []
 let gameSessionID = 0
 
@@ -52,15 +52,15 @@ class Command {
       return
     }
 
-    if (!(this.args[0] >= 0 && this.args[0] <= 20)) {
+    if (!(this.args[0] >= 0 && this.args[0] <= 200)) {
       this.message.channel.send(
-        'The Volume must be between 0 and 20 (default is 5).'
+        'The Volume must be between 0 and 10 (default is 5).'
       )
       return
     }
     volume = this.args.shift()
     if (dispatcher.setVolume) {
-      dispatcher.setVolume(volume / 10)
+      dispatcher.setVolume(volume)
     }
     this.message.channel.send(`Setting current volume to ${volume}.`)
   }
