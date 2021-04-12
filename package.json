@@ -22,6 +22,8 @@
 		"parse-time": "^0.1.4",
 		"public-ip": "^3.2.0",
 		"snekfetch": "^4.0.4",
+		"twitch": "^4.4.12",
+		"twitch-auth": "^4.4.12",
 		"unescape": "^1.0.1",
 		"winston": "^3.2.1",
 		"youtube-search": "^1.1.4",
