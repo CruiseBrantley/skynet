@@ -30,7 +30,7 @@ class Command {
     if (dispatcher.destroy) {
       dispatcher.destroy()
       this.bot.user.setActivity(process.env.ACTIVITY)
-      channel.leave()
+      if (channel && channel.leave) channel.leave()
     }
   }
 
