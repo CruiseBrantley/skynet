@@ -151,9 +151,12 @@ class Command {
           .join()
           .then(connection => {
             dispatcher = connection.play(url)
-
+            
             dispatcher.on('end', () => {
-              channel.leave()
+              setTimeout(() => {
+                connection.disconnect()
+                channel.leave()
+              }, 2000)
             })
           })
           .catch(err => logger.info('channel join error: ', err))

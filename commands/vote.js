@@ -1,6 +1,4 @@
-const fs = require('fs')
 const logger = require('../logger')
-let voteTopic = {}
 
 function eligibleChannel (message) {
   // if (!(message.channel.id === "592718526083498014" || message.channel.id === "579568174392147968")) {
