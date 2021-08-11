@@ -12,6 +12,7 @@ const siri4n = process.env.SIRI4N_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
 const fireFriends = [cyphane, cha, siri4n]
+const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
 const prodCases = [
@@ -44,6 +45,11 @@ const prodCases = [
     case: [bfd],
     channel: process.env.BFD_ANNOUNCE_CHANNEL,
     type: 'main'
+  },
+  {
+    case: sirverFriends,
+    channel: process.env.SIRVER_ANNOUNCE_CHANNEL,
+    type: 'friend'
   }
 ]
 
