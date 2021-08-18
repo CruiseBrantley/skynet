@@ -65,7 +65,7 @@ class Command {
     this.message.channel.send(`Setting current volume to ${volume}.`)
   }
 
-  speak () {
+  speak() {
     // ex: !speak The words to be said in my voice channel
     try {
       const channelName = this.message.member.voice.channelID
@@ -96,7 +96,9 @@ class Command {
       )
       return
     }
-    googleTTS(speakMessage, 'en', 1).then(url => {
+    console.log('Google TTS', googleTTS)
+    const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' })
+    try {
       channel
         .join()
         .then(connection => {
@@ -107,8 +109,9 @@ class Command {
             }, 2000)
           })
         })
-        .catch(err => logger.info('Encountered an error: ', err))
-    })
+    } catch (err) {
+      logger.info('Encountered an error: ', err)
+    }
   }
 
   speakchannel () {
