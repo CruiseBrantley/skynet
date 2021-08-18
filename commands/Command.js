@@ -255,6 +255,7 @@ class Command {
       const connection = await channel.join()
       dispatcher = await playVideo(query, connection, volume)
       this.bot.user.setActivity('YouTube.')
+      dispatcher.setVolume(volume)
 
       dispatcher.on('finish', () => {
         this.bot.user.setActivity(process.env.ACTIVITY)
