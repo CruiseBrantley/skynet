@@ -1,37 +1,43 @@
 const axios = require('axios')
 const publicIp = require('public-ip')
-const bodyParser = require('body-parser')
 const botAnnounce = require('../events/botAnnounce')
 const logger = require('../logger')
 const oauth = require('./oauth')
 const express = require('express')
 const server = express()
-const port =
-  process.env.NODE_ENV === 'dev' ? 3001 : process.env.TWITCH_LISTEN_PORT
-console.log(port)
+const port = process.env.TWITCH_LISTEN_PORT
 
-server.use(bodyParser.json())
+server.use(express.json())
 
 let streamID
 let oauthToken
 async function subscribe (id) {
   const data = {
-    'hub.callback': `http://${await publicIp.v4()}:${port}/`,
-    'hub.mode': 'subscribe',
-    'hub.lease_seconds': 86400,
-    'hub.topic': `https://api.twitch.tv/helix/streams?user_id=${id}`
+    version: "1",
+    type: "channel.follow",
+    "condition": {
+      "broadcaster_user_id": id
+    },
+    "transport": {
+      "method": "webhook",
+      "callback": `https://${await publicIp.v4()}:${port}/`,
+      "secret": "abcdefghij0123456789"
+    }
   }
   axios
-    .post('https://api.twitch.tv/helix/webhooks/hub', data, {
+    .post('https://api.twitch.tv/helix/eventsub/subscriptions', data, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
-        Authorization: `Bearer ${oauthToken}`
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json'
       }
     })
     .then(res =>
       logger.info('Successfully subscribed to Twitch Updates for ' + id)
     )
-    .catch(err => logger.info('Failed Subscribing for' + id + err))
+    .catch(err => {
+      logger.info(`Failed Subscribing for ${id} ${err.message}`)
+    })
 }
 
 async function subscribeAll () {

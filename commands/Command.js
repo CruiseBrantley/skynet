@@ -65,7 +65,7 @@ class Command {
     this.message.channel.send(`Setting current volume to ${volume}.`)
   }
 
-  speak () {
+  speak() {
     // ex: !speak The words to be said in my voice channel
     try {
       const channelName = this.message.member.voice.channelID
@@ -96,22 +96,24 @@ class Command {
       )
       return
     }
-    googleTTS(speakMessage, 'en', 1).then(url => {
+    const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' })
+    try {
       channel
         .join()
         .then(connection => {
           dispatcher = connection.play(url)
-          dispatcher.on('end', () => {
+          dispatcher.on('finish', () => {
             setTimeout(() => {
               connection.disconnect()
             }, 2000)
           })
         })
-        .catch(err => logger.info('Encountered an error: ', err))
-    })
+    } catch (err) {
+      logger.info('Encountered an error: ', err)
+    }
   }
 
-  speakchannel () {
+  speakchannel() {
     // ex: !sc General The words to be said in General voice channel
     let channelName
     let speakMessage
@@ -133,35 +135,33 @@ class Command {
       logger.info(err)
       return
     }
-    googleTTS(speakMessage, 'en', 1)
-      .then(url => {
-        const channel = this.message.guild.channels.cache.find(item => {
-          return (
-            item.name.toLowerCase() === channelName.toLowerCase() &&
-            item.type === 'voice'
-          )
-        })
-        if (channel === undefined || null) {
-          this.message.channel.send(
-            "Hmmm, it seems I couldn't find that channel."
-          )
-          return
-        }
-        channel
-          .join()
-          .then(connection => {
-            dispatcher = connection.play(url)
-            
-            dispatcher.on('end', () => {
-              setTimeout(() => {
-                connection.disconnect()
-                channel.leave()
-              }, 2000)
-            })
-          })
-          .catch(err => logger.info('channel join error: ', err))
+    const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' })
+    try {
+      const channel = this.message.guild.channels.cache.find(item => {
+        return (
+          item.name.toLowerCase() === channelName.toLowerCase() &&
+          item.type === 'voice'
+        )
       })
-      .catch(err => logger.info('googleTTS error: ', err))
+      if (channel === undefined || null) {
+        this.message.channel.send(
+          "Hmmm, it seems I couldn't find that channel."
+        )
+        return
+      }
+      channel
+        .join()
+        .then(connection => {
+          dispatcher = connection.play(url)
+          dispatcher.on('finish', () => {
+            setTimeout(() => {
+              connection.disconnect()
+            }, 2000)
+          })
+        })
+    } catch (err) {
+      logger.info('Encountered an error: ', err)
+    }
   }
 
   searchyoutube () {
@@ -271,7 +271,7 @@ class Command {
   }
 
   async skipsong () {
-    if (playlist.length) {
+    if (playlist && playlist.length) {
       dispatch = await playVideo(
         playlist.shift().shortUrl,
         connection,
