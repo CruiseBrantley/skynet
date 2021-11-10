@@ -20,7 +20,7 @@ async function subscribe (id) {
     },
     "transport": {
       "method": "webhook",
-      "callback": `https://${await publicIp.v4()}:${port}/`,
+      "callback": "https://05ff-2600-1700-6750-5f3f-00-574.ngrok.io",
       "secret": "abcdefghij0123456789"
     }
   }
