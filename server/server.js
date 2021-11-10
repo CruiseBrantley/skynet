@@ -92,13 +92,13 @@ function setupServer (bot) {
     logger.info('Post Received.')
     console.log(req.body)
 
-    if (req.query['challenge']) {
+    if (req.body.challenge) {
       // Called on initial subscription
-      logger.info('Get: ' + req.query['challenge'])
+      logger.info('Get: ' + req.body.challenge)
       res
         .status(200)
         .type('text/plain')
-        .send(req.query['hub.challenge'])
+        .send(req.body.challenge)
     }
 
     else if (
