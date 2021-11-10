@@ -91,7 +91,17 @@ function setupServer (bot) {
     // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
     console.log(req.body)
-    if (
+
+    if (req.query['challenge']) {
+      // Called on initial subscription
+      logger.info('Get: ' + req.query['challenge'])
+      res
+        .status(200)
+        .type('text/plain')
+        .send(req.query['hub.challenge'])
+    }
+
+    else if (
       req.body &&
       req.body.data &&
       req.body.data.length > 0 &&
