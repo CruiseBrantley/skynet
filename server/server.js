@@ -94,7 +94,7 @@ function setupServer (bot) {
 
     if (req.body.challenge) {
       // Called on initial subscription
-      logger.info('Get: ' + req.body.challenge)
+      logger.info('Challenge Token: ' + req.body.challenge)
       res
         .status(200)
         .type('text/plain')
@@ -113,10 +113,6 @@ function setupServer (bot) {
       botAnnounce(bot, betterResponse)
       streamID = betterResponse.id
     }
-    res
-      .status(200)
-      .type('text/plain')
-      .send(req.query['hub.challenge'])
   })
 
   server.listen(port, () =>
