@@ -90,6 +90,7 @@ function setupServer (bot) {
     // Called when new stream is detected
     // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
+    console.log(req.body)
     if (
       req.body &&
       req.body.data &&
