@@ -98,7 +98,7 @@ async function getChannelInfo (id) {
         Authorization: `Bearer ${oauthToken}`
       }
     })
-    if (res && res.data && res.data.length) {
+    if (res && res.data) {
       console.log('channel response data:', res.data)
       return res.data[0]
       // logger.info(`Looked up data for: ${response.name}`)
