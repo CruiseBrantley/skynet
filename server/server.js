@@ -14,7 +14,7 @@ let oauthToken
 async function subscribe (id) {
   const data = {
     version: "1",
-    type: "channel.follow",
+    type: "stream.online",
     "condition": {
       "broadcaster_user_id": id
     },
@@ -72,10 +72,11 @@ function getGameInfo (id) {
 
 function setupServer (bot) {
   subscribeAll()
-  setInterval(() => {
-    // Twitch times out subscriptions, this ensures they're renewed
-    subscribeAll()
-  }, 86400 * 100) // s to ms
+  // this part may be unnecessary now
+  // setInterval(() => {
+  //   // Twitch times out subscriptions, this ensures they're renewed
+  //   subscribeAll()
+  // }, 86400 * 100) // s to ms
 
   server.get('/', async (req, res) => {
     // Called on initial subscription
