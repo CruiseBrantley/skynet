@@ -51,23 +51,65 @@ async function subscribeAll () {
   subscribe(process.env.I_AM_JEFF_ID)
 }
 
-function getGameInfo (id) {
-  return axios
-    .get(`https://api.twitch.tv/helix/games?id=${id}`, {
+// function getGameInfo (id) {
+//   return axios
+//     .get(`https://api.twitch.tv/helix/games?id=${id}`, {
+//       headers: {
+//         'Client-ID': process.env.TWITCH_CLIENTID,
+//         Authorization: `Bearer ${oauthToken}`
+//       }
+//     })
+//     .then(res => {
+//       if (res && res.data && res.data.data && res.data.data.length) {
+//         const response = res.data.data[0]
+//         logger.info(`Looked up data for: ${response.name}`)
+//         return { game_name: response.name, game_image: response.box_art_url }
+//       }
+//       logger.info("Response wasn't right, or there was no game:\n ", res)
+//     })
+//     .catch(err => logger.info("Couldn't get game info: " + err))
+// }
+
+async function getGameInfo (id) {
+  try {
+    const res = await axios.get(`https://api.twitch.tv/helix/games?id=${id}`, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
         Authorization: `Bearer ${oauthToken}`
       }
     })
-    .then(res => {
-      if (res && res.data && res.data.data && res.data.data.length) {
-        const response = res.data.data[0]
-        logger.info(`Looked up data for: ${response.name}`)
-        return { game_name: response.name, game_image: response.box_art_url }
+    if (res && res.data && res.data.data && res.data.data.length) {
+      const response = res.data.data[0]
+      logger.info(`Looked up data for: ${response.name}`)
+      return { game_name: response.name, game_image: response.box_art_url }
+    }
+    logger.info("Response wasn't right, or there was no game:\n ", res)
+  }
+  catch(err) {
+    logger.info("Couldn't get game info: " + err)
+  }
+}
+
+async function getUserInfo (id) {
+  try {
+    const res = await axios.get(`https://api.twitch.tv/helix/users?id=${id}`, {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENTID,
+        Authorization: `Bearer ${oauthToken}`
       }
-      logger.info("Response wasn't right, or there was no game:\n ", res)
     })
-    .catch(err => logger.info("Couldn't get game info: " + err))
+    if (res && res.data && res.data.data && res.data.data.length) {
+      console.log('user response:', res.data)
+      const response = res.data.data[0]
+      console.log('response:', response)
+      // logger.info(`Looked up data for: ${response.name}`)
+      // return { game_name: response.name, game_image: response.box_art_url }
+    }
+    logger.info("Response wasn't right, or there was no user:\n ", res)
+  }
+  catch(err) {
+    logger.info("Couldn't get user info: " + err)
+  }
 }
 
 function setupServer (bot) {
@@ -91,28 +133,28 @@ function setupServer (bot) {
     // Called when new stream is detected
     // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
-    console.log(req.body)
+    const { body } = req
+    console.log(body)
 
-    if (req.body.challenge) {
+    if (body.challenge) {
       // Called on initial subscription
-      logger.info('Challenge Token: ' + req.body.challenge)
+      logger.info('Challenge Token: ' + body.challenge)
       res
         .status(200)
         .type('text/plain')
-        .send(req.body.challenge)
+        .send(body.challenge)
     }
 
     else if (
-      req.body &&
-      req.body.data &&
-      req.body.data.length > 0 &&
-      req.body.data[0].id !== streamID
+      body &&
+      body.subscription &&
+      body.subscription.id !== streamID
     ) {
-      const response = req.body.data[0]
-      const gameInfo = await getGameInfo(response.game_id)
-      const betterResponse = { ...response, ...gameInfo }
-      botAnnounce(bot, betterResponse)
-      streamID = betterResponse.id
+      getUserInfo(body.event.broadcaster_user_id)
+      // const gameInfo = await getGameInfo(response.game_id)
+      // const betterResponse = { ...response, ...gameInfo }
+      // botAnnounce(bot, betterResponse)
+      // streamID = betterResponse.id
     }
   })
 
