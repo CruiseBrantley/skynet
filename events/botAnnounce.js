@@ -9,9 +9,10 @@ const bfd = process.env.BFD_ID
 const dale = process.env.DALE_ID
 const iaj = process.env.I_AM_JEFF_ID
 const siri4n = process.env.SIRI4N_ID
+const whitehallow = process.env.WHITEHALLOW_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha, siri4n]
+const fireFriends = [cyphane, cha, siri4n, whitehallow]
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
@@ -113,6 +114,7 @@ async function botAnnounce (bot, data) {
 
     for (const streamCase of streamCases)
       if (streamCase.case.includes(data.user_id)) {
+        logger.info('Announcing ', data.user_name)
         announce(bot, data, streamCase.channel, streamCase.type)
       }
   } catch (err) {

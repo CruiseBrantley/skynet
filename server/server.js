@@ -49,6 +49,7 @@ async function subscribeAll () {
   subscribe(process.env.BFD_ID)
   subscribe(process.env.DALE_ID)
   subscribe(process.env.I_AM_JEFF_ID)
+  subscribe(process.env.WHITEHALLOW_ID)
 }
 
 // function getGameInfo (id) {
@@ -99,12 +100,9 @@ async function getChannelInfo (id) {
       }
     })
     if (res && res.data && res.data.data && res.data.data.length) {
-      console.log('channel response data:', res.data)
       return res.data.data[0]
-      // logger.info(`Looked up data for: ${response.name}`)
-      // return { game_name: response.name, game_image: response.box_art_url }
     }
-    logger.info("Response wasn't right, or there was no user:\n ", res.data)
+    logger.info("Response wasn't right, or there was no channel:\n ", res.data)
   }
   catch(err) {
     logger.info("Couldn't get channel info: " + err)
@@ -153,6 +151,7 @@ function setupServer (bot) {
       console.log('channel info response:', response)
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
+      console.log('Better Response:', betterResponse)
       botAnnounce(bot, betterResponse)
       streamID = betterResponse.id
     }
