@@ -19,7 +19,7 @@ async function subscribe (id) {
     },
     "transport": {
       "method": "webhook",
-      "callback": "https://9407-2600-1700-6750-5f3f-00-574.ngrok.io/",
+      "callback": "https://c6a6-2600-1700-6750-5f3f-00-574.ngrok.io",
       "secret": "abcdefghij0123456789"
     }
   }
