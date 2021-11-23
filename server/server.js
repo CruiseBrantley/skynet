@@ -1,5 +1,4 @@
 const axios = require('axios')
-const publicIp = require('public-ip')
 const botAnnounce = require('../events/botAnnounce')
 const logger = require('../logger')
 const oauth = require('./oauth')
@@ -50,26 +49,8 @@ async function subscribeAll () {
   subscribe(process.env.DALE_ID)
   subscribe(process.env.I_AM_JEFF_ID)
   subscribe(process.env.WHITEHALLOW_ID)
+  subscribe(process.env.DEKU_ID)
 }
-
-// function getGameInfo (id) {
-//   return axios
-//     .get(`https://api.twitch.tv/helix/games?id=${id}`, {
-//       headers: {
-//         'Client-ID': process.env.TWITCH_CLIENTID,
-//         Authorization: `Bearer ${oauthToken}`
-//       }
-//     })
-//     .then(res => {
-//       if (res && res.data && res.data.data && res.data.data.length) {
-//         const response = res.data.data[0]
-//         logger.info(`Looked up data for: ${response.name}`)
-//         return { game_name: response.name, game_image: response.box_art_url }
-//       }
-//       logger.info("Response wasn't right, or there was no game:\n ", res)
-//     })
-//     .catch(err => logger.info("Couldn't get game info: " + err))
-// }
 
 async function getGameInfo (id) {
   try {

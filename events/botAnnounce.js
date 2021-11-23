@@ -10,9 +10,10 @@ const dale = process.env.DALE_ID
 const iaj = process.env.I_AM_JEFF_ID
 const siri4n = process.env.SIRI4N_ID
 const whitehallow = process.env.WHITEHALLOW_ID
+const deku = process.env.DEKU_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha, siri4n, whitehallow]
+const fireFriends = [cyphane, cha, siri4n, whitehallow, deku]
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
