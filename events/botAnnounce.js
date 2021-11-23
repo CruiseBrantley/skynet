@@ -101,6 +101,7 @@ function announce (bot, data, channel, type) {
 }
 
 async function botAnnounce (bot, data) {
+  console.log('Called botAnnounce', data)
   try {
     const image = await fetch.get(
       data.game_image
