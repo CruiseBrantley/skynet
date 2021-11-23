@@ -90,25 +90,23 @@ async function getGameInfo (id) {
   }
 }
 
-async function getUserInfo (id) {
+async function getChannelInfo (id) {
   try {
-    const res = await axios.get(`https://api.twitch.tv/helix/users?id=${id}`, {
+    const res = await axios.get(`https://api.twitch.tv/helix/channels?id=${id}`, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
         Authorization: `Bearer ${oauthToken}`
       }
     })
     if (res && res.data && res.data.data && res.data.data.length) {
-      console.log('user response:', res.data)
-      const response = res.data.data[0]
-      console.log('response:', response)
+      return res.data.data[0]
       // logger.info(`Looked up data for: ${response.name}`)
       // return { game_name: response.name, game_image: response.box_art_url }
     }
-    logger.info("Response wasn't right, or there was no user:\n ", res)
+    logger.info("Response wasn't right, or there was no user:\n ", res.data)
   }
   catch(err) {
-    logger.info("Couldn't get user info: " + err)
+    logger.info("Couldn't get channel info: " + err)
   }
 }
 
@@ -150,11 +148,12 @@ function setupServer (bot) {
       body.subscription &&
       body.subscription.id !== streamID
     ) {
-      getUserInfo(body.event.broadcaster_user_id)
-      // const gameInfo = await getGameInfo(response.game_id)
-      // const betterResponse = { ...response, ...gameInfo }
-      // botAnnounce(bot, betterResponse)
-      // streamID = betterResponse.id
+      const response = getChannelInfo(body.event.broadcaster_user_id)
+      console.log('channel info response:', response)
+      const gameInfo = await getGameInfo(response.game_id)
+      const betterResponse = { ...response, ...gameInfo }
+      botAnnounce(bot, betterResponse)
+      streamID = betterResponse.id
     }
   })
 
