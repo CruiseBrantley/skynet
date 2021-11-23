@@ -114,7 +114,7 @@ async function botAnnounce (bot, data) {
 
     for (const streamCase of streamCases)
       if (streamCase.case.includes(data.broadcaster_id)) {
-        logger.info('Announcing ', data.broadcaster_name)
+        logger.info(`Announcing: ${data.broadcaster_name} ${streamCase.channel} ${streamCase.type}`)
         announce(bot, data, streamCase.channel, streamCase.type)
       }
   } catch (err) {
