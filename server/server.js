@@ -131,7 +131,6 @@ function setupServer (bot) {
     // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
     const { body } = req
-    console.log(body)
 
     if (body.challenge) {
       // Called on initial subscription
@@ -148,10 +147,8 @@ function setupServer (bot) {
       body.subscription.id !== streamID
     ) {
       const response = await getChannelInfo(body.event.broadcaster_user_id)
-      console.log('channel info response:', response)
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
-      console.log('Better Response:', betterResponse)
       botAnnounce(bot, betterResponse)
       streamID = betterResponse.id
     }

@@ -111,7 +111,10 @@ async function botAnnounce (bot, data) {
             .replace('{height}', '577')
     )
 
+    console.log('before file write')
     fs.writeFileSync('image.jpg', image.body, 'binary')
+
+    console.log('after file write')
 
     for (const streamCase of streamCases)
       if (streamCase.case.includes(data.user_id)) {
