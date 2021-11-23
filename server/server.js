@@ -83,7 +83,7 @@ async function getGameInfo (id) {
       logger.info(`Looked up data for: ${response.name}`)
       return { game_name: response.name, game_image: response.box_art_url }
     }
-    logger.info("Response wasn't right, or there was no game:\n ", res)
+    logger.info("Response wasn't right, or there was no game:\n ", res.data)
   }
   catch(err) {
     logger.info("Couldn't get game info: " + err)
@@ -148,7 +148,7 @@ function setupServer (bot) {
       body.subscription &&
       body.subscription.id !== streamID
     ) {
-      const response = getChannelInfo(body.event.broadcaster_user_id)
+      const response = await getChannelInfo(body.event.broadcaster_user_id)
       console.log('channel info response:', response)
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
