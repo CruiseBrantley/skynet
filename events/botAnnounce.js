@@ -76,16 +76,16 @@ function announce (bot, data, channel, type) {
     })
       .send(
         `${type === 'friend' ? '' : '@everyone'} ${
-          data.user_name
-        } has gone Live! https://www.twitch.tv/${data.user_name}`,
+          data.broadcaster_name
+        } has gone Live! https://www.twitch.tv/${data.broadcaster_name}`,
         {
           embed: {
             author: {
-              name: `${data.user_name} is Streaming ${
+              name: `${data.broadcaster_name} is Streaming ${
                 data.game_name ? `${data.game_name} ` : ''
               }on Twitch!`
             },
-            url: `https://www.twitch.tv/${data.user_name}`,
+            url: `https://www.twitch.tv/${data.broadcaster_name}`,
             title: data.title,
             image: {
               url: 'attachment://image.jpg'
@@ -101,7 +101,6 @@ function announce (bot, data, channel, type) {
 }
 
 async function botAnnounce (bot, data) {
-  console.log('Called botAnnounce', data)
   try {
     const image = await fetch.get(
       data.game_image
@@ -111,14 +110,11 @@ async function botAnnounce (bot, data) {
             .replace('{height}', '577')
     )
 
-    console.log('before file write')
     fs.writeFileSync('image.jpg', image.body, 'binary')
 
-    console.log('after file write')
-
     for (const streamCase of streamCases)
-      if (streamCase.case.includes(data.user_id)) {
-        logger.info('Announcing ', data.user_name)
+      if (streamCase.case.includes(data.broadcaster_id)) {
+        logger.info('Announcing ', data.broadcaster_name)
         announce(bot, data, streamCase.channel, streamCase.type)
       }
   } catch (err) {
