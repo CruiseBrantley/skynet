@@ -92,7 +92,7 @@ async function getGameInfo (id) {
 
 async function getChannelInfo (id) {
   try {
-    const res = await axios.get(`https://api.twitch.tv/helix/channels?id=${id}`, {
+    const res = await axios.get(`https://api.twitch.tv/helix/channels?broadcaster_id=${id}`, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
         Authorization: `Bearer ${oauthToken}`
