@@ -98,8 +98,9 @@ async function getChannelInfo (id) {
         Authorization: `Bearer ${oauthToken}`
       }
     })
-    if (res && res.data && res.data.data && res.data.data.length) {
-      return res.data.data[0]
+    if (res && res.data && res.data.length) {
+      console.log('channel response data:', res.data)
+      return res.data[0]
       // logger.info(`Looked up data for: ${response.name}`)
       // return { game_name: response.name, game_image: response.box_art_url }
     }
