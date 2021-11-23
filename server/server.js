@@ -150,7 +150,7 @@ function setupServer (bot) {
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
       botAnnounce(bot, betterResponse)
-      streamID = betterResponse.id
+      streamID = body.subscription.id
     }
   })
 
