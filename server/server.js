@@ -3,6 +3,7 @@ const botAnnounce = require('../events/botAnnounce')
 const logger = require('../logger')
 const oauth = require('./oauth')
 const express = require('express')
+const ngrok = require('ngrok')
 const server = express()
 const port = process.env.TWITCH_LISTEN_PORT
 
@@ -10,6 +11,22 @@ server.use(express.json())
 
 let streamID
 let oauthToken
+
+const getURL = async () => {
+  try {
+    const url = await ngrok.connect({
+      addr: port,
+      authtoken: process.env.NGROK_AUTH_TOKEN
+    })
+    logger.info('Ngrok URL: ' + url)
+    return url
+  } catch (err) {
+    logger.info('Ngrok Error: ' + err)
+  }
+}
+
+const url = getURL()
+
 async function subscribe (id) {
   const data = {
     version: "1",
@@ -19,7 +36,7 @@ async function subscribe (id) {
     },
     "transport": {
       "method": "webhook",
-      "callback": "https://c6a6-2600-1700-6750-5f3f-00-574.ngrok.io",
+      "callback": await url,
       "secret": "abcdefghij0123456789"
     }
   }
