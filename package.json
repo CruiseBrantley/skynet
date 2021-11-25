@@ -37,6 +37,7 @@
 	"scripts": {
 		"test": "jest",
 		"dev-env": "cross-env NODE_ENV=dev node bot.js",
+		"prod-env": "cross-env NODE_ENV=prod node bot.js",
 		"run": "node bot.js"
 	},
 	"jest": {
