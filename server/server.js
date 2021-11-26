@@ -1,9 +1,9 @@
 const axios = require('axios')
-const publicIp = require('public-ip')
 const botAnnounce = require('../events/botAnnounce')
 const logger = require('../logger')
 const oauth = require('./oauth')
 const express = require('express')
+const getURL = require('./ngrok')
 const server = express()
 const port = process.env.TWITCH_LISTEN_PORT
 
@@ -11,16 +11,18 @@ server.use(express.json())
 
 let streamID
 let oauthToken
+
+const url = getURL()
 async function subscribe (id) {
   const data = {
     version: "1",
-    type: "channel.follow",
+    type: "stream.online",
     "condition": {
       "broadcaster_user_id": id
     },
     "transport": {
       "method": "webhook",
-      "callback": `https://${await publicIp.v4()}:${port}/`,
+      "callback": await url,
       "secret": "abcdefghij0123456789"
     }
   }
@@ -49,33 +51,55 @@ async function subscribeAll () {
   subscribe(process.env.BFD_ID)
   subscribe(process.env.DALE_ID)
   subscribe(process.env.I_AM_JEFF_ID)
+  subscribe(process.env.WHITEHALLOW_ID)
+  subscribe(process.env.DEKU_ID)
 }
 
-function getGameInfo (id) {
-  return axios
-    .get(`https://api.twitch.tv/helix/games?id=${id}`, {
+async function getGameInfo (id) {
+  try {
+    const res = await axios.get(`https://api.twitch.tv/helix/games?id=${id}`, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
         Authorization: `Bearer ${oauthToken}`
       }
     })
-    .then(res => {
-      if (res && res.data && res.data.data && res.data.data.length) {
-        const response = res.data.data[0]
-        logger.info(`Looked up data for: ${response.name}`)
-        return { game_name: response.name, game_image: response.box_art_url }
+    if (res && res.data && res.data.data && res.data.data.length) {
+      const response = res.data.data[0]
+      logger.info(`Looked up data for: ${response.name}`)
+      return { game_name: response.name, game_image: response.box_art_url }
+    }
+    logger.info("Response wasn't right, or there was no game:\n ", res.data)
+  }
+  catch(err) {
+    logger.info("Couldn't get game info: " + err)
+  }
+}
+
+async function getChannelInfo (id) {
+  try {
+    const res = await axios.get(`https://api.twitch.tv/helix/channels?broadcaster_id=${id}`, {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENTID,
+        Authorization: `Bearer ${oauthToken}`
       }
-      logger.info("Response wasn't right, or there was no game:\n ", res)
     })
-    .catch(err => logger.info("Couldn't get game info: " + err))
+    if (res && res.data && res.data.data && res.data.data.length) {
+      return res.data.data[0]
+    }
+    logger.info("Response wasn't right, or there was no channel:\n ", res.data)
+  }
+  catch(err) {
+    logger.info("Couldn't get channel info: " + err)
+  }
 }
 
 function setupServer (bot) {
   subscribeAll()
-  setInterval(() => {
-    // Twitch times out subscriptions, this ensures they're renewed
-    subscribeAll()
-  }, 86400 * 100) // s to ms
+  // this part may be unnecessary now
+  // setInterval(() => {
+  //   // Twitch times out subscriptions, this ensures they're renewed
+  //   subscribeAll()
+  // }, 86400 * 100) // s to ms
 
   server.get('/', async (req, res) => {
     // Called on initial subscription
@@ -90,22 +114,28 @@ function setupServer (bot) {
     // Called when new stream is detected
     // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
-    if (
-      req.body &&
-      req.body.data &&
-      req.body.data.length > 0 &&
-      req.body.data[0].id !== streamID
+    const { body } = req
+
+    if (body.challenge) {
+      // Called on initial subscription
+      logger.info('Challenge Token: ' + body.challenge)
+      res
+        .status(200)
+        .type('text/plain')
+        .send(body.challenge)
+    }
+
+    else if (
+      body &&
+      body.subscription &&
+      body.subscription.id !== streamID
     ) {
-      const response = req.body.data[0]
+      const response = await getChannelInfo(body.event.broadcaster_user_id)
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
       botAnnounce(bot, betterResponse)
-      streamID = betterResponse.id
+      streamID = body.subscription.id
     }
-    res
-      .status(200)
-      .type('text/plain')
-      .send(req.query['hub.challenge'])
   })
 
   server.listen(port, () =>
