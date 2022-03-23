@@ -360,6 +360,15 @@ class Command {
     }
   }
 
+  async time () {
+    let query
+    if (this.args.length) query = this.args.join(' ')
+    // Use user date/time or if not supplied current time
+    const date = query ? new Date(query) : new Date()
+    const time = Math.floor(date.valueOf().toString()/1000.0)
+    this.message.channel.send(`<t:${time}:R> <t:${time}:F> \`<t:${time}>\``)
+  }
+
   async ping () {
     // ex: !ping
     const m = await this.message.channel.send('Ping?')

@@ -76,6 +76,9 @@ function chatCommand (command) {
     case 'voteclear':
       command.voteclear()
       break
+    case 'time':
+      command.time()
+      break
     case 'whi':
     case 'wafflehouse':
     case 'wafflehouseindex':
