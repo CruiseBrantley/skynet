@@ -360,13 +360,18 @@ class Command {
     }
   }
 
-  async time () {
+  time () {
     let query
     if (this.args.length) query = this.args.join(' ')
     // Use user date/time or if not supplied current time
     const date = query ? new Date(query) : new Date()
-    const time = Math.floor(date.valueOf().toString()/1000.0)
-    this.message.channel.send(`<t:${time}:R> <t:${time}:F> \`<t:${time}>\``)
+    if (isNaN(date.valueOf())) {
+      this.message.channel.send('I have no idea what date that is.')
+      return
+    }
+    let time = Math.floor(date.valueOf()/1000.0)
+    if (query) time -= 3600 // DST in effect
+    this.message.channel.send(`<t:${time}:R> <t:${time}:F> ||\`<t:${time}>\`||`)
   }
 
   async ping () {
