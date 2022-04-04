@@ -3,6 +3,9 @@ function chatCommand (command) {
     case 'ping':
       command.ping()
       break
+    case 'mmr':
+      command.mmr()
+      break
     case 'speak':
       command.speak()
       break

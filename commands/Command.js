@@ -389,6 +389,35 @@ class Command {
     )
   }
 
+  async mmr () {
+    let query
+    if (this.args.length) query = this.args.join('%20')
+    if (!query) {
+      this.message.channel.send('You need to send a Summoner name to lookup.')
+      return
+    }
+    axios
+    .get('https://na.whatismymmr.com/api/v1/summoner?name=' + query)
+    .then(response => {
+      console.log(response)
+      if (response.code === 100) {
+        this.message.channel.send(
+          'Could not find this Summoner.'
+        )
+        return
+      }
+      if (response.data.ranked.closestRank) {
+        this.message.channel.send(response.data.ranked.closestRank)
+        return
+      }
+      this.message.channel.send("There's not enough ranked data for this Summoner.")
+    })
+    .catch(error => {
+      logger.info(error)
+      this.message.channel.send("This Summoner doesn't exist or there was an error.")
+    })
+  }
+
   say () {
     // ex: !say I'm telling the bot what to say.
     const sayMessage = this.args.join(' ') || ' '
