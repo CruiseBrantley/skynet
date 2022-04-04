@@ -399,7 +399,6 @@ class Command {
     axios
     .get('https://na.whatismymmr.com/api/v1/summoner?name=' + query)
     .then(response => {
-      console.log(response)
       if (response.code === 100) {
         this.message.channel.send(
           'Could not find this Summoner.'
