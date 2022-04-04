@@ -406,7 +406,9 @@ class Command {
         return
       }
       if (response.data.ranked.closestRank) {
-        this.message.channel.send(response.data.ranked.closestRank)
+        let strippedString = response.data.ranked.summary.replace(/(<br>)/, "\n")
+        strippedString = strippedString.replace(/(<([^>]+)>)/gi, "")
+        this.message.channel.send(strippedString)
         return
       }
       this.message.channel.send("There's not enough ranked data for this Summoner.")
