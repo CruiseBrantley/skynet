@@ -399,13 +399,7 @@ class Command {
     axios
     .get('https://na.whatismymmr.com/api/v1/summoner?name=' + query)
     .then(response => {
-      if (response.code === 100) {
-        this.message.channel.send(
-          'Could not find this Summoner.'
-        )
-        return
-      }
-      if (response.data.ranked.closestRank) {
+      if (response?.data?.ranked?.closestRank) {
         let strippedString = response.data.ranked.summary.replace(/(<br>)/, "\n")
         strippedString = strippedString.replace(/(<([^>]+)>)/gi, "")
         this.message.channel.send(strippedString)
@@ -414,6 +408,21 @@ class Command {
       this.message.channel.send("There's not enough ranked data for this Summoner.")
     })
     .catch(error => {
+      const { response } = error
+      if (response?.data?.error?.code) {
+        switch(response?.data?.error?.code) {
+          case 100: 
+            this.message.channel.send('Could not find this Summoner.')
+            break
+          case 101:
+            this.message.channel.send("There's not enough ranked data for this Summoner.")
+            break
+          case 9001:
+            this.message.channel.send("Too many requests.")
+            break
+        }
+        return
+      }
       logger.info(error)
       this.message.channel.send("This Summoner doesn't exist or there was an error.")
     })
