@@ -213,7 +213,7 @@ async function voteclear (message, args, database) {
     if (message.member.permissions.has('ADMINISTRATOR')) {
       const ref = database.ref(message.channel.guild.id)
       ref.set([])
-      message.channel.send('Cleared all options vote options.')
+      message.channel.send('Cleared all vote options.')
       return
     }
     message.channel.send(
