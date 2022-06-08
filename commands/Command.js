@@ -67,15 +67,39 @@ class Command {
 
   speak() {
     // ex: !speak The words to be said in my voice channel
-    try {
-      const channelName = this.message.member.voice.channelID
+    let query
+    let channelName
+    channel = undefined
+    
+    if (this.args.length) query = this.args.join(' ')
 
+    if (query.substring(0, 9).toLowerCase() === 'channel="') {
+      const queryIndex = query.indexOf('"', 11) + 2
+      channelName = query.substring(9, queryIndex - 2)
+      query = query.substring(queryIndex)
+    }
+
+    if (this.args.length < 1) {
+      this.message.channel.send('This command requires a video URL.')
+      return
+    } else if (channelName) {
+      channel = this.message.guild.channels.cache.find(item => {
+        return (
+          item.name.toLowerCase() === channelName.toLowerCase() &&
+          item.type === 'voice'
+        )
+      })
+    } else {
+      channelName = this.message.member.voice.channelID
       channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
       })
+    }
+
+    try {
       if (!channel) {
         this.message.channel.send(
-          "You need to be in a voice channel, try !speakchannel (!sc) to send your message to a channel you're not currently in."
+          "You need to be in a voice channel or to specify a channel."
         )
         return
       }
@@ -84,7 +108,7 @@ class Command {
       return
     }
 
-    const speakMessage = this.args.join(' ')
+    const speakMessage = query
     if (!speakMessage.length) {
       this.message.channel.send('I need a message to speak!')
       return
@@ -98,57 +122,6 @@ class Command {
     }
     const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' })
     try {
-      channel
-        .join()
-        .then(connection => {
-          dispatcher = connection.play(url)
-          dispatcher.on('finish', () => {
-            setTimeout(() => {
-              connection.disconnect()
-            }, 2000)
-          })
-        })
-    } catch (err) {
-      logger.info('Encountered an error: ', err)
-    }
-  }
-
-  speakchannel() {
-    // ex: !sc General The words to be said in General voice channel
-    let channelName
-    let speakMessage
-    try {
-      channelName = this.args.shift()
-      speakMessage = this.args.join(' ')
-      if (!speakMessage.length) {
-        this.message.channel.send('I need a message to speak!')
-        return
-      }
-      if (speakMessage.length > 200) {
-        // Google translate API has a 200 character limitation
-        this.message.channel.send(
-          `I can only speak up to 200 characters at a time, you entered ${speakMessage.length}.`
-        )
-        return
-      }
-    } catch (err) {
-      logger.info(err)
-      return
-    }
-    const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' })
-    try {
-      const channel = this.message.guild.channels.cache.find(item => {
-        return (
-          item.name.toLowerCase() === channelName.toLowerCase() &&
-          item.type === 'voice'
-        )
-      })
-      if (channel === undefined || null) {
-        this.message.channel.send(
-          "Hmmm, it seems I couldn't find that channel."
-        )
-        return
-      }
       channel
         .join()
         .then(connection => {

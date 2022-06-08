@@ -9,10 +9,6 @@ function chatCommand (command) {
     case 'speak':
       command.speak()
       break
-    case 'sc':
-    case 'speakchannel':
-      command.speakchannel()
-      break
     case 'yt':
     case 'youtube':
       command.youtube()
