@@ -12,9 +12,10 @@ const siri4n = process.env.SIRI4N_ID
 const whitehallow = process.env.WHITEHALLOW_ID
 const deku = process.env.DEKU_ID
 const hoski = process.env.HOSKI_ID
+const crow = process.env.CROW_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski]
+const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow]
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
