@@ -53,6 +53,7 @@ async function subscribeAll () {
   subscribe(process.env.I_AM_JEFF_ID)
   subscribe(process.env.WHITEHALLOW_ID)
   subscribe(process.env.DEKU_ID)
+  subscribe(process.env.HOSKI_ID)
 }
 
 async function getGameInfo (id) {
