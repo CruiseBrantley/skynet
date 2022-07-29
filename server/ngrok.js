@@ -5,6 +5,7 @@ const authtoken = process.env.NGROK_AUTH_TOKEN
 
 const getURL = async () => {
     try {
+            // await ngrok.disconnect()
             const url = await ngrok.connect({
             addr: port,
             authtoken
@@ -12,7 +13,8 @@ const getURL = async () => {
         logger.info('Ngrok URL: ' + url)
         return url
     } catch (err) {
-        logger.info('Ngrok Error: ' + err)
+        console.error(err)
+        logger.error('Ngrok Error: ' + err)
     }
 }
 

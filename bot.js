@@ -2,7 +2,7 @@ const dotenv = require('dotenv')
 dotenv.config()
 const Discord = require('discord.js')
 const logger = require('./logger')
-const server = require('./server/server')
+const {setupServer: server} = require('./server/server')
 const loginFirebase = require('./firebase-login')
 
 function discordBot () {

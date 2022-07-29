@@ -12,8 +12,7 @@ server.use(express.json())
 let streamID
 let oauthToken
 
-const url = getURL()
-async function subscribe (id) {
+async function twitchSubscribe (id, url, twitchToken) {
   const data = {
     version: "1",
     type: "stream.online",
@@ -23,6 +22,37 @@ async function subscribe (id) {
     "transport": {
       "method": "webhook",
       "callback": await url,
+      "secret": "abcdefghij0123456789"
+    }
+  }
+  return axios
+    .post('https://api.twitch.tv/helix/eventsub/subscriptions', data, {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENTID,
+        Authorization: `Bearer ${twitchToken || oauthToken}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    .then(res => {
+      logger.info('Successfully subscribed to Twitch Updates for ' + id)
+      return res.status
+    })
+    .catch(err => {
+      logger.info(`Failed Subscribing for ${id} ${err.message}`)
+      return err.response?.data
+    })
+}
+async function deleteSubscription (id, url) {
+  console.log('URL is:', url)
+  const data = {
+    version: "1",
+    type: "stream.online",
+    "condition": {
+      "broadcaster_user_id": id
+    },
+    "transport": {
+      "method": "webhook",
+      "callback": url,
       "secret": "abcdefghij0123456789"
     }
   }
@@ -42,19 +72,39 @@ async function subscribe (id) {
     })
 }
 
+async function getSubscriptions (oauthParam) {
+  return axios
+    .get('https://api.twitch.tv/helix/eventsub/subscriptions', {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENTID,
+        Authorization: `Bearer ${oauthParam || oauthToken}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    .then(res => {
+      logger.info(`Successfully got all ${String(res.data?.total)} Subscriptions`)
+      return res.data
+    }
+    )
+    .catch(err => {
+      logger.info('Failed Getting Subscriptions:', err)
+    })
+}
+
 async function subscribeAll () {
+  const url = getURL()
   oauthToken = await oauth()
-  subscribe(process.env.FIRERAVEN_ID)
-  subscribe(process.env.CYPHANE_ID)
-  subscribe(process.env.CHA_ID)
-  subscribe(process.env.SIRI4N_ID)
-  subscribe(process.env.BFD_ID)
-  subscribe(process.env.DALE_ID)
-  subscribe(process.env.I_AM_JEFF_ID)
-  subscribe(process.env.WHITEHALLOW_ID)
-  subscribe(process.env.DEKU_ID)
-  subscribe(process.env.HOSKI_ID)
-  subscribe(process.env.CROW_ID)
+  twitchSubscribe(process.env.FIRERAVEN_ID, url)
+  twitchSubscribe(process.env.CYPHANE_ID, url)
+  twitchSubscribe(process.env.CHA_ID, url)
+  twitchSubscribe(process.env.SIRI4N_ID, url)
+  twitchSubscribe(process.env.BFD_ID, url)
+  twitchSubscribe(process.env.DALE_ID, url)
+  twitchSubscribe(process.env.I_AM_JEFF_ID, url)
+  twitchSubscribe(process.env.WHITEHALLOW_ID, url)
+  twitchSubscribe(process.env.DEKU_ID, url)
+  twitchSubscribe(process.env.HOSKI_ID, url)
+  twitchSubscribe(process.env.CROW_ID, url)
 }
 
 async function getGameInfo (id) {
@@ -96,12 +146,10 @@ async function getChannelInfo (id) {
 }
 
 function setupServer (bot) {
-  subscribeAll()
-  // this part may be unnecessary now
-  // setInterval(() => {
-  //   // Twitch times out subscriptions, this ensures they're renewed
-  //   subscribeAll()
-  // }, 86400 * 100) // s to ms
+  setInterval(() => {
+    // ngrok URL needs to be renewed periodically
+    subscribeAll()
+  }, 60 * 60 * 24 * 100) // seconds/minutes/hours/day/milliseconds
 
   server.get('/', async (req, res) => {
     // Called on initial subscription
@@ -146,4 +194,24 @@ function setupServer (bot) {
   return server
 }
 
-module.exports = setupServer
+function testServer () {
+  server.get('/', async (req, res) => {
+    // Called on initial subscription
+    console.log('Get: ' + req.query['hub.challenge'])
+    res
+      .status(200)
+      .type('text/plain')
+      .send(req.query['hub.challenge'])
+  })
+
+  server.listen(5002, () =>
+    logger.info(`Twitch updates listening on port: ${5002}!`)
+  )
+  return server
+}
+
+module.exports.setupServer = setupServer
+module.exports.getSubscriptions = getSubscriptions
+module.exports.deleteSubscription = deleteSubscription
+module.exports.twitchSubscribe = twitchSubscribe
+module.exports.testServer = testServer
