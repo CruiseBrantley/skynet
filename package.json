@@ -9,7 +9,7 @@
 		"axios": "^0.21.1",
 		"discord.js": "^12.4.1",
 		"dotenv": "^7.0.0",
-		"express": "^4.17.1",
+		"express": "^4.17.3",
 		"ffmpeg": "0.0.4",
 		"ffmpeg-static": "^4.4.0",
 		"firebase-admin": "^8.13.0",
