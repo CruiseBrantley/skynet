@@ -12,7 +12,7 @@
 		"express": "^4.17.1",
 		"ffmpeg": "0.0.4",
 		"ffmpeg-static": "^4.4.0",
-		"firebase-admin": "^8.13.0",
+		"firebase-admin": "^11.4.1",
 		"google-tts-api": "^2.0.2",
 		"m3u8stream": "^0.6.5",
 		"moment": "^2.24.0",
