@@ -6,8 +6,9 @@
 	"author": "Cruise Brantley",
 	"dependencies": {
 		"@discordjs/opus": "^0.3.3",
+		"@discordjs/voice": "^0.14.0",
 		"axios": "^0.21.1",
-		"discord.js": "^12.4.1",
+		"discord.js": "^14.7.1",
 		"dotenv": "^7.0.0",
 		"express": "^4.17.1",
 		"ffmpeg": "0.0.4",

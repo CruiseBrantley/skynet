@@ -1,6 +1,6 @@
 const dotenv = require('dotenv')
 dotenv.config()
-const Discord = require('discord.js')
+const { Client, GatewayIntentBits } = require('discord.js')
 const logger = require('./logger')
 const {setupServer: server} = require('./server/server')
 const loginFirebase = require('./firebase-login')
@@ -9,7 +9,9 @@ function discordBot () {
   // Initialize Discord Bot
   if (process.env.NODE_ENV !== 'dev') process.env.NODE_ENV = 'prod'
   logger.info('Current ENV:' + process.env.NODE_ENV)
-  const bot = new Discord.Client()
+  const bot = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates]
+  })
   const aFunc = async () => {
     try {
       await bot.login(process.env.TOKEN)
@@ -55,7 +57,7 @@ function discordBot () {
 
   // twitterChannelInit();
 
-  bot.on('message', botMessage(bot, database))
+  bot.on('messageCreate', botMessage(bot, database))
 
   bot.on('messageUpdate', botUpdate())
 
