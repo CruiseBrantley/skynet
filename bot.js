@@ -29,20 +29,6 @@ function discordBot () {
     logger.info('Logged in as: ')
     logger.info(bot.user.username + ' - (' + bot.user.id + ')')
     bot.user.setActivity('for John Connor', { type: 'WATCHING' })
-    // for (const guild of bot.guilds) {
-    //   const serverId = guild[0]
-    //   const ref = database.ref(serverId)
-    //   ref.once('value', function (data) {
-    //     if (data.val() === null)
-    //       ref.set({}, error => {
-    //         if (error) {
-    //           console.log('Data could not be saved.' + error)
-    //         } else {
-    //           console.log('Data saved successfully.')
-    //         }
-    //       })
-    //   })
-    // }
   })
 
   bot.on('error', err => {

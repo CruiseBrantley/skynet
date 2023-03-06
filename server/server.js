@@ -146,6 +146,7 @@ async function getChannelInfo (id) {
 }
 
 function setupServer (bot) {
+  subscribeAll()
   setInterval(() => {
     // ngrok URL needs to be renewed periodically
     subscribeAll()
