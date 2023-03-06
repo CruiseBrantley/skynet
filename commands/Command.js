@@ -90,7 +90,7 @@ class Command {
         )
       })
     } else {
-      channelName = this.message.member.voice.channelID
+      channelName = this.message.member.voice.channelId
       channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
       })
@@ -207,9 +207,9 @@ class Command {
         )
       })
     } else {
-      channelName = this.message.member.voice.channelID
+      channelName = this.message.member.voice.channelId
       channel = this.message.guild.channels.cache.find(item => {
-        return item.id === channelName && item.type === 'voice'
+        return item.id === channelName && item.type === 2
       })
     }
 
@@ -282,7 +282,7 @@ class Command {
         )
       })
     } else {
-      channelName = this.message.member.voice.channelID
+      channelName = this.message.member.voice.channelId
       channel = this.message.guild.channels.cache.find(item => {
         return item.id === channelName && item.type === 'voice'
       })
