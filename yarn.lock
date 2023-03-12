@@ -1620,10 +1620,10 @@ char-regex@^1.0.2:
   resolved "https://registry.npmjs.org/char-regex/-/char-regex-1.0.2.tgz"
   integrity sha512-kWWXztvZ5SBQV+eRgKFeh8q5sLuZY2+8WUIzlxWVTg+oGwY14qylx1KbKzHd8P6ZYkAg0xyIDU9JMHhyJMZ1jw==
 
-chatgpt@^5.0.7:
-  version "5.0.7"
-  resolved "https://registry.yarnpkg.com/chatgpt/-/chatgpt-5.0.7.tgz#01c812878cebc2d3e08b7f625dfbb87e89cf1250"
-  integrity sha512-wy69++JDNS0xKi+6rP+HDOByXBafQIVynHnlQw09apuDntGSKfwBRY902N8Q7/ZFU/XET+8NpJiio2iI69IWYw==
+chatgpt@^5.0.9:
+  version "5.0.9"
+  resolved "https://registry.yarnpkg.com/chatgpt/-/chatgpt-5.0.9.tgz#a160d8beedaeeec141aae8821bc5ea6442e9ee29"
+  integrity sha512-H0MMegLKcYyYh3LeFO4ubIdJSiSAl4rRjTeXf3KjHfGXDM7QZ1EkiTH9RuIoaNzOm8rJTn4QEhrwBbOIpbalxw==
   dependencies:
     "@dqbd/tiktoken" "^0.4.0"
     cac "^6.7.14"

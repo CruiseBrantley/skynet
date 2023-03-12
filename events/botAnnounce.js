@@ -1,3 +1,4 @@
+const { AttachmentBuilder, EmbedBuilder } = require('discord.js')
 const fetch = require('snekfetch')
 const logger = require('../logger')
 const fs = require('fs')
@@ -13,9 +14,11 @@ const whitehallow = process.env.WHITEHALLOW_ID
 const deku = process.env.DEKU_ID
 const hoski = process.env.HOSKI_ID
 const crow = process.env.CROW_ID
+const merc = process.env.MERC_ID
+const juan = process.env.JUAN_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow]
+const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow, iaj, merc, juan]
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
@@ -72,45 +75,45 @@ const testCases = [
 
 const streamCases = process.env.NODE_ENV === 'dev' ? testCases : prodCases
 
-function announce (bot, data, channel, type) {
+function announce(bot, data, channel, type) {
   try {
+    console.log(data)
+    const attachment = new AttachmentBuilder('image.jpg', { name: 'image.jpg' })
+    const embed = new EmbedBuilder()
+      .setAuthor({
+        name: `${data.broadcaster_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''
+          }on Twitch!`
+      })
+      .setURL(`https://www.twitch.tv/${data.broadcaster_name}`)
+      .setTitle(data.title)
+      .setImage('attachment://image.jpg')
+      .setTimestamp()
+    console.log(attachment, embed)
+
     bot.channels.cache.find(item => {
       return item.id === channel
     })
-      .send(
-        `${type === 'friend' ? '' : '@everyone'} ${
-          data.broadcaster_name
-        } has gone Live! https://www.twitch.tv/${data.broadcaster_name}`,
-        {
-          embed: {
-            author: {
-              name: `${data.broadcaster_name} is Streaming ${
-                data.game_name ? `${data.game_name} ` : ''
-              }on Twitch!`
-            },
-            url: `https://www.twitch.tv/${data.broadcaster_name}`,
-            title: data.title,
-            image: {
-              url: 'attachment://image.jpg'
-            },
-            timestamp: data.started_at
-          },
-          files: [{ attachment: 'image.jpg', name: 'image.jpg' }]
-        }
+      .send({
+        content:
+          `${type === 'friend' ? '' : '@everyone'} ${data.broadcaster_name
+          } has gone Live! https://www.twitch.tv/${data.broadcaster_name}`,
+        embeds: [embed],
+        files: [attachment]
+      }
       )
   } catch (err) {
     logger.info('Main botAnnounce error: ', err)
   }
 }
 
-async function botAnnounce (bot, data) {
+async function botAnnounce(bot, data) {
   try {
     const image = await fetch.get(
       data.game_image
         ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
         : data.thumbnail_url
-            .replace('{width}', '1025')
-            .replace('{height}', '577')
+          .replace('{width}', '1025')
+          .replace('{height}', '577')
     )
 
     fs.writeFileSync('image.jpg', image.body, 'binary')

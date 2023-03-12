@@ -13,14 +13,14 @@ test('Twitch Subscribe', async () => {
   expect(twitchSubscription.status).toBe(200)
 })
 
-test.todo('Delete Twitch Subscription')
-
-test.todo('Subscribe All')
-
 test('Get All Twitch Subscriptions', async () => {
   const subscriptions = await getSubscriptions(await OAuthToken)
   console.log(subscriptions)
   expect(subscriptions?.total).not.toBe(undefined)
 })
 
+test.todo('Delete Twitch Subscription')
+
 test.todo('Delete All Subscriptions')
+
+test.todo('Subscribe All')
