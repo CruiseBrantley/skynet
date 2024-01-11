@@ -2,6 +2,7 @@ const vote = require('./vote')
 const wafflehouse = require('./wafflehouse')
 const playVideo = require('./playVideo')
 
+const { getVoiceConnection, joinVoiceChannel, VoiceConnectionStatus } = require('@discordjs/voice');
 const publicIp = require('public-ip')
 const axios = require('axios')
 const googleTTS = require('google-tts-api')
@@ -36,34 +37,34 @@ class Command {
 
   pause () {
     if (dispatcher !== {}) {
-      dispatcher.pause()
+      getVoiceConnection(this.message.channel.guild.id).pause()
     }
   }
 
   resume () {
     if (dispatcher !== {}) {
-      dispatcher.resume()
+      getVoiceConnection(this.message.channel.guild.id).resume()
     }
   }
 
-  volume () {
-    if (this.args.length === 0) {
-      this.message.channel.send(`The current volume is set to ${volume}.`)
-      return
-    }
+  // volume () {
+  //   if (this.args.length === 0) {
+  //     this.message.channel.send(`The current volume is set to ${volume}.`)
+  //     return
+  //   }
 
-    if (!(this.args[0] >= 0 && this.args[0] <= 200)) {
-      this.message.channel.send(
-        'The Volume must be between 0 and 10 (default is 5).'
-      )
-      return
-    }
-    volume = this.args.shift()
-    if (dispatcher.setVolume) {
-      dispatcher.setVolume(volume)
-    }
-    this.message.channel.send(`Setting current volume to ${volume}.`)
-  }
+  //   if (!(this.args[0] >= 0 && this.args[0] <= 200)) {
+  //     this.message.channel.send(
+  //       'The Volume must be between 0 and 10 (default is 5).'
+  //     )
+  //     return
+  //   }
+  //   volume = this.args.shift()
+  //   if (dispatcher.setVolume) {
+  //     dispatcher.setVolume(volume)
+  //   }
+  //   this.message.channel.send(`Setting current volume to ${volume}.`)
+  // }
 
   speak() {
     // ex: !speak The words to be said in my voice channel
@@ -225,15 +226,23 @@ class Command {
     if (query === 'yellow' && lastSearch.length) query = lastSearch[2].link
 
     try {
-      const connection = await channel.join()
-      dispatcher = await playVideo(query, connection, volume)
-      this.bot.user.setActivity('YouTube.')
-      dispatcher.setVolume(volume)
-
-      dispatcher.on('finish', () => {
-        this.bot.user.setActivity(process.env.ACTIVITY)
-        connection.disconnect()
-      })
+      const connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+      });
+      connection.on(VoiceConnectionStatus.Ready, async () => {
+        console.log('Ping: ', connection.ping)
+        dispatcher = await playVideo(query, channel.guild.id, volume)
+        this.bot.user.setActivity('YouTube.')
+        console.log('Should be playing')
+        
+        // dispatcher.player.on('finish', () => {
+        //   this.bot.user.setActivity(process.env.ACTIVITY)
+        //   dispatcher.connection.disconnect()
+        // })
+      });
+      console.log('Finished the connection block')
     } catch (err) {
       if (err.message.includes('permission'))
         this.message.channel.send(
