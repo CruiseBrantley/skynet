@@ -42,33 +42,19 @@ async function twitchSubscribe (id, url, twitchToken) {
       return err.response?.data
     })
 }
-async function deleteSubscription (id, url) {
-  console.log('URL is:', url)
-  const data = {
-    version: "1",
-    type: "stream.online",
-    "condition": {
-      "broadcaster_user_id": id
-    },
-    "transport": {
-      "method": "webhook",
-      "callback": url,
-      "secret": "abcdefghij0123456789"
-    }
-  }
-  axios
-    .post('https://api.twitch.tv/helix/eventsub/subscriptions', data, {
+async function deleteSubscription (subscriptionId) {
+  return axios
+    .delete(`https://api.twitch.tv/helix/eventsub/subscriptions?id=${subscriptionId}`, {
       headers: {
         'Client-ID': process.env.TWITCH_CLIENTID,
-        Authorization: `Bearer ${oauthToken}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${oauthToken}`
       }
     })
     .then(res =>
-      logger.info('Successfully subscribed to Twitch Updates for ' + id)
+      logger.info('Successfully deleted Twitch subscription: ' + subscriptionId)
     )
     .catch(err => {
-      logger.info(`Failed Subscribing for ${id} ${err.message}`)
+      logger.info(`Failed deleting subscription ${subscriptionId}: ${err.message}`)
     })
 }
 
@@ -92,8 +78,18 @@ async function getSubscriptions (oauthParam) {
 }
 
 async function subscribeAll () {
-  const url = getURL()
+  const url = await getURL()
   oauthToken = await oauth()
+
+  // Clean up old subscriptions to prevent accumulation
+  const existingSubs = await getSubscriptions(oauthToken)
+  if (existingSubs && existingSubs.data && existingSubs.data.length > 0) {
+      logger.info(`Cleaning up ${existingSubs.data.length} old Twitch subscriptions...`)
+      for (const sub of existingSubs.data) {
+          await deleteSubscription(sub.id)
+      }
+  }
+
   twitchSubscribe(process.env.FIRERAVEN_ID, url)
   twitchSubscribe(process.env.CYPHANE_ID, url)
   twitchSubscribe(process.env.CHA_ID, url)
@@ -149,10 +145,10 @@ async function getChannelInfo (id) {
 
 function setupServer (bot) {
   subscribeAll()
-  setInterval(() => {
-    // ngrok URL needs to be renewed periodically
-    subscribeAll()
-  }, 60 * 60 * 24 * 100) // seconds/minutes/hours/day/milliseconds
+  // setInterval(() => {
+  //   // ngrok URL needs to be renewed periodically
+  //   subscribeAll()
+  // }, 60 * 60 * 24 * 100) // seconds/minutes/hours/day/milliseconds
 
   server.get('/', async (req, res) => {
     // Called on initial subscription

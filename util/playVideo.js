@@ -6,7 +6,6 @@ module.exports = async function playVideo (url, id, volume) {
   const player = createAudioPlayer();
   const stream = await ytdl(url, {
     type: 'opus',
-    quality: 'highestaudio',
     highWaterMark: 1 << 25
   })
   const options = {

@@ -22,6 +22,13 @@ const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow, iaj, 
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
 
+// Generic mapping for additional social links (YouTube, Twitter, etc.)
+const streamerSocials = {
+  [fireraven]: {
+    youtube: 'https://www.youtube.com/@FireravenTV'
+  }
+}
+
 const prodCases = [
   {
     case: [fireraven],
@@ -90,17 +97,19 @@ function announce(bot, data, channel, type) {
       .setTimestamp()
     console.log(attachment, embed)
 
+    const socials = streamerSocials[data.broadcaster_id]
+    const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : ''
+
     bot.channels.cache.find(item => {
       return item.id === channel
     })
       .send({
         content:
           `${type === 'friend' ? '' : '@everyone'} ${data.broadcaster_name
-          } has gone Live! https://www.twitch.tv/${data.broadcaster_name}`,
+          } has gone Live! https://www.twitch.tv/${data.broadcaster_name}${youtubeText}`,
         embeds: [embed],
         files: [attachment]
-      }
-      )
+      })
   } catch (err) {
     logger.info('Main botAnnounce error: ', err)
   }

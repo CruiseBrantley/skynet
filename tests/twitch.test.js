@@ -6,8 +6,10 @@ const server = testServer()
 const OAuthToken = oauth()
 const url = getURL()
 
+const testOauth = async () => console.log(await OAuthToken)
+testOauth();
+
 test('Twitch Subscribe', async () => {
-  console.log
   const twitchSubscription = await twitchSubscribe(process.env.SIRI4N_ID, url, await OAuthToken)
   console.log('Subscribe response:', twitchSubscription)
   expect(twitchSubscription.status).toBe(200)
