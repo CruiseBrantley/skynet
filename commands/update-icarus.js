@@ -34,27 +34,29 @@ module.exports = {
         try {
             await interaction.editReply('🔄 **Step 1/4**: Checking server status...');
 
-            // Step 1: Check if running
-            const taskList = await runSSH('tasklist /FI "IMAGENAME eq IcarusServer.exe"');
-            const isRunning = taskList.includes('IcarusServer.exe');
+            // Step 1: Check if running using robust CSV list
+            const taskList = await runSSH('tasklist /FO CSV');
+            const isRunning = taskList.includes('IcarusServer-Win64-Shipping.exe');
 
             // Step 2: Stop if running
             if (isRunning) {
-                await interaction.editReply('🛑 **Step 2/4**: Server is running, stopping...');
-                await runSSH('taskkill /F /IM IcarusServer.exe');
+                await interaction.editReply('🛑 **Step 2/4**: Server is running, stopping `IcarusServer-Win64-Shipping.exe`...');
+                await runSSH('taskkill /F /IM IcarusServer-Win64-Shipping.exe');
                 // Wait a few seconds for the process to exit
-                await new Promise(r => setTimeout(r, 5000));
+                await new Promise(r => setTimeout(r, 10000));
             } else {
                 await interaction.editReply('⏭️ **Step 2/4**: Server not running, skipping stop.');
             }
+
 
             // Step 3: Update via SteamCMD
             await interaction.editReply('📥 **Step 3/4**: Updating via SteamCMD (this may take a while)...');
             await runSSH(`${STEAMCMD} +login anonymous +app_update 1644960 validate +quit`, { ignoreExitCode: true });
 
-            // Step 4: Start server
-            await interaction.editReply('🚀 **Step 4/4**: Starting Icarus server...');
-            await runSSH(`powershell -c "Start-Process -FilePath '${ICARUS_DIR}\\IcarusServer.exe' -ArgumentList '-log' -WorkingDirectory '${ICARUS_DIR}'"`);
+            // Step 4: Start server with wmic to detach from SSH session context
+            await interaction.editReply('🚀 **Step 4/4**: Starting Icarus server (detached background process)...');
+            await runSSH(`wmic process call create "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server\\IcarusServer.exe -log", "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server"`);
+
 
             await interaction.editReply('✅ **Icarus server updated and restarted successfully!**');
         } catch (err) {
