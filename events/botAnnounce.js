@@ -82,7 +82,7 @@ const testCases = [
 
 const streamCases = process.env.NODE_ENV === 'dev' ? testCases : prodCases
 
-function announce(bot, data, channel, type) {
+async function announce(bot, data, channel, type) {
   try {
     console.log(data)
     const attachment = new AttachmentBuilder('image.jpg', { name: 'image.jpg' })
@@ -100,10 +100,13 @@ function announce(bot, data, channel, type) {
     const socials = streamerSocials[data.broadcaster_id]
     const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : ''
 
-    bot.channels.cache.find(item => {
-      return item.id === channel
-    })
-      .send({
+    const targetChannel = await bot.channels.fetch(channel)
+    if (!targetChannel) {
+      logger.info(`botAnnounce: Channel ${channel} not found`)
+      return
+    }
+
+    await targetChannel.send({
         content:
           `${type === 'friend' ? '' : '@everyone'} ${data.broadcaster_name
           } has gone Live! https://www.twitch.tv/${data.broadcaster_name}${youtubeText}`,
@@ -130,7 +133,7 @@ async function botAnnounce(bot, data) {
     for (const streamCase of streamCases)
       if (streamCase.case.includes(data.broadcaster_id)) {
         logger.info(`Announcing: ${data.broadcaster_name} ${streamCase.channel} ${streamCase.type}`)
-        announce(bot, data, streamCase.channel, streamCase.type)
+        await announce(bot, data, streamCase.channel, streamCase.type)
       }
   } catch (err) {
     logger.info('Error downloading image', err)
