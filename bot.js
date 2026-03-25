@@ -89,7 +89,8 @@ function discordBot () {
   bot.on('messageCreate', async message => {
     if (message.author.bot) return;
     
-    // Check if the bot is mentioned
+    // Check if the bot is directly mentioned (ignore @everyone and @here)
+    if (message.mentions.everyone) return;
     if (message.mentions.has(bot.user)) {
         const chatCommand = bot.commands.get('chat');
         if (chatCommand) {

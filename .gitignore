@@ -68,3 +68,10 @@ image.jpg
 
 # firebase
 service-account.json
+
+# TTS engine binaries, models, and temp audio
+tts_engine/
+temp_audio/
+test_raw.wav
+test_filtered.*
+test.m4a
