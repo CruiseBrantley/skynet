@@ -55,7 +55,7 @@ module.exports = {
 
             // Step 4: Start server with wmic to detach from SSH session context
             await interaction.editReply('🚀 **Step 4/4**: Starting Icarus server (detached background process)...');
-            await runSSH(`wmic process call create "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server\\IcarusServer.exe -log", "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server"`);
+            await runSSH(`wmic process call create "${ICARUS_DIR}\\IcarusServer.exe -log", "${ICARUS_DIR}"`);
 
 
             await interaction.editReply('✅ **Icarus server updated and restarted successfully!**');
