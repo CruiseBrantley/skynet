@@ -1,3 +1,9 @@
+// Node 25 SlowBuffer polyfill for outdated dependencies
+const buffer = require('buffer');
+if (!buffer.SlowBuffer) {
+    buffer.SlowBuffer = buffer.Buffer;
+}
+
 const dotenv = require('dotenv')
 dotenv.config()
 const { Client, GatewayIntentBits, Collection } = require('discord.js')
@@ -55,8 +61,10 @@ function discordBot () {
 
   const botUpdate = require('./events/botUpdate')
   const botDelete = require('./events/botDelete')
+  const linkSummarize = require('./events/linkSummarize')
 
   server(bot)
+  linkSummarize(bot)
 
   // twitterChannelInit();
 

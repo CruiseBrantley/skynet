@@ -1,12 +1,15 @@
 const { SlashCommandBuilder } = require('discord.js');
-const googleTTS = require('google-tts-api');
-const { getVoiceConnection, joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, VoiceConnectionStatus } = require('@discordjs/voice');
+const { getVoiceConnection, joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const logger = require('../logger');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
+const fs = require('fs');
+const path = require('path');
 
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('speak')
-		.setDescription('Makes the bot speak a phrase using Google TTS')
+		.setDescription('Makes the bot speak a phrase using local audio synthesis')
         .addStringOption(option => 
             option.setName('message')
                 .setDescription('The message to speak')
@@ -33,43 +36,84 @@ module.exports = {
         }
 
         const speakMessage = query;
-        if (speakMessage.length > 200) {
-            await interaction.reply({ content: `I can only speak up to 200 characters at a time, you entered ${speakMessage.length}.`, ephemeral: true });
+        if (speakMessage.length > 300) {
+            await interaction.reply({ content: `I can only speak up to 300 characters at a time.`, ephemeral: true });
             return;
         }
 
-        const url = googleTTS.getAudioUrl(speakMessage, { lang: 'en', host: 'https://translate.google.com' });
-        
         await interaction.deferReply();
         
+        const tempDir = path.join(__dirname, '../temp_audio');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+        
+        const tempWav = path.join(tempDir, `speak_${interaction.id}.wav`);
+        const tempMp3 = path.join(tempDir, `speak_${interaction.id}.mp3`);
+
         try {
+            // Step 1: Generate high quality local TTS with Piper
+            const piperPath = path.join(__dirname, '../tts_engine/piper_venv/bin/piper');
+            const modelPath = path.join(__dirname, '../tts_engine/en_US-danny-low.onnx');
+            
+            await exec(`echo "${speakMessage.replace(/"/g, '\\"')}" | "${piperPath}" --model "${modelPath}" --output_file "${tempWav}"`);
+
+            // Step 2: Skip FFmpeg filtering, just copy to mp3 (or we can just stream wav)
+            // It's actually easier to just play the WAV file directly with Discord.js
+            await exec(`/opt/homebrew/bin/ffmpeg -y -i "${tempWav}" -acodec libmp3lame "${tempMp3}"`);
+
             const connection = joinVoiceChannel({
                 channelId: channelName.id,
                 guildId: channelName.guild.id,
                 adapterCreator: channelName.guild.voiceAdapterCreator,
             });
 
-            connection.on(VoiceConnectionStatus.Ready, () => {
-                const player = createAudioPlayer();
-                const resource = createAudioResource(url, { inputType: StreamType.Arbitrary });
-                player.play(resource);
-                const subscription = connection.subscribe(player);
-                
-                player.on('stateChange', (oldState, newState) => {
-                    if (newState.status === 'idle') {
-                        setTimeout(() => {
-                            if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
-                                connection.destroy();
-                            }
-                        }, 2000);
-                    }
+            // Wait for connection to be ready
+            logger.info(`Voice connection state: ${connection.state.status}`);
+            if (connection.state.status !== VoiceConnectionStatus.Ready) {
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error(`Voice connection timed out in state: ${connection.state.status}`));
+                    }, 15000);
+                    connection.on(VoiceConnectionStatus.Ready, () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    });
+                    connection.on(VoiceConnectionStatus.Destroyed, () => {
+                        clearTimeout(timeout);
+                        reject(new Error('Voice connection was destroyed'));
+                    });
                 });
-                interaction.editReply(`Speaking: "${speakMessage}"`);
+            }
+            logger.info('Voice connection ready, playing audio');
+
+            const player = createAudioPlayer();
+            const resource = createAudioResource(tempMp3, { inputType: StreamType.Arbitrary });
+            player.play(resource);
+            connection.subscribe(player);
+            
+            player.on('stateChange', (oldState, newState) => {
+                if (newState.status === 'idle') {
+                    setTimeout(() => {
+                        if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                            connection.destroy();
+                        }
+                        // Cleanup temp files
+                        try {
+                            if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);
+                            if (fs.existsSync(tempMp3)) fs.unlinkSync(tempMp3);
+                        } catch (e) {}
+                    }, 2000);
+                }
             });
+            await interaction.editReply(`Speaking: "${speakMessage}"`);
             
         } catch (err) {
-            logger.info('Encountered an error: ', err);
+            logger.info('Encountered an error speaking: ', err);
             await interaction.editReply('There was an error trying to speak.');
+            // Cleanup on error
+            try {
+                if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);
+                if (fs.existsSync(tempMp3)) fs.unlinkSync(tempMp3);
+            } catch (e) {}
         }
 	},
 };
