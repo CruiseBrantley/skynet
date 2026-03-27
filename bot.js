@@ -97,6 +97,7 @@ function discordBot () {
             // Mock an interaction object to reuse the slash command logic
             let typingInterval;
             const stopTyping = () => { if (typingInterval) clearInterval(typingInterval); };
+            const sendAndStop = async (content) => { stopTyping(); return message.channel.send(content); };
             
             const mockInteraction = {
                 client: bot,
@@ -122,12 +123,10 @@ function discordBot () {
                     message.channel.sendTyping(); 
                     typingInterval = setInterval(() => { message.channel.sendTyping(); }, 9000);
                 },
-                reply: async (content) => { stopTyping(); message.channel.send(content); },
-                editReply: async (content) => { stopTyping(); message.channel.send(content); },
-                followUp: async (content) => { stopTyping(); message.channel.send(content); },
-                channel: {
-                    send: async (content) => { stopTyping(); message.channel.send(content); }
-                }
+                reply: sendAndStop,
+                editReply: sendAndStop,
+                followUp: sendAndStop,
+                channel: { send: sendAndStop }
             };
             
             try {
