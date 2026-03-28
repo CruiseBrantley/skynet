@@ -17,6 +17,7 @@ const SKIP_PATTERNS = [
 ];
 
 function extractUrls(text) {
+    if (!text) return [];
     return text.match(URL_REGEX) || [];
 }
 
@@ -80,7 +81,7 @@ async function fetchPageText(url) {
             .replace(/\s+/g, ' ')
             .trim();
 
-        // Limit to first ~4000 chars to avoid massive payloads
+        // Limit to first ~6000 chars to avoid massive payloads
         return text.substring(0, 6000);
     } catch (err) {
         logger.info(`Failed to fetch page ${url}: ${err.message}`);
@@ -118,6 +119,7 @@ async function summarizeUrl(url) {
 }
 
 function splitMessage(text, limit = 1900) {
+    if (!text) return [''];
     const chunks = [];
     let current = '';
     for (const line of text.split('\n')) {

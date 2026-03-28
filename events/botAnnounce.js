@@ -1,5 +1,5 @@
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js')
-const fetch = require('snekfetch')
+const axios = require('axios')
 const logger = require('../logger')
 const fs = require('fs')
 
@@ -120,15 +120,14 @@ async function announce(bot, data, channel, type) {
 
 async function botAnnounce(bot, data) {
   try {
-    const image = await fetch.get(
-      data.game_image
+    const imageUrl = data.game_image
         ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
         : data.thumbnail_url
           .replace('{width}', '1025')
-          .replace('{height}', '577')
-    )
-
-    fs.writeFileSync('image.jpg', image.body, 'binary')
+          .replace('{height}', '577');
+          
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    fs.writeFileSync('image.jpg', imageResponse.data)
 
     for (const streamCase of streamCases)
       if (streamCase.case.includes(data.broadcaster_id)) {

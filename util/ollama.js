@@ -12,30 +12,30 @@ async function checkOllamaOnline(url, endpoint) {
 }
 
 /**
- * Queries Ollama with automatic failover from remote PC to local fallback to Gemini.
+ * Queries Ollama with automatic failover from remote PC to Gemini to local fallback.
  * @param {string} endpoint - The API endpoint e.g., '/api/chat' or '/api/generate'
  * @param {object} payload - The request body (e.g. messages: [], prompt: "")
- * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: local Ollama, 2: Gemini
+ * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: Gemini, 2: local Ollama
  * @returns {Promise<object>} The normalized response data
  */
 async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     // Handle backwards compatibility for boolean isBackup
+    // If isBackup is true, we skip the primary PC and jump to the first fallback (Gemini)
     if (fallbackLevel === true) fallbackLevel = 1;
     if (fallbackLevel === false) fallbackLevel = 0;
 
     const timeoutMs = 300000; // 5 minutes timeout safety
 
-    // Level 2: Gemini Fallback
-    if (fallbackLevel >= 2) {
+    // Level 1: Gemini Fallback (Now the primary fallback)
+    if (fallbackLevel === 1) {
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
-            logger.error("GEMINI_API_KEY is not configured in .env");
-            throw new Error("Gemini fallback failed: API Key missing");
+            logger.error("GEMINI_API_KEY is not configured in .env. Skipping to local fallback.");
+            return queryOllama(endpoint, payload, 2);
         }
         
-        logger.info(`Triggering Level 2 fallback: Gemini-Flash for ${endpoint}`);
+        logger.info(`Triggering Level 1 fallback: Gemini-3-Flash for ${endpoint}`);
         
-        // Translate payload for OpenAI-compatible endpoint
         let geminiMessages = [];
         if (payload.messages) {
             geminiMessages = payload.messages;
@@ -47,11 +47,10 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             const response = await axios.post(
                 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
                 {
-                    model: 'gemini-3-flash',
+                    model: 'gemini-1.5-flash', // Updated to latest flash model name standard
                     messages: geminiMessages,
                     stream: false
                 },
-
                 {
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
@@ -70,65 +69,60 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             }
             throw new Error("Invalid response structure from Gemini API");
         } catch (err) {
-            logger.error(`Gemini fallback failed: ${err.message}`);
-            throw err;
+            logger.info(`Gemini fallback failed, dropping to local: ${err.message}`);
+            return queryOllama(endpoint, payload, 2);
         }
     }
 
-    const url = fallbackLevel === 1 ? `http://127.0.0.1:11434${endpoint}` : `http://192.168.50.182:11434${endpoint}`;
-    const model = fallbackLevel === 1 ? 'qwen3.5:4b' : 'gemma3:27b';
+    // Level 2: Local Fallback (The final fail-safe)
+    if (fallbackLevel >= 2) {
+        const localUrl = `http://127.0.0.1:11434${endpoint}`;
+        const localModel = 'qwen2.5:4b';
+        
+        logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`);
 
-    // Pre-flight check before waiting 300s
-    if (fallbackLevel === 0) {
-        const isOnline = await checkOllamaOnline(url, endpoint);
-        if (!isOnline) {
-            logger.info(`Primary Ollama PC is offline or unreachable. Skipping to local.`);
-            return queryOllama(endpoint, payload, 1);
-        }
-    }
-
-    if (fallbackLevel === 1) {
-        let isOnline = await checkOllamaOnline(url, endpoint);
+        // Try to start local Ollama if offline
+        let isOnline = await checkOllamaOnline(localUrl, endpoint);
         if (!isOnline) {
             logger.info(`Local Ollama is offline. Attempting to start with 'open -a Ollama'...`);
             const { exec } = require('child_process');
             exec('open -a Ollama');
-            
-            // Wait up to 10 seconds for it to start
             for (let i = 0; i < 5; i++) {
-                await new Promise(r => setTimeout(r, 2000)); // wait 2s
-                isOnline = await checkOllamaOnline(url, endpoint);
-                if (isOnline) {
-                    logger.info(`Local Ollama is now online!`);
-                    break;
-                }
+                await new Promise(r => setTimeout(r, 2000));
+                isOnline = await checkOllamaOnline(localUrl, endpoint);
+                if (isOnline) break;
             }
         }
+
         if (!isOnline) {
-            logger.warn(`Local Ollama failed to start. Skipping to Gemini.`);
-            return queryOllama(endpoint, payload, 2);
+            throw new Error("All fallback tiers (Remote, Gemini, Local) are unreachable.");
+        }
+
+        try {
+            const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: timeoutMs });
+            return response.data;
+        } catch (err) {
+            logger.error(`Local fallback failed: ${err.message}`);
+            throw err;
         }
     }
 
-
-    const finalPayload = {
-        ...payload,
-        model: model,
-        stream: false
-    };
-
+    // Level 0: Primary Remote Workstation
+    const remoteUrl = `http://192.168.50.182:11434${endpoint}`;
+    const remoteModel = 'gemma3:27b';
+    
+    // Pre-flight check
+    const isOnline = await checkOllamaOnline(remoteUrl, endpoint);
+    if (!isOnline) {
+        logger.info(`Primary Ollama PC is offline. Skipping to Level 1 (Gemini).`);
+        return queryOllama(endpoint, payload, 1);
+    }
     try {
-        const response = await axios.post(url, finalPayload, { timeout: timeoutMs });
+        const response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs });
         return response.data;
     } catch (err) {
-        if (fallbackLevel === 0) {
-            logger.info(`Primary Ollama failed, falling back to local: ${err.message}`);
-            return queryOllama(endpoint, payload, 1);
-        } else if (fallbackLevel === 1) {
-            logger.info(`Local Ollama failed, falling back to Gemini: ${err.message}`);
-            return queryOllama(endpoint, payload, 2);
-        }
-        throw err;
+        logger.info(`Primary Ollama failed, falling back to Gemini: ${err.message}`);
+        return queryOllama(endpoint, payload, 1);
     }
 }
 

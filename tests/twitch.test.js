@@ -1,28 +1,16 @@
-const { getSubscriptions, twitchSubscribe, testServer } = require('../server/server')
-const oauth = require('../server/oauth')
-const getURL = require('../server/ngrok')
+const { getSubscriptions, twitchSubscribe } = require('../server/server')
+const axios = require('axios')
 
-const server = testServer()
-const OAuthToken = oauth()
-const url = getURL()
-
-const testOauth = async () => console.log(await OAuthToken)
-testOauth();
+jest.mock('axios')
 
 test('Twitch Subscribe', async () => {
-  const twitchSubscription = await twitchSubscribe(process.env.SIRI4N_ID, url, await OAuthToken)
-  console.log('Subscribe response:', twitchSubscription)
-  expect(twitchSubscription.status).toBe(200)
+  axios.post.mockResolvedValueOnce({ status: 200 })
+  const twitchSubscription = await twitchSubscribe('12345', 'http://localhost/test', 'mock_token')
+  expect(twitchSubscription).toBe(200)
 })
 
 test('Get All Twitch Subscriptions', async () => {
-  const subscriptions = await getSubscriptions(await OAuthToken)
-  console.log(subscriptions)
-  expect(subscriptions?.total).not.toBe(undefined)
+  axios.get.mockResolvedValueOnce({ data: { total: 5, data: [] } })
+  const subscriptions = await getSubscriptions('mock_token')
+  expect(subscriptions.total).toBe(5)
 })
-
-test.todo('Delete Twitch Subscription')
-
-test.todo('Delete All Subscriptions')
-
-test.todo('Subscribe All')

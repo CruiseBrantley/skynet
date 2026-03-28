@@ -10,6 +10,9 @@ function linkSummarize(bot) {
     bot.on('messageCreate', async message => {
         if (message.author.bot) return;
         if (!SUMMARY_CHANNELS.includes(message.channelId)) return;
+        
+        // If the bot is mentioned, let the chat command handle the link instead of the auto-summarizer
+        if (message.mentions.has(bot.user)) return;
 
         const urls = extractUrls(message.content);
         if (urls.length === 0) return;

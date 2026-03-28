@@ -66,8 +66,6 @@ function discordBot () {
   server(bot)
   linkSummarize(bot)
 
-  // twitterChannelInit();
-
   bot.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     
@@ -104,8 +102,29 @@ function discordBot () {
         if (chatCommand) {
             // Mock an interaction object to reuse the slash command logic
             let typingInterval;
+            let responseMessage = null;
+
             const stopTyping = () => { if (typingInterval) clearInterval(typingInterval); };
-            const sendAndStop = async (content) => { stopTyping(); return message.channel.send(content); };
+            
+            const replyFunc = async (content) => { 
+                stopTyping();
+                const payload = typeof content === 'string' ? { content } : content;
+                const sent = await message.channel.send(payload);
+                if (!responseMessage) responseMessage = sent;
+                return sent;
+            };
+
+            const editFunc = async (content) => {
+                stopTyping();
+                const payload = typeof content === 'string' ? { content } : content;
+                if (responseMessage) {
+                    return await responseMessage.edit(payload);
+                } else {
+                    const sent = await message.channel.send(payload);
+                    responseMessage = sent;
+                    return sent;
+                }
+            };
             
             const mockInteraction = {
                 client: bot,
@@ -131,10 +150,17 @@ function discordBot () {
                     message.channel.sendTyping(); 
                     typingInterval = setInterval(() => { message.channel.sendTyping(); }, 9000);
                 },
-                reply: sendAndStop,
-                editReply: sendAndStop,
-                followUp: sendAndStop,
-                channel: { send: sendAndStop }
+                deleteReply: async () => {
+                    stopTyping();
+                    if (responseMessage) {
+                        await responseMessage.delete().catch(() => {});
+                        responseMessage = null;
+                    }
+                },
+                reply: replyFunc,
+                editReply: editFunc,
+                followUp: replyFunc,
+                channel: { send: replyFunc }
             };
             
             try {

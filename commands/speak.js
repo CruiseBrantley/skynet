@@ -104,11 +104,11 @@ module.exports = {
                     }, 2000);
                 }
             });
-            await interaction.editReply(`Speaking: "${speakMessage}"`);
+            // await interaction.editReply(`Speaking: "${speakMessage}"`);
             
         } catch (err) {
             logger.info('Encountered an error speaking: ', err);
-            await interaction.editReply('There was an error trying to speak.');
+            // await interaction.editReply('There was an error trying to speak.');
             // Cleanup on error
             try {
                 if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);
