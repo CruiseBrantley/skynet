@@ -1,3 +1,4 @@
+const { MessageFlags } = require('discord.js');
 const logger = require('../logger');
 const { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage } = require('../util/summarize');
 
@@ -32,10 +33,14 @@ function linkSummarize(bot) {
                     if (i === 0) {
                         await message.reply({
                             content: chunks[i],
-                            allowedMentions: { repliedUser: false }
+                            allowedMentions: { repliedUser: false },
+                            flags: [MessageFlags.SuppressEmbeds]
                         });
                     } else {
-                        await message.channel.send(chunks[i]);
+                        await message.channel.send({
+                            content: chunks[i],
+                            flags: [MessageFlags.SuppressEmbeds]
+                        });
                     }
                 }
             }

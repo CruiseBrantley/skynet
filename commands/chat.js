@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -28,20 +28,23 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
             if (!sharedState.primaryResponseUsed) {
                 sharedState.primaryResponseUsed = true;
                 sharedState.primaryContent = str;
-                await interaction.editReply(msg);
+                await interaction.editReply({ content: str, flags: [MessageFlags.SuppressEmbeds] });
             } else if (combinedText.length < 2000) {
                 sharedState.primaryContent = combinedText;
-                await interaction.editReply(combinedText);
+                await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
             } else {
-                await interaction.followUp(msg);
+                await interaction.followUp({ content: str, flags: [MessageFlags.SuppressEmbeds] });
             }
         }
+        // Return a mock message object to support 'fetchReply: true' in commands like /ping
+        return { createdTimestamp: Date.now() };
     };
 
     return {
         id: interaction.id, client: interaction.client, user: interaction.user,
         member: interaction.member, channelId: interaction.channelId,
         channel: interaction.channel, guild: interaction.guild, guildId: interaction.guildId,
+        createdTimestamp: interaction.createdTimestamp || Date.now(),
         options: {
             getString: () => null, getChannel: () => null, getAttachment: () => null,
             getBoolean: () => false, getInteger: () => null,
@@ -137,6 +140,7 @@ module.exports = {
           .setDescription('Optional image to analyze (Vision models only)')
           .setRequired(false)),
   async execute(interaction) {
+    logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
     await interaction.deferReply();
     try {
       const messageText = interaction.options.getString('message').replace('<@558428214805135370>', 'Skynet');
@@ -223,6 +227,7 @@ module.exports = {
         const sharedState = { primaryResponseUsed: false, primaryContent: "" };
 
         while (loopCount < 3) {
+            if (!replyContent || typeof replyContent !== 'string') break;
             const commandMatch = replyContent.match(/<<<RUN_COMMAND:\s*([\s\S]*?)\s*>>>/);
             if (!commandMatch) break;
             
@@ -338,7 +343,7 @@ module.exports = {
                     }
                 }
             } catch (e) {
-                logger.error('Failed to execute autonomous command: ' + e.message);
+                logger.error('Failed to execute autonomous command: ' + e.stack || e.message);
                 replyContent = "I attempted to execute a command autonomously, but encountered an error: " + e.message;
                 break;
             }
@@ -378,7 +383,7 @@ module.exports = {
                     }
                 } catch (discordErr) {
                     logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message);
-                    await interaction.channel.send(chunks[i]);
+                    await interaction.channel.send({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
                 }
             }
         }

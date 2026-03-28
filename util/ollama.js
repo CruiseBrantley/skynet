@@ -77,7 +77,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     // Level 2: Local Fallback (The final fail-safe)
     if (fallbackLevel >= 2) {
         const localUrl = `http://127.0.0.1:11434${endpoint}`;
-        const localModel = 'qwen2.5:4b';
+        const localModel = 'qwen3.5:4b';
         
         logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`);
 

@@ -1,5 +1,5 @@
 const axios = require('axios');
-const ytdl = require('ytdl-core');
+const play = require('play-dl');
 const { getSubtitles } = require('youtube-captions-scraper');
 const logger = require('../logger');
 const { queryOllama } = require('./ollama');
@@ -28,15 +28,15 @@ function shouldSkipUrl(url) {
 async function fetchPageText(url) {
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
         try {
-            const info = await ytdl.getBasicInfo(url);
-            if (info && info.videoDetails) {
-                const desc = info.videoDetails.description || '';
+            const info = await play.video_basic_info(url);
+            if (info && info.video_details) {
+                const desc = info.video_details.description || '';
                 
                 let transcriptText = "";
                 try {
                     const match = url.match(/[?&]v=([^&]+)/) || url.match(/youtu\.be\/([^?]+)/);
                     const videoId = match ? match[1] : null;
-                    if (videoId) {
+                    if (videoId && typeof url === 'string') {
                         const captions = await getSubtitles({ videoID: videoId, lang: 'en' });
                         if (captions && captions.length > 0) {
                             transcriptText = "\n\nTranscript:\n" + captions.map(c => c.text).join(' ');
@@ -48,7 +48,7 @@ async function fetchPageText(url) {
                     // Ignore transcript fetch errors
                 }
 
-                return `YouTube Video Title: ${info.videoDetails.title}\n\nDescription:\n${desc}${transcriptText}`;
+                return `YouTube Video Title: ${info.video_details.title}\n\nDescription:\n${desc}${transcriptText}`;
             }
         } catch (err) {
             logger.info(`Failed to fetch YouTube info for ${url}: ${err.message}`);
@@ -82,6 +82,7 @@ async function fetchPageText(url) {
             .trim();
 
         // Limit to first ~6000 chars to avoid massive payloads
+        logger.info(`Fetched ${text.length} characters from ${url}`);
         return text.substring(0, 6000);
     } catch (err) {
         logger.info(`Failed to fetch page ${url}: ${err.message}`);

@@ -10,6 +10,16 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js')
 const logger = require('./logger')
 const {setupServer: server} = require('./server/server')
 const loginFirebase = require('./firebase-login')
+const { exec } = require('child_process');
+
+// Sync YouTube cookies from Safari on startup
+exec('bash scripts/sync-youtube-cookies.sh', (err, stdout, stderr) => {
+    if (err) {
+        logger.error(`YouTube cookie sync failed: ${err.message}`);
+    } else {
+        logger.info('YouTube cookies synced successfully from Safari.');
+    }
+});
 
 const fs = require('fs');
 const path = require('path');
@@ -69,21 +79,24 @@ function discordBot () {
   bot.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     
+    logger.info(`Interaction received: ${interaction.commandName} from ${interaction.user.tag}`);
+
     const command = interaction.client.commands.get(interaction.commandName);
     
     if (!command) {
-        console.error(`No command matching ${interaction.commandName} was found.`);
+        logger.error(`No command matching ${interaction.commandName} was found.`);
         return;
     }
     
     try {
         await command.execute(interaction, database);
+        logger.info(`Command executed successfully: ${interaction.commandName}`);
     } catch (error) {
-        console.error(error);
+        logger.error(`Command execution error (${interaction.commandName}):`, error);
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true }).catch(() => {});
         } else {
-            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true }).catch(() => {});
         }
     }
   });
@@ -98,6 +111,7 @@ function discordBot () {
     // Check if the bot is directly mentioned (ignore @everyone and @here)
     if (message.mentions.everyone) return;
     if (message.mentions.has(bot.user)) {
+        logger.info(`Bot mentioned by ${message.author.tag} in ${message.channelId}: "${message.content}"`);
         const chatCommand = bot.commands.get('chat');
         if (chatCommand) {
             // Mock an interaction object to reuse the slash command logic

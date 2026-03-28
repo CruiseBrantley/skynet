@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -15,6 +15,9 @@ module.exports = {
         }
 
         const sayMessage = interaction.options.getString('message');
-        await interaction.reply({ content: sayMessage });
+        await interaction.reply({ 
+            content: sayMessage,
+            flags: [MessageFlags.SuppressEmbeds]
+        });
 	},
 };

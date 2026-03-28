@@ -33,9 +33,15 @@ module.exports = {
                 const chunks = splitMessage(`📰 **Summary of** <${url}>:\n${summary}`);
                 for (let i = 0; i < chunks.length; i++) {
                     if (i === 0) {
-                        await interaction.editReply(chunks[i]);
+                        await interaction.editReply({ 
+                            content: chunks[i],
+                            flags: [MessageFlags.SuppressEmbeds]
+                        });
                     } else {
-                        await interaction.followUp(chunks[i]);
+                        await interaction.followUp({ 
+                            content: chunks[i],
+                            flags: [MessageFlags.SuppressEmbeds]
+                        });
                     }
                 }
             } else {

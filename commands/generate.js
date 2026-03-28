@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const logger = require('../logger');
 const { queryOllama } = require('../util/ollama');
@@ -215,13 +215,15 @@ module.exports = {
             try {
                 await interaction.editReply({
                     content: replyContent,
-                    files: [attachment]
+                    files: [attachment],
+                    flags: [MessageFlags.SuppressEmbeds]
                 });
             } catch (discordErr) {
                 // Interaction timed out, send to channel
                 await interaction.channel.send({
                     content: `<@${interaction.user.id}> ${replyContent}`,
-                    files: [attachment]
+                    files: [attachment],
+                    flags: [MessageFlags.SuppressEmbeds]
                 });
             }
 

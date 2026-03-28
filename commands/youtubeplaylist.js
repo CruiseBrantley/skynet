@@ -1,8 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getVoiceConnection, joinVoiceChannel, VoiceConnectionStatus } = require('@discordjs/voice');
-const playVideo = require('../util/playVideo');
 const ytpl = require('ytpl');
 const logger = require('../logger');
+const musicManager = require('../util/MusicManager');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -35,60 +34,14 @@ module.exports = {
 
         await interaction.deferReply();
 
-        let connection;
-        try {
-            connection = joinVoiceChannel({
-                channelId: channelName.id,
-                guildId: channelName.guild.id,
-                adapterCreator: channelName.guild.voiceAdapterCreator,
-            });
-        } catch (err) {
-            logger.info('channel join error: ', err);
-            await interaction.editReply("I don't yet have permission to join this voice channel.");
-            return;
-        }
-
-        async function startPlaylist (playlistItems, connectionObj) {
-            if (playlistItems.length == 0) {
-                interaction.client.user.setActivity(process.env.ACTIVITY);
-                connectionObj.destroy();
-                return;
-            }
-            
-            const nextVideoUrl = playlistItems.shift().shortUrl;
-            
-            try {
-                const subscription = await playVideo(nextVideoUrl, connectionObj.joinConfig.guildId, 5);
-                
-                subscription.player.on('stateChange', async (oldState, newState) => {
-                    if (newState.status === 'idle') {
-                        await startPlaylist(playlistItems, connectionObj);
-                    }
-                });
-                
-                subscription.player.on('error', async err => {
-                    console.log('Player Error:', err);
-                    await startPlaylist(playlistItems, connectionObj);
-                });
-                
-            } catch (e) {
-                console.log('Error starting playlist video:', e);
-                await startPlaylist(playlistItems, connectionObj);
-            }
-        }
-
         try {
             const playlistDoc = await ytpl(query, { pages: 1 });
             interaction.client.user.setActivity('YouTube.');
-            console.log('Playlist Items Length:', playlistDoc.items.length);
             
-            // Expose the global playlist context if you want skipsong to work (basic implementation)
-            global.globalPlaylist = playlistDoc.items;
-            global.globalConnection = connection;
-
-            connection.on(VoiceConnectionStatus.Ready, async () => {
-                await startPlaylist(playlistDoc.items, connection);
-                await interaction.editReply(`Now playing playlist: **${playlistDoc.title}** (${playlistDoc.items.length} videos)`);
+            await musicManager.addBatch(interaction, playlistDoc.items);
+            await interaction.editReply({ 
+                content: `Added playlist: **${playlistDoc.title}** to the queue (${playlistDoc.items.length} videos).`,
+                flags: [MessageFlags.SuppressEmbeds]
             });
             
         } catch (err) {

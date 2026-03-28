@@ -1,10 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getVoiceConnection, joinVoiceChannel, VoiceConnectionStatus } = require('@discordjs/voice');
-const playVideo = require('../util/playVideo');
 const logger = require('../logger');
-
-// Store last search globally if needed by 'red'/'orange'/'yellow' (can be improved later)
-let lastSearch = [];
+const musicManager = require('../util/MusicManager');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -35,36 +31,26 @@ module.exports = {
             return;
         }
 
-        // Extremely basic handling of previous search references (if implemented globally)
-        if (query === 'red' && global.lastSearch?.length) query = global.lastSearch[0].link;
-        if (query === 'orange' && global.lastSearch?.length) query = global.lastSearch[1].link;
-        if (query === 'yellow' && global.lastSearch?.length) query = global.lastSearch[2].link;
-
         await interaction.deferReply();
 
-        try {
-            const connection = joinVoiceChannel({
-                channelId: channel.id,
-                guildId: channel.guild.id,
-                adapterCreator: channel.guild.voiceAdapterCreator,
-            });
+        // Resolve search shortcuts before playing
+        if (query === 'green' && global.lastSearch?.length) query = global.lastSearch[0].link;
+        if (query === 'blue' && global.lastSearch?.length) query = global.lastSearch[1].link;
+        if (query === 'red' && global.lastSearch?.length) query = global.lastSearch[2].link;
 
-            connection.on(VoiceConnectionStatus.Ready, async () => {
-                try {
-                    await playVideo(query, channel.guild.id, 5); // Default volume 5
-                    interaction.client.user.setActivity('YouTube.');
-                    await interaction.editReply(`Now playing: ${query}`);
-                } catch(e) {
-                    logger.error(e);
-                    await interaction.editReply(`Failed to play video: ${e.message}`);
-                }
+        try {
+            const videoUrl = await musicManager.play(interaction, query);
+            interaction.client.user.setActivity('YouTube.');
+            await interaction.editReply({ 
+                content: `Now playing: ${videoUrl}`,
+                flags: [MessageFlags.SuppressEmbeds]
             });
         } catch (err) {
-            logger.info('channel join error: ', err);
+            logger.error('YouTube command error: ', err);
             if (err.message.includes('permission')) {
                 await interaction.editReply("I don't yet have permission to join this voice channel.");
             } else {
-                await interaction.editReply("There was an error joining the voice channel.");
+                await interaction.editReply(`Failed to play: ${err.message}`);
             }
         }
 	},

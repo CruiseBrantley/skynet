@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const logger = require('../logger');
 
@@ -11,7 +11,10 @@ module.exports = {
         axios
           .get(process.env.CATFACT_GET)
           .then(async response => {
-            await interaction.editReply(response.data.fact);
+            await interaction.editReply({ 
+                content: response.data.fact,
+                flags: [MessageFlags.SuppressEmbeds]
+            });
           })
           .catch(async error => {
             logger.info(error);
