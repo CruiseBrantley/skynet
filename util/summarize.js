@@ -31,7 +31,7 @@ async function fetchPageText(url) {
             const info = await play.video_basic_info(url);
             if (info && info.video_details) {
                 const desc = info.video_details.description || '';
-                
+
                 let transcriptText = "";
                 try {
                     const match = url.match(/[?&]v=([^&]+)/) || url.match(/youtu\.be\/([^?]+)/);
@@ -58,31 +58,44 @@ async function fetchPageText(url) {
 
     try {
         const response = await axios.get(url, {
-            timeout: 10000,
+            timeout: 15000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; SkynetBot/1.0)',
-                'Accept': 'text/html'
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Referer': 'https://www.google.com/'
             },
-            maxRedirects: 3
+            maxRedirects: 5
         });
 
         const html = response.data;
         if (typeof html !== 'string') return null;
 
-        // Strip scripts, styles, and HTML tags to get raw text
+        // Strip junk tags to get raw content
         let text = html
             .replace(/<script[\s\S]*?<\/script>/gi, '')
             .replace(/<style[\s\S]*?<\/style>/gi, '')
             .replace(/<nav[\s\S]*?<\/nav>/gi, '')
             .replace(/<footer[\s\S]*?<\/footer>/gi, '')
             .replace(/<header[\s\S]*?<\/header>/gi, '')
+            .replace(/<aside[\s\S]*?<\/aside>/gi, '')
+            .replace(/<form[\s\S]*?<\/form>/gi, '')
+            .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+            .replace(/<canvas[\s\S]*?<\/canvas>/gi, '')
             .replace(/<[^>]+>/g, ' ')
             .replace(/&[a-z]+;/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
 
+        if (text.length < 100) {
+            logger.info(`Fetched very little text (${text.length} chars) from ${url}. Page may be dynamic/JS-heavy.`);
+        } else {
+            logger.info(`Fetched ${text.length} characters from ${url}`);
+        }
+
         // Limit to first ~6000 chars to avoid massive payloads
-        logger.info(`Fetched ${text.length} characters from ${url}`);
         return text.substring(0, 6000);
     } catch (err) {
         logger.info(`Failed to fetch page ${url}: ${err.message}`);
@@ -100,7 +113,7 @@ async function summarizeUrl(url) {
         messages: [
             {
                 role: 'system',
-                content: 'You are a helpful summarizer. Given the text content of a web page, provide a detailed but concise summary. Focus on the SPECIFIC details, changes, or facts — not generic descriptions of what the page is about. For patch notes or changelogs, list the most important individual changes as bullet points. For news articles, highlight the key facts and findings. Avoid vague statements like "the update includes fixes" — instead say what was fixed. Use Discord markdown formatting, BUT NEVER USE markdown link syntax like `[text](url)` since Discord does not support it in standard messages. Just provide the raw URL. If the text has no substantive content (e.g. login page, captcha, access denied), DO NOT summarize it. Instead, reply with exactly the word "SKIP".'
+                content: 'Given the text content of a web page, provide a detailed but concise summary. Focus on the SPECIFIC details, changes, or facts — not generic descriptions of what the page is about. For patch notes or changelogs, list the most important individual changes as bullet points. For news articles, highlight the key facts and findings. Avoid vague statements like "the update includes fixes" — instead say what was fixed. Use Discord markdown formatting, BUT NEVER USE markdown link syntax like `[text](url)` since Discord does not support it in standard messages. DO NOT repeat the original source URL in your response (neither at the beginning nor at the end). If the text has no substantive content (e.g. login page, captcha, access denied), DO NOT summarize it. Instead, reply with exactly the word "SKIP".'
             },
             {
                 role: 'user',
@@ -110,10 +123,20 @@ async function summarizeUrl(url) {
     });
 
     if (result && result.message && result.message.content) {
-        const content = result.message.content.trim();
+        let content = result.message.content.trim();
         if (content === 'SKIP' || content === '"SKIP"' || content.toLowerCase().includes("i cannot summarize")) {
             return null;
         }
+
+        // Final safety check to strip the URL if the AI included it anyway
+        const lowerContent = content.toLowerCase();
+        const lowerUrl = url.toLowerCase();
+        if (lowerContent.endsWith(lowerUrl)) {
+            content = content.substring(0, content.length - url.length).trim();
+        } else if (lowerContent.endsWith(`<${lowerUrl}>`)) {
+            content = content.substring(0, content.length - (url.length + 2)).trim();
+        }
+
         return content;
     }
     return null;

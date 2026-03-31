@@ -72,7 +72,7 @@ module.exports = {
             const enhancePrompt = interaction.options.getBoolean('enhance_prompt') || false;
             const creativity = parseFloat(interaction.options.getString('creativity') || '0.6');
             const modelKey = interaction.options.getString('model') || 'turbo';
-            
+
             let customModel = 'ZImage/SwarmUI_Z-Image-Turbo-FP8Mix.safetensors';
             let defaultSteps = 8;
             let defaultCfg = 1.0;
@@ -88,10 +88,10 @@ module.exports = {
             if (enhancePrompt) {
                 try {
                     const ollamaRes = await queryOllama('/api/generate', {
-                        prompt: `You are an expert AI image generation prompt writer. The user wants an image of: "${prompt}". Write a highly detailed, descriptive, comma-separated list of visual keywords, lighting, and photographic styles to create the best possible image prompt. Do not include any introductory or conversational text, just the raw image prompt.`,
+                        prompt: `The user wants an image of: "${prompt}". Write a highly detailed, descriptive, comma-separated list of visual keywords, lighting, and photographic styles to create the best possible image prompt. Do not include any introductory or conversational text, just the raw image prompt.`,
                         options: { num_predict: 120 }
                     });
-                    
+
                     if (ollamaRes && ollamaRes.response) {
                         prompt = ollamaRes.response.trim();
                         logger.info(`Enhanced prompt from "${originalPrompt}" to "${prompt}"`);
@@ -139,17 +139,17 @@ module.exports = {
             let baseUrl = 'http://192.168.50.182:7801';
             let sessionRes;
             let useComfyDirect = false;
-            
+
             try {
                 sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 10000 });
             } catch (err) {
                 logger.info(`Remote SwarmUI Core offline at ${baseUrl}. Re-routing to local Mac Mini fallback.`);
                 baseUrl = 'http://127.0.0.1:7801';
-                
+
                 if (customModel === 'ZImage/SwarmUI_Z-Image-Turbo-FP8Mix.safetensors' || customModel === 'z-image-turbo-Q8_0.gguf') {
                     useComfyDirect = true;
                 }
-                
+
                 try {
                     if (!useComfyDirect) {
                         sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 5000 });
@@ -184,7 +184,7 @@ module.exports = {
 
                 if (base64InitImage) {
                     generatePayload.initimage = base64InitImage;
-                    generatePayload.initimage_creativity = creativity; 
+                    generatePayload.initimage_creativity = creativity;
                 }
 
                 const genRes = await axios.post(`${baseUrl}/API/GenerateText2Image`, generatePayload, { timeout: 600000 });

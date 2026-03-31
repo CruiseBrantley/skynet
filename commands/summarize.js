@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const logger = require('../logger');
 const { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage } = require('../util/summarize');
 
@@ -30,7 +30,7 @@ module.exports = {
         try {
             const summary = await summarizeUrl(url);
             if (summary) {
-                const chunks = splitMessage(`📰 **Summary of** <${url}>:\n${summary}`);
+                const chunks = splitMessage(`📰 **Summary:**\n${summary}`);
                 for (let i = 0; i < chunks.length; i++) {
                     if (i === 0) {
                         await interaction.editReply({ 
@@ -45,7 +45,7 @@ module.exports = {
                     }
                 }
             } else {
-                await interaction.editReply('Could not extract enough text from that page to summarize.');
+                await interaction.editReply('Could not extract enough text from that page to summarize. (The site may require JavaScript or be blocking automated access).');
             }
         } catch (err) {
             logger.error(`Summarize command error: ${err.message}`);
