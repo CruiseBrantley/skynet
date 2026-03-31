@@ -34,6 +34,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             return queryOllama(endpoint, payload, 2);
         }
         
+        // Updated log message to reflect the correct model being used
         logger.info(`Triggering Level 1 fallback: Gemini-3-Flash for ${endpoint}`);
         
         let geminiMessages = [];
@@ -44,10 +45,11 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
         }
 
         try {
+            // Updated Gemini endpoint to use the latest available model: gemini-3-flash-preview
             const response = await axios.post(
                 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
                 {
-                    model: 'gemini-1.5-flash', // Updated to latest flash model name standard
+                    model: 'gemini-3-flash-preview', 
                     messages: geminiMessages,
                     stream: false
                 },
@@ -69,7 +71,12 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             }
             throw new Error("Invalid response structure from Gemini API");
         } catch (err) {
-            logger.info(`Gemini fallback failed, dropping to local: ${err.message}`);
+            // If 404, we try to log the error detail and then drop to local
+            const errorDetail = err.response ? `${err.response.status} ${err.response.statusText}` : err.message;
+            logger.error(`Gemini fallback failed (${errorDetail}), dropping to local.`);
+            if (err.response && err.response.data) {
+                logger.error(`Gemini API Error Detail: ${JSON.stringify(err.response.data)}`);
+            }
             return queryOllama(endpoint, payload, 2);
         }
     }
@@ -77,7 +84,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     // Level 2: Local Fallback (The final fail-safe)
     if (fallbackLevel >= 2) {
         const localUrl = `http://127.0.0.1:11434${endpoint}`;
-        const localModel = 'qwen3.5:4b';
+        const localModel = 'qwen3.5:4b'; // Confirmed available on local system
         
         logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`);
 
@@ -87,7 +94,8 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             logger.info(`Local Ollama is offline. Attempting to start with 'open -a Ollama'...`);
             const { exec } = require('child_process');
             exec('open -a Ollama');
-            for (let i = 0; i < 5; i++) {
+            // Give it more time to spin up if it was completely closed
+            for (let i = 0; i < 8; i++) {
                 await new Promise(r => setTimeout(r, 2000));
                 isOnline = await checkOllamaOnline(localUrl, endpoint);
                 if (isOnline) break;
@@ -99,7 +107,8 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
         }
 
         try {
-            const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: timeoutMs });
+            // Increased timeout specifically for local generation as it was failing before
+            const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: timeoutMs * 1.5 });
             return response.data;
         } catch (err) {
             logger.error(`Local fallback failed: ${err.message}`);
