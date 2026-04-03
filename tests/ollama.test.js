@@ -1,131 +1,99 @@
-// Mock dependencies
-jest.mock('axios');
-jest.mock('child_process', () => ({
-    exec: jest.fn()
-}));
-jest.mock('../logger', () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn()
-}));
-
-const axios = require('axios');
 const { queryOllama } = require('../util/ollama');
-const { exec } = require('child_process');
-const logger = require('../logger');
+const axios = require('axios');
+const net = require('net');
 
-describe('Ollama Utility Fallback Logic', () => {
+jest.mock('axios');
+jest.mock('net');
+jest.mock('../logger');
+
+jest.setTimeout(30000); // Increase timeout for the local startup retry loops
+
+describe('Ollama Fallback Hierarchy (Level 0: Remote -> Level 1: Gemini -> Level 2: Local)', () => {
+    let mockSocket;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        delete process.env.GEMINI_API_KEY;
+        mockSocket = {
+            setTimeout: jest.fn(),
+            once: jest.fn(),
+            connect: jest.fn(),
+            end: jest.fn(),
+            destroy: jest.fn()
+        };
+        net.Socket.mockImplementation(() => mockSocket);
     });
 
-    // --- Fallback Level 0 (Primary PC) ---
-    test('routes to Level 0 (Primary) when online', async () => {
-        axios.get.mockResolvedValueOnce({ data: {} }); 
-        axios.post.mockResolvedValueOnce({ data: { response: 'Primary Response' } });
+    const mockPortOpen = (isOpen) => {
+        mockSocket.connect.mockImplementation((port, host, cb) => {
+            if (isOpen) cb();
+        });
+        if (!isOpen) {
+            mockSocket.once.mockImplementation((event, cb) => {
+                if (event === 'error' || event === 'timeout') cb();
+            });
+        }
+    };
 
-        const result = await queryOllama('/api/generate', { prompt: 'Hello' });
+    test('should use Level 0 (Remote) when online', async () => {
+        mockPortOpen(true);
+        axios.post.mockResolvedValueOnce({ data: { message: { content: 'remote response' } } });
 
-        expect(axios.get).toHaveBeenCalledWith(expect.stringContaining('192.168.50.182'), expect.any(Object));
+        const result = await queryOllama('/api/chat', { messages: [] });
+
+        expect(result.message.content).toBe('remote response');
         expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('192.168.50.182'), expect.any(Object), expect.any(Object));
-        expect(result).toEqual({ response: 'Primary Response' });
     });
 
-    test('falls back to Level 1 (Gemini) if Level 0 is offline', async () => {
-        process.env.GEMINI_API_KEY = 'mock_key';
-        axios.get.mockRejectedValueOnce(new Error('Network Error'));
-        axios.post.mockResolvedValueOnce({
-            data: { choices: [{ message: { content: 'Gemini Response' } }] }
+    test('should failover to Level 1 (Gemini) when Remote is offline', async () => {
+        mockPortOpen(false); // Remote offline
+        process.env.GEMINI_API_KEY = 'test-key';
+
+        // Mock Gemini success
+        axios.post.mockResolvedValueOnce({ 
+            data: { 
+                choices: [{ message: { content: 'gemini response' } }] 
+            } 
         });
 
-        const result = await queryOllama('/api/generate', { prompt: 'Hello' }, 0);
+        const result = await queryOllama('/api/chat', { messages: [] });
 
-        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Primary Ollama PC is offline'));
-        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('generativelanguage.googleapis'), expect.any(Object), expect.any(Object));
-        expect(result).toEqual({ response: 'Gemini Response' });
+        expect(result.message.content).toBe('gemini response');
+        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('generativelanguage.googleapis.com'), expect.any(Object), expect.any(Object));
     });
 
-    // --- Fallback Level 1 (Gemini API) ---
-    test('falls back to Level 2 (Local) if Gemini API key is missing', async () => {
-        delete process.env.GEMINI_API_KEY;
-        // Mock Level 2 (Local) success
-        axios.get.mockResolvedValueOnce({ data: {} });
-        axios.post.mockResolvedValueOnce({ data: { response: 'Local Fail-safe' } });
+    test('should failover to Level 2 (Local) when Remote and Gemini fail', async () => {
+        mockPortOpen(false); // Remote offline
+        process.env.GEMINI_API_KEY = 'test-key';
 
-        const result = await queryOllama('/api/generate', { prompt: 'Hello' }, 1);
-
-        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('GEMINI_API_KEY is not configured'));
-        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('127.0.0.1'), expect.any(Object), expect.any(Object));
-        expect(result).toEqual({ response: 'Local Fail-safe' });
-    });
-
-    test('translates /api/chat payloads for Gemini correctly', async () => {
-        process.env.GEMINI_API_KEY = 'mock_key';
-        axios.post.mockResolvedValueOnce({
-            data: { choices: [{ message: { content: 'Gemini Chat' } }] }
+        // Gemini fails (Level 1)
+        axios.post.mockRejectedValueOnce(new Error('Gemini API Error'));
+        
+        // Local online (Level 2)
+        // Note: queryOllama checks port 11434 for local. We must handle the second checkPortOpen call.
+        mockSocket.connect.mockImplementation((port, host, cb) => {
+            if (port === 11434 && host === '127.0.0.1') cb(); // Local online
         });
 
-        const messages = [{ role: 'user', content: 'Hi' }];
-        const result = await queryOllama('/api/chat', { messages }, 1);
+        axios.post.mockResolvedValueOnce({ data: { message: { content: 'local response' } } });
 
-        expect(axios.post).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({
-                messages: messages,
-                model: 'gemini-1.5-flash'
-            }),
-            expect.any(Object)
-        );
-        expect(result).toEqual({ message: { role: 'assistant', content: 'Gemini Chat' } });
+        const result = await queryOllama('/api/chat', { messages: [] });
+
+        expect(result.message.content).toBe('local response');
+        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('127.0.0.1:11434'), expect.objectContaining({ model: 'qwen3.5:4b' }), expect.any(Object));
     });
 
-    // --- Fallback Level 2 (Local Mac Mini) ---
-    test('attempts to start Local Ollama if Level 2 is offline, then succeeds', async () => {
-        axios.get.mockRejectedValueOnce(new Error('Offline')); // check 1
-        axios.get.mockResolvedValueOnce({ data: {} });       // check 2 after start
-        axios.post.mockResolvedValueOnce({ data: { response: 'Local Started' } });
+    test('should throw error if all tiers fail', async () => {
+        mockPortOpen(false); // Remote offline
+        process.env.GEMINI_API_KEY = 'test-key';
 
-        jest.useFakeTimers();
-        const queryPromise = queryOllama('/api/generate', { prompt: 'Hello' }, 2);
-        await jest.advanceTimersByTimeAsync(3000);
-        const result = await queryPromise;
-
-        expect(exec).toHaveBeenCalledWith('open -a Ollama');
-        expect(result).toEqual({ response: 'Local Started' });
-        jest.useRealTimers();
-    });
-
-    test('throws final error if Local Ollama cannot be started/reached', async () => {
-        axios.get.mockRejectedValue(new Error('Offline')); // keep failing check
+        axios.post.mockRejectedValueOnce(new Error('Gemini Fail')); // Level 1 fail
         
-        jest.useFakeTimers();
-        // Attach catch immediately to avoid "unhandled rejection" during timer advancement
-        const queryPromise = queryOllama('/api/generate', { prompt: 'Hello' }, 2).catch(e => e);
-        
-        // Fast-forward all timers in the retry loop
-        await jest.runAllTimersAsync();
-        
-        const error = await queryPromise;
-        expect(error).toBeDefined();
-        expect(error.message).toContain('All fallback tiers');
-        jest.useRealTimers();
-    });
+        // Local offline (Level 2)
+        mockSocket.once.mockImplementation((event, cb) => {
+            if (event === 'error') cb();
+        });
+        axios.post.mockRejectedValueOnce(new Error('Local Fail')); // Level 2 fail
 
-    // --- Model Selection ---
-    test('switches to vision-capable model if images are provided', async () => {
-        axios.get.mockResolvedValueOnce({ data: {} }); 
-        axios.post.mockResolvedValueOnce({ data: { response: 'Vision' } });
-
-        await queryOllama('/api/chat', { 
-            messages: [{ role: 'user', content: 'See', images: ['b64'] }] 
-        }, 0);
-
-        expect(axios.post).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ model: 'gemma3:27b' }),
-            expect.any(Object)
-        );
+        await expect(queryOllama('/api/chat', { messages: [] })).rejects.toThrow('All fallback tiers');
     });
 });

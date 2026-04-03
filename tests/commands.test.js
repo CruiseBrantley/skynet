@@ -3,6 +3,7 @@ jest.mock('public-ip', () => ({
     v4: jest.fn()
 }));
 
+const { MessageFlags } = require('discord.js');
 const pingCmd = require('../commands/ping');
 const sayCmd = require('../commands/say');
 const timeCmd = require('../commands/time');
@@ -54,7 +55,10 @@ describe('Utility Commands', () => {
 
             await sayCmd.execute(mockInteraction);
 
-            expect(mockInteraction.reply).toHaveBeenCalledWith({ content: 'Hello Discord' });
+            expect(mockInteraction.reply).toHaveBeenCalledWith({ 
+                content: 'Hello Discord', 
+                flags: [MessageFlags.SuppressEmbeds] 
+            });
         });
 
         test('returns ephemeral error if user lacks Administrator permission', async () => {

@@ -9,7 +9,7 @@ wiki.setUserAgent('SkynetBot/1.0 (https://github.com/CruiseBrantley/skynet; crui
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
-const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If the user asks you to execute a command on their behalf OR look up real-time information/weather on the web (ONLY if it requires current data not in your training set), reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"commandName\", \"arg1\": \"value\"}>>>. Otherwise, answer directly. Do not include any other text when calling a command.";
+const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"search\", \"query\": \"your search query\"}>>>. Using the results provided by the system, you will then provide a direct, summarized answer to the user. Otherwise, answer directly. Do not include any other text when calling a command.";
 
 const channelHistories = {}; // { [channelId]: { time: Date.now(), messages: [] } }
 const MAX_CHANNEL_HISTORIES = 50;
@@ -59,20 +59,25 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
 
 const { queryOllama: executeOllama } = require('../util/ollama');
 
-async function queryOllama(messages, isBackup = false) {
-  let processedMessages = messages;
-  if (isBackup) {
-      processedMessages = messages.map(msg => {
-          if (msg.images) {
-              const { images, ...rest } = msg;
-              return {
-                  ...rest,
-                  content: rest.content + "\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that Skynet's visual sensors are currently offline and you can only process text.]"
-              };
-          }
-          return msg;
-      });
+async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "", isVocal = false) {
+  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
+  if (isVocal) {
+      sysMsg += "\n\nThe user wants you to SPEAK this answer. Keep your final response UNDER 300 CHARACTERS and do NOT use markdown, code blocks, or emojis so it can be read aloud.";
   }
+
+  let processedMessages = messages.map((msg, idx) => {
+      if (idx === 0 && msg.role === 'system') {
+          return { ...msg, content: sysMsg };
+      }
+      if (isBackup && msg.images) {
+          const { images, ...rest } = msg;
+          return {
+              ...rest,
+              content: (rest.content || "") + "\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that Skynet's visual sensors are currently offline and you can only process text.]"
+          };
+      }
+      return msg;
+  });
 
   try {
       const result = await executeOllama('/api/chat', { messages: processedMessages }, isBackup);
@@ -80,7 +85,7 @@ async function queryOllama(messages, isBackup = false) {
   } catch (err) {
       if (!isBackup) {
           logger.info(`Primary Ollama failed, falling back to local: ${err.message}`);
-          return queryOllama(messages, true);
+          return queryOllama(messages, true, commandsContext, logsContext, isVocal);
       }
       throw err;
   }
@@ -188,7 +193,7 @@ module.exports = {
               const params = c.data.options.map(o => `"${o.name}": [${o.description}]`).join(', ');
               paramStr = ` (JSON Params: {${params}})`;
           }
-          return `- /${c.data.name}: ${c.data.description}${paramStr}`;
+          return `- ${c.data.name}: ${c.data.description}${paramStr}`;
       }).join('\n') : 'Unknown');
       let logsContext = "No recent logs available.";
       try {
@@ -201,17 +206,8 @@ module.exports = {
           logger.error('Failed to read logs for chatbot context: ' + e.message);
       }
 
-      const queryMessages = [...channelHistories[channelId].messages];
-      let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
-      if (isVocal) {
-          sysMsg += "\n\nThe user wants you to SPEAK this answer. Keep your final response UNDER 300 CHARACTERS and do NOT use markdown, code blocks, or emojis so it can be read aloud.";
-      }
-      queryMessages[0] = { 
-          role: 'system', 
-          content: sysMsg
-      };
-
-      const responseData = await queryOllama(queryMessages);
+      let currentIsBackup = false;
+      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, isVocal);
 
       if (responseData && responseData.message) {
         channelHistories[channelId].messages.push(responseData.message); // store assistant reply
@@ -228,7 +224,12 @@ module.exports = {
 
         while (loopCount < 3) {
             if (!replyContent || typeof replyContent !== 'string') break;
-            const commandMatch = replyContent.match(/<<<RUN_COMMAND:\s*([\s\S]*?)\s*>>>/);
+            // More robust regex to handle various formatting (missing brackets, extra whitespace, /json prefix, etc.)
+            const commandMatch = replyContent.match(/<<<?RUN_COMMAND:?\s*([\s\S]*?)\s*>>>?/) || 
+                                 replyContent.match(/RUN_COMMAND:?\s*(\{[\s\S]*?\})/) ||
+                                 replyContent.match(/\/json\s*(\{[\s\S]*?\})/i) ||
+                                 replyContent.match(/(\{[\s\S]*?"command"[\s\S]*?\})/i) ||
+                                 replyContent.match(/(\{[\s\S]*?"message"[\s\S]*?\})/i); // Catch bare message JSON
             if (!commandMatch) break;
             
             loopCount++;
@@ -242,12 +243,12 @@ module.exports = {
                 const cmdData = JSON.parse(jsonrepair(jsonStr));
                 
                 // Remove the command tag from the visible reply to avoid cluttering Discord
-                replyContent = replyContent.replace(/<<<RUN_COMMAND:[\s\S]*?>>>/, '').trim();
+                replyContent = replyContent.replace(commandMatch[0], '').trim();
 
                 if (cmdData.command === 'search' || cmdData.command === 'web_search') {
                     const query = cmdData.query || cmdData.arg1 || cmdData.message;
                     if (!sharedState.primaryResponseUsed) {
-                        await interaction.editReply(`*Skynet is searching the web for: \`${query}\`...*`);
+                        await interaction.editReply({ content: `*Skynet is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                     }
                     try {
                         let results = [];
@@ -298,14 +299,14 @@ module.exports = {
                             searchResultContext = `[SYSTEM: WEB SEARCH UNAVAILABLE FOR "${query}"]\nThe search integration returned no results (possibly rate limited). Do not attempt to search again for this query. Instead, answer the user immediately using your internal knowledge base and memory. ONLY apologize/mention the failure if the request absolutely requires real-time data (like current weather or breaking news).`;
                         }
 
-                        channelHistories[channelId].messages.pop(); // Remove previous command
+                        // Keep the assistant's message in history so it knows it requested the search
                         channelHistories[channelId].messages.push({ role: 'system', content: searchResultContext });
                         
-                        const nestedQueryMessages = [...channelHistories[channelId].messages];
-                        nestedQueryMessages[0] = { role: 'system', content: sysMsg };
-                        const nestedResponse = await queryOllama(nestedQueryMessages);
+                        logger.info(`NESTED SEARCH HISTORY (Backup: ${currentIsBackup}): ${JSON.stringify(channelHistories[channelId].messages.slice(-3))}`);
                         
-                        replyContent = nestedResponse.message.content || "";
+                        const nestedResponse = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, isVocal);
+                        
+                        replyContent = replyContent ? (replyContent + "\n\n" + (nestedResponse.message.content || "")) : (nestedResponse.message.content || "");
                         ttsContent = replyContent;
                         channelHistories[channelId].messages.push(nestedResponse.message);
                         // Loop continues to check if the new reply has another command (e.g. speak)
@@ -314,10 +315,22 @@ module.exports = {
                         break;
                     }
                 } else {
-                    const targetCmd = interaction.client.commands.get(cmdData.command);
+                // Normalize the command name: strip leading slashes and trim
+                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '');
+                
+                // Special case: if the model tries to call 'chat' or 'json' autonomously with a 'message'
+                // OR if it just outputs a bare JSON block with a 'message' field.
+                if (((rawCmdName === 'chat' || rawCmdName === 'json' || !rawCmdName) && (cmdData.message || cmdData.arg1))) {
+                    const finalMsg = cmdData.message || cmdData.arg1;
+                    replyContent = replyContent.replace(commandMatch[0], '').trim();
+                    replyContent = replyContent ? (replyContent + "\n\n" + finalMsg) : finalMsg;
+                    continue; // Skip execution and just use the content
+                }
+
+                const targetCmd = interaction.client.commands.get(rawCmdName);
                     if (targetCmd) {
                         if (!sharedState.primaryResponseUsed) {
-                            await interaction.editReply(`*Skynet is autonomously executing \`/${cmdData.command}\`...*`);
+                            await interaction.editReply({ content: `*Skynet is autonomously executing \`/${cmdData.command}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                         }
                         let cmdOutput = "";
                         const mock = createMockInteraction(interaction, {
@@ -340,6 +353,9 @@ module.exports = {
                         } else if (cmdOutput.trim()) {
                             ttsContent = cmdOutput.trim();
                         }
+                    } else {
+                        logger.error(`LLM requested unknown command: ${cmdData.command}`);
+                        replyContent = `${replyContent}\n*(System Error: Skynet attempted to execute unknown command \`/${cmdData.command}\`)*`.trim();
                     }
                 }
             } catch (e) {
@@ -350,7 +366,7 @@ module.exports = {
         }
         // ---------------------------------------------
         // Strip any remaining unparsed tags (in case of loop cap hit or malformed tags)
-        replyContent = replyContent.replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').trim();
+        replyContent = replyContent.replace(/<<<?RUN_COMMAND:?[\s\S]*?>>>?/g, '').replace(/RUN_COMMAND:?\s*\{[\s\S]*?\}/g, '').trim();
 
         if (replyContent.length === 0) {
             // Only delete if the primary slot hasn't been occupied by real content from a tool
@@ -363,17 +379,17 @@ module.exports = {
                 try {
                     const cleanChunk = chunks[i].trim();
                     const originalText = typeof sharedState.primaryContent === 'string' ? sharedState.primaryContent : (sharedState.primaryContent?.content || "");
-                    const combinedText = originalText ? (cleanChunk + "\n" + originalText) : cleanChunk;
+                    const combinedText = (cleanChunk && originalText) ? (cleanChunk + "\n" + originalText) : (cleanChunk || originalText);
 
                     if (i === 0) {
                         if (sharedState.primaryResponseUsed && combinedText.length < 2000) {
                             // Slot is already occupied by tool output (e.g. timestamp result). Prepend our text.
-                            await interaction.editReply(combinedText);
+                            await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
                             sharedState.primaryContent = combinedText;
                         } else if (!sharedState.primaryResponseUsed) {
                             sharedState.primaryResponseUsed = true;
                             sharedState.primaryContent = cleanChunk;
-                            await interaction.editReply(cleanChunk);
+                            await interaction.editReply({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] });
                         } else {
                             // Primary slot is used and merging would exceed limit, so MUST followUp
                             await interaction.followUp(chunks[i]);
@@ -411,7 +427,7 @@ module.exports = {
     } catch (err) {
       logger.error('Ollama error: ' + err.message);
       try {
-          await interaction.editReply('There was an error communicating with the Skynet AI Core.');
+          await interaction.editReply({ content: 'There was an error communicating with the Skynet AI Core.', flags: [MessageFlags.SuppressEmbeds] });
       } catch (e) {
           await interaction.channel.send('There was an error communicating with the Skynet AI Core.');
       }

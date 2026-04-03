@@ -61,7 +61,7 @@ describe('Chat Command', () => {
 
         expect(mockInteraction.deferReply).toHaveBeenCalled();
         expect(executeOllama).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringMatching(/Hello there!\s*/));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/Hello there!\s*/) }));
     });
 
     // --- Tag Stripping ---
@@ -78,7 +78,7 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringMatching(/I have done that\.\s*/));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/I have done that\.\s*/) }));
     });
 
     // --- Recursive Search ---
@@ -97,10 +97,30 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('searching the web'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('searching the web') }));
         expect(googleIt).toHaveBeenCalledWith({ query: 'weather', disableConsole: true });
         expect(executeOllama).toHaveBeenCalledTimes(2);
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringMatching(/The weather is sunny\.\s*/));
+        // Should contain the final search result
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/The weather is sunny\.\s*/) }));
+    });
+
+    test('retains Surrounding Text during recursive search', async () => {
+        executeOllama
+            .mockResolvedValueOnce({
+                message: { role: 'assistant', content: 'Let me check: <<<RUN_COMMAND: {"command": "search", "query": "weather"}>>> and I will tell you.' }
+            })
+            .mockResolvedValueOnce({
+                message: { role: 'assistant', content: 'Sunny.' }
+            });
+
+        googleIt.mockResolvedValue([{ title: 'W', snippet: 'Sunny', link: 'http://w.com' }]);
+
+        await chat.execute(mockInteraction);
+
+        // Final response should merge the original text with the search result
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Let me check:') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Sunny.') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('and I will tell you.') }));
     });
 
     // --- Search Fallback: Google -> DuckDuckGo ---
@@ -127,7 +147,7 @@ describe('Chat Command', () => {
         expect(googleIt).toHaveBeenCalled();
         expect(ddg.search).toHaveBeenCalledWith('latest news');
         expect(executeOllama).toHaveBeenCalledTimes(2);
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringMatching(/Here is the news from DDG\.\s*/));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/Here is the news from DDG\.\s*/) }));
     });
     test('falls back to Wikipedia when Google and DDG return no results', async () => {
         executeOllama
@@ -153,7 +173,7 @@ describe('Chat Command', () => {
 
         expect(googleIt).toHaveBeenCalled();
         expect(wiki.summary).toHaveBeenCalledWith('moon distance');
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('The Moon is far.'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('The Moon is far.') }));
     });
     test('falls back to internal knowledge when ALL search providers fail', async () => {
         executeOllama
@@ -177,7 +197,7 @@ describe('Chat Command', () => {
         expect(wiki.summary).toHaveBeenCalled();
         
         // Final message should contain synthesized answer
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('internal databases'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('internal databases') }));
     });
     
     // --- Chained Reasoning: Search -> Speak ---
@@ -198,10 +218,53 @@ describe('Chat Command', () => {
 
         expect(executeOllama).toHaveBeenCalledTimes(2);
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringMatching(/It is 5 PM\.\s*/));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/It is 5 PM\.\s*/) }));
     });
 
-    // --- Malformed JSON (jsonrepair fixes it instead of crashing) ---
+    // --- Robust Parsing ---
+    test('handles RUN_COMMAND without brackets (Robust parsing)', async () => {
+        executeOllama.mockResolvedValue({
+            message: { role: 'assistant', content: 'RUN_COMMAND: {"command": "speak", "message": "hello"}' }
+        });
+
+        const speakExec = jest.fn().mockResolvedValue();
+        mockInteraction.client.commands.get = jest.fn().mockReturnValue({ execute: speakExec });
+
+        await chat.execute(mockInteraction);
+
+        expect(speakExec).toHaveBeenCalled();
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+    });
+
+    test('handles RUN_COMMAND with missing trailing brackets (Robust parsing)', async () => {
+        executeOllama.mockResolvedValue({
+            message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "speak", "message": "hello"}>>' }
+        });
+
+        const speakExec = jest.fn().mockResolvedValue();
+        mockInteraction.client.commands.get = jest.fn().mockReturnValue({ execute: speakExec });
+
+        await chat.execute(mockInteraction);
+
+        expect(speakExec).toHaveBeenCalled();
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+    });
+
+    // --- Unknown Command Logging ---
+    test('logs error and informs user of unknown command', async () => {
+        executeOllama.mockResolvedValue({
+            message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "hallucinated_cmd"}>>>' }
+        });
+
+        mockInteraction.client.commands.get.mockReturnValue(null);
+
+        await chat.execute(mockInteraction);
+
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('unknown command: hallucinated_cmd'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('System Error') }));
+    });
+
+    // --- Malformed JSON (existing test improved) ---
     test('handles malformed JSON gracefully via jsonrepair', async () => {
         executeOllama.mockResolvedValue({
             message: { role: 'assistant', content: '<<<RUN_COMMAND: { bad json >>>' }
@@ -210,8 +273,8 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         // jsonrepair will attempt to fix even severely broken JSON.
-        // The bot should not crash regardless of the outcome, and since the text is empty, it will delete the reply.
-        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+        // the text contains an error message instead of being empty, so it will NOT delete the reply.
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('unknown command') }));
     });
 
     // --- Missing Arguments ---
@@ -222,7 +285,7 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('unknown command') }));
     });
 
     // --- Vocal Playback "tell me" ---
@@ -237,7 +300,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('chicken'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('chicken') }));
     });
 
     // --- Double-speak prevention ---
@@ -268,7 +331,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(mockInteraction.editReply).toHaveBeenCalledWith(
-            expect.stringContaining('error communicating')
+            expect.objectContaining({ content: expect.stringContaining('error communicating') })
         );
     });
 
@@ -303,7 +366,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         // Should have edited the status message with the result
-        expect(mockInteraction.editReply).toHaveBeenCalledWith('Resulting Text');
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Resulting Text' }));
         // Should NOT have deleted the reply because it now contains the result
         expect(mockInteraction.deleteReply).not.toHaveBeenCalled();
     });
@@ -324,9 +387,9 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         // Should have edited the reply to merge them
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Here is the data:'));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('TOOL_RESULT'));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('\n'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Here is the data:') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('TOOL_RESULT') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('\n') }));
         
         // No follow-up should have been sent (since they were merged)
         expect(mockInteraction.followUp).not.toHaveBeenCalled();
@@ -351,8 +414,8 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(longSummary);
-        expect(mockInteraction.followUp).toHaveBeenCalledWith(secondChunk);
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: longSummary }));
+        expect(mockInteraction.followUp).toHaveBeenCalledWith(expect.objectContaining({ content: secondChunk }));
     });
 
     test('ensures multiple tools merge into a single message', async () => {
@@ -378,10 +441,10 @@ describe('Chat Command', () => {
         // 4. t2 calls editReply("R2") -> Merges "R1\nR2"
         // 5. final loop merges "Results:" with "R1\nR2"
         
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Results:'));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('R1'));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('R2'));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith('Results:\nR1\nR2');
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Results:') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('R1') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('R2') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Results:\nR1\nR2' }));
     });
 
     // --- getString fallback correctness ---

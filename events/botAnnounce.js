@@ -16,11 +16,13 @@ const hoski = process.env.HOSKI_ID
 const crow = process.env.CROW_ID
 const merc = process.env.MERC_ID
 const juan = process.env.JUAN_ID
+const well_suited = process.env.WELL_SUITED_ID
 
 const cyphaneFriends = [fireraven, cha, bfd, iaj]
 const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow, iaj, merc, juan]
 const sirverFriends = [siri4n]
 const siri4nFriends = [siri4n]
+const makingThingsSimplerFriends = [well_suited, whitehallow, siri4n]
 
 // Generic mapping for additional social links (YouTube, Twitter, etc.)
 const streamerSocials = {
@@ -64,6 +66,11 @@ const prodCases = [
     case: sirverFriends,
     channel: process.env.SIRVER_ANNOUNCE_CHANNEL,
     type: 'friend'
+  },
+  {
+    case: makingThingsSimplerFriends,
+    channel: process.env.MAKING_THINGS_SIMPLER_ANNOUNCE_CHANNEL,
+    type: 'main'
   }
 ]
 

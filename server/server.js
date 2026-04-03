@@ -103,6 +103,7 @@ async function subscribeAll () {
   twitchSubscribe(process.env.CROW_ID, url)
   twitchSubscribe(process.env.MERC_ID, url)
   twitchSubscribe(process.env.JUAN_ID, url)
+  twitchSubscribe(process.env.WELL_SUITED_ID, url)
 }
 
 async function getGameInfo (id) {
