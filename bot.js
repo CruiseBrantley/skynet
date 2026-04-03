@@ -57,6 +57,8 @@ function discordBot() {
     }
     aFunc()
     const database = loginFirebase()
+    const setupConfigSync = require('./util/configSync')
+    bot.configSync = setupConfigSync(database)
 
     bot.on('ready', () => {
         logger.info('Connected')

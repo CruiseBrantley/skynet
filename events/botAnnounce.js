@@ -1,148 +1,75 @@
-const { AttachmentBuilder, EmbedBuilder } = require('discord.js')
-const axios = require('axios')
-const logger = require('../logger')
-const fs = require('fs')
+const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
+const axios = require('axios');
+const logger = require('../logger');
+const fs = require('fs');
+const path = require('path');
 
-const fireraven = process.env.FIRERAVEN_ID
-const cyphane = process.env.CYPHANE_ID
-const cha = process.env.CHA_ID
-const bfd = process.env.BFD_ID
-const dale = process.env.DALE_ID
-const iaj = process.env.I_AM_JEFF_ID
-const siri4n = process.env.SIRI4N_ID
-const whitehallow = process.env.WHITEHALLOW_ID
-const deku = process.env.DEKU_ID
-const hoski = process.env.HOSKI_ID
-const crow = process.env.CROW_ID
-const merc = process.env.MERC_ID
-const juan = process.env.JUAN_ID
-const well_suited = process.env.WELL_SUITED_ID
+const configPath = path.join(__dirname, '../config/announcements.json');
 
-const cyphaneFriends = [fireraven, cha, bfd, iaj]
-const fireFriends = [cyphane, cha, siri4n, whitehallow, deku, hoski, crow, iaj, merc, juan]
-const sirverFriends = [siri4n]
-const siri4nFriends = [siri4n]
-const makingThingsSimplerFriends = [well_suited, whitehallow, siri4n]
-
-// Generic mapping for additional social links (YouTube, Twitter, etc.)
-const streamerSocials = {
-  [fireraven]: {
-    youtube: 'https://www.youtube.com/@FireravenTV'
+function loadConfig() {
+  try {
+    const data = fs.readFileSync(configPath, 'utf8');
+    return JSON.parse(data);
+  } catch (err) {
+    logger.error('Error loading announcement config:', err);
+    return { groups: [], socials: {} };
   }
 }
 
-const prodCases = [
-  {
-    case: [fireraven],
-    channel: process.env.FIRERAVEN_ANNOUNCE_CHANNEL,
-    type: 'main'
-  }, // Case FireRaven
-  {
-    case: fireFriends,
-    channel: process.env.FIRERAVEN_FRIENDS_ANNOUNCE_CHANNEL,
-    type: 'friend'
-  }, // Case FireRaven Friend
-  // {
-  //   case: [cyphane],
-  //   channel: process.env.CYPHANE_ANNOUNCE_CHANNEL,
-  //   type: 'main'
-  // }, // Case Cyphane
-  // {
-  //   case: cyphaneFriends,
-  //   channel: process.env.CYPHANE_FRIENDS_ANNOUNCE_CHANNEL,
-  //   type: 'friend'
-  // }, // Case Cyphane Friend
-  {
-    case: [dale],
-    channel: process.env.DALE_ANNOUNCE_CHANNEL,
-    type: 'main'
-  }, // Case Dale
-  {
-    case: [bfd],
-    channel: process.env.BFD_ANNOUNCE_CHANNEL,
-    type: 'main'
-  },
-  {
-    case: sirverFriends,
-    channel: process.env.SIRVER_ANNOUNCE_CHANNEL,
-    type: 'friend'
-  },
-  {
-    case: makingThingsSimplerFriends,
-    channel: process.env.MAKING_THINGS_SIMPLER_ANNOUNCE_CHANNEL,
-    type: 'main'
-  }
-]
-
-const testCases = [
-  {
-    case: [siri4n],
-    channel: process.env.TEST_CHANNEL,
-    type: 'main'
-  },
-  {
-    case: siri4nFriends,
-    channel: process.env.TEST_CHANNEL,
-    type: 'friend'
-  }
-]
-
-const streamCases = process.env.NODE_ENV === 'dev' ? testCases : prodCases
-
-async function announce(bot, data, channel, type) {
+async function announce(bot, data, group, config) {
   try {
-    console.log(data)
-    const attachment = new AttachmentBuilder('image.jpg', { name: 'image.jpg' })
+    const attachment = new AttachmentBuilder('image.jpg', { name: 'image.jpg' });
     const embed = new EmbedBuilder()
       .setAuthor({
-        name: `${data.broadcaster_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''
-          }on Twitch!`
+        name: `${data.broadcaster_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''}on Twitch!`
       })
       .setURL(`https://www.twitch.tv/${data.broadcaster_name}`)
       .setTitle(data.title)
       .setImage('attachment://image.jpg')
-      .setTimestamp()
-    console.log(attachment, embed)
+      .setTimestamp();
 
-    const socials = streamerSocials[data.broadcaster_id]
-    const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : ''
+    const socials = config.socials[data.broadcaster_id];
+    const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : '';
 
-    const targetChannel = await bot.channels.fetch(channel)
+    const targetChannel = await bot.channels.fetch(group.channel_id);
     if (!targetChannel) {
-      logger.info(`botAnnounce: Channel ${channel} not found`)
-      return
+      logger.info(`botAnnounce: Channel ${group.channel_id} not found`);
+      return;
     }
 
+    const mention = group.mention !== undefined ? group.mention : '@everyone';
+
     await targetChannel.send({
-        content:
-          `${type === 'friend' ? '' : '@everyone'} ${data.broadcaster_name
-          } has gone Live! https://www.twitch.tv/${data.broadcaster_name}${youtubeText}`,
-        embeds: [embed],
-        files: [attachment]
-      })
+      content: `${mention} ${data.broadcaster_name} has gone Live! https://www.twitch.tv/${data.broadcaster_name}${youtubeText}`,
+      embeds: [embed],
+      files: [attachment]
+    });
   } catch (err) {
-    logger.info('Main botAnnounce error: ', err)
+    logger.error('Main announce error:', err);
   }
 }
 
 async function botAnnounce(bot, data) {
   try {
+    const config = loadConfig();
     const imageUrl = data.game_image
-        ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
-        : data.thumbnail_url
-          .replace('{width}', '1025')
-          .replace('{height}', '577');
-          
-    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    fs.writeFileSync('image.jpg', imageResponse.data)
+      ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
+      : data.thumbnail_url
+        .replace('{width}', '1025')
+        .replace('{height}', '577');
 
-    for (const streamCase of streamCases)
-      if (streamCase.case.includes(data.broadcaster_id)) {
-        logger.info(`Announcing: ${data.broadcaster_name} ${streamCase.channel} ${streamCase.type}`)
-        await announce(bot, data, streamCase.channel, streamCase.type)
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    fs.writeFileSync('image.jpg', imageResponse.data);
+
+    for (const group of config.groups) {
+      if (group.streamers.includes(data.broadcaster_id)) {
+        logger.info(`Announcing: ${data.broadcaster_name} in ${group.channel_id}`);
+        await announce(bot, data, group, config);
       }
+    }
   } catch (err) {
-    logger.info('Error downloading image', err)
+    logger.error('Error in botAnnounce:', err);
   }
 }
-module.exports = botAnnounce
+
+module.exports = botAnnounce;

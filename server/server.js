@@ -4,25 +4,29 @@ const logger = require('../logger')
 const oauth = require('./oauth')
 const express = require('express')
 const getURL = require('./ngrok')
+const fs = require('fs')
+const path = require('path')
+
 const server = express()
 const port = process.env.TWITCH_LISTEN_PORT
+const configPath = path.join(__dirname, '../config/announcements.json')
 
 server.use(express.json())
 
 let streamID
 let oauthToken
 
-async function twitchSubscribe (id, url, twitchToken) {
+async function twitchSubscribe(id, url, twitchToken) {
   const data = {
     version: "1",
     type: "stream.online",
     "condition": {
       "broadcaster_user_id": id
     },
-    "transport": {
-      "method": "webhook",
-      "callback": await url,
-      "secret": "abcdefghij0123456789"
+    transport: {
+      method: "webhook",
+      callback: await url,
+      secret: "abcdefghij0123456789"
     }
   }
   return axios
@@ -38,11 +42,12 @@ async function twitchSubscribe (id, url, twitchToken) {
       return res.status
     })
     .catch(err => {
-      logger.info(`Failed Subscribing for ${id} ${err.message}`)
+      logger.info(`Failed Subscribing for ${id}: ${err.response?.data?.message || err.message}`)
       return err.response?.data
     })
 }
-async function deleteSubscription (subscriptionId) {
+
+async function deleteSubscription(subscriptionId) {
   return axios
     .delete(`https://api.twitch.tv/helix/eventsub/subscriptions?id=${subscriptionId}`, {
       headers: {
@@ -58,7 +63,7 @@ async function deleteSubscription (subscriptionId) {
     })
 }
 
-async function getSubscriptions (oauthParam) {
+async function getSubscriptions(oauthParam) {
   return axios
     .get('https://api.twitch.tv/helix/eventsub/subscriptions', {
       headers: {
@@ -70,43 +75,45 @@ async function getSubscriptions (oauthParam) {
     .then(res => {
       logger.info(`Successfully got all ${String(res.data?.total)} Subscriptions`)
       return res.data
-    }
-    )
+    })
     .catch(err => {
       logger.info('Failed Getting Subscriptions:', err)
     })
 }
 
-async function subscribeAll () {
-  const url = await getURL()
-  oauthToken = await oauth()
+async function subscribeAll() {
+  try {
+    const url = await getURL()
+    oauthToken = await oauth()
 
-  // Clean up old subscriptions to prevent accumulation
-  const existingSubs = await getSubscriptions(oauthToken)
-  if (existingSubs && existingSubs.data && existingSubs.data.length > 0) {
+    // Clean up old subscriptions to prevent accumulation
+    const existingSubs = await getSubscriptions(oauthToken)
+    if (existingSubs && existingSubs.data && existingSubs.data.length > 0) {
       logger.info(`Cleaning up ${existingSubs.data.length} old Twitch subscriptions...`)
       for (const sub of existingSubs.data) {
-          await deleteSubscription(sub.id)
+        await deleteSubscription(sub.id)
       }
-  }
+    }
 
-  twitchSubscribe(process.env.FIRERAVEN_ID, url)
-  twitchSubscribe(process.env.CYPHANE_ID, url)
-  twitchSubscribe(process.env.CHA_ID, url)
-  twitchSubscribe(process.env.SIRI4N_ID, url)
-  twitchSubscribe(process.env.BFD_ID, url)
-  twitchSubscribe(process.env.DALE_ID, url)
-  twitchSubscribe(process.env.I_AM_JEFF_ID, url)
-  twitchSubscribe(process.env.WHITEHALLOW_ID, url)
-  twitchSubscribe(process.env.DEKU_ID, url)
-  twitchSubscribe(process.env.HOSKI_ID, url)
-  twitchSubscribe(process.env.CROW_ID, url)
-  twitchSubscribe(process.env.MERC_ID, url)
-  twitchSubscribe(process.env.JUAN_ID, url)
-  twitchSubscribe(process.env.WELL_SUITED_ID, url)
+    // Load unique streamers from config
+    const configData = fs.readFileSync(configPath, 'utf8')
+    const config = JSON.parse(configData)
+    const uniqueStreamers = new Set()
+    
+    config.groups.forEach(group => {
+      group.streamers.forEach(id => uniqueStreamers.add(id))
+    })
+
+    logger.info(`Subscribing to ${uniqueStreamers.size} unique Twitch streamers...`)
+    for (const id of uniqueStreamers) {
+      await twitchSubscribe(id, url)
+    }
+  } catch (err) {
+    logger.error('Error in subscribeAll:', err)
+  }
 }
 
-async function getGameInfo (id) {
+async function getGameInfo(id) {
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/games?id=${id}`, {
       headers: {
@@ -120,13 +127,12 @@ async function getGameInfo (id) {
       return { game_name: response.name, game_image: response.box_art_url }
     }
     logger.info("Response wasn't right, or there was no game:\n ", res.data)
-  }
-  catch(err) {
+  } catch (err) {
     logger.info("Couldn't get game info: " + err)
   }
 }
 
-async function getChannelInfo (id) {
+async function getChannelInfo(id) {
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/channels?broadcaster_id=${id}`, {
       headers: {
@@ -138,21 +144,15 @@ async function getChannelInfo (id) {
       return res.data.data[0]
     }
     logger.info("Response wasn't right, or there was no channel:\n ", res.data)
-  }
-  catch(err) {
+  } catch (err) {
     logger.info("Couldn't get channel info: " + err)
   }
 }
 
-function setupServer (bot) {
+function setupServer(bot) {
   subscribeAll()
-  // setInterval(() => {
-  //   // ngrok URL needs to be renewed periodically
-  //   subscribeAll()
-  // }, 60 * 60 * 24 * 100) // seconds/minutes/hours/day/milliseconds
 
   server.get('/', async (req, res) => {
-    // Called on initial subscription
     logger.info('Get: ' + req.query['hub.challenge'])
     res
       .status(200)
@@ -161,21 +161,16 @@ function setupServer (bot) {
   })
 
   server.post('/', async (req, res) => {
-    // Called when new stream is detected
-    // streamID is kept to ensure there aren't duplicate updates
     logger.info('Post Received.')
     const { body } = req
 
     if (body.challenge) {
-      // Called on initial subscription
       logger.info('Challenge Token: ' + body.challenge)
       res
         .status(200)
         .type('text/plain')
         .send(body.challenge)
-    }
-
-    else if (
+    } else if (
       body &&
       body.subscription &&
       body.subscription.id !== streamID
@@ -194,24 +189,8 @@ function setupServer (bot) {
   return server
 }
 
-function testServer () {
-  server.get('/', async (req, res) => {
-    // Called on initial subscription
-    console.log('Get: ' + req.query['hub.challenge'])
-    res
-      .status(200)
-      .type('text/plain')
-      .send(req.query['hub.challenge'])
-  })
-
-  server.listen(5002, () =>
-    logger.info(`Twitch updates listening on port: ${5002}!`)
-  )
-  return server
-}
-
 module.exports.setupServer = setupServer
 module.exports.getSubscriptions = getSubscriptions
 module.exports.deleteSubscription = deleteSubscription
 module.exports.twitchSubscribe = twitchSubscribe
-module.exports.testServer = testServer
+module.exports.subscribeAll = subscribeAll;
