@@ -18,15 +18,48 @@ module.exports = {
             option.setName('channel')
                 .setDescription('The voice channel to join')
                 .addChannelTypes(2) // Voice channel type
+                .setRequired(false))
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('The specific user to follow into voice')
                 .setRequired(false)),
 	async execute(interaction) {
         let query = interaction.options.getString('message');
         let channelName = interaction.options.getChannel('channel');
         
         if (!channelName) {
-            const memberVoiceChannelId = interaction.member?.voice?.channelId;
-            if (memberVoiceChannelId) {
-                channelName = interaction.guild.channels.cache.get(memberVoiceChannelId);
+            // Priority 1: Specifically targeted user
+            const targetUser = interaction.options.getMember('user');
+            if (targetUser?.voice?.channelId) {
+                channelName = interaction.guild.channels.cache.get(targetUser.voice.channelId);
+                if (channelName) {
+                    logger.info(`Speak: Target user ${targetUser.user.tag} followed into voice channel ${channelName.name}`);
+                }
+            }
+
+            // Priority 2: Check for mentioned users in the message (discovery)
+            if (!channelName) {
+                const mentionRegex = /<@!?(\d+)>/g;
+                let match;
+                while ((match = mentionRegex.exec(query)) !== null) {
+                    const userId = match[1];
+                    const member = interaction.guild.members.cache.get(userId) || await interaction.guild.members.fetch(userId).catch(() => null);
+                    if (member?.voice?.channelId) {
+                        channelName = interaction.guild.channels.cache.get(member.voice.channelId);
+                        if (channelName) {
+                            logger.info(`Speak: Following mentioned user ${member.user.tag} into voice channel ${channelName.name}`);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Priority 3: Fall back to speaker's voice channel
+            if (!channelName) {
+                const memberVoiceChannelId = interaction.member?.voice?.channelId;
+                if (memberVoiceChannelId) {
+                    channelName = interaction.guild.channels.cache.get(memberVoiceChannelId);
+                }
             }
         }
 

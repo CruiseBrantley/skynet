@@ -9,7 +9,7 @@ wiki.setUserAgent('SkynetBot/1.0 (https://github.com/CruiseBrantley/skynet; crui
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
-const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"search\", \"query\": \"your search query\"}>>>. Using the results provided by the system, you will then provide a direct, summarized answer to the user. Otherwise, answer directly. Do not include any other text when calling a command.";
+const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. If you are asked to 'speak' to someone or want to reply vocally to a specific user, use the 'speak' command and include the 'user' ID to follow them into their voice channel. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"command_name\", \"param\": \"value\"}>>>. Otherwise, answer directly. Do not include any other text when calling a command.";
 
 const channelHistories = {}; // { [channelId]: { time: Date.now(), messages: [] } }
 const MAX_CHANNEL_HISTORIES = 50;
@@ -48,6 +48,7 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
         options: {
             getString: () => null, getChannel: () => null, getAttachment: () => null,
             getBoolean: () => false, getInteger: () => null,
+            getMember: () => null, getUser: () => null,
             ...optionsOverrides
         },
         reply: capture,
@@ -182,7 +183,7 @@ module.exports = {
       if (base64Image) {
           userMessage.images = [base64Image];
       }
-      const isVocal = messageText.toLowerCase().includes("tell me") || messageText.toLowerCase().includes("speak");
+      const isVocal = messageText.toLowerCase().includes("tell ") || messageText.toLowerCase().includes("speak") || messageText.toLowerCase().includes("say ");
 
       channelHistories[channelId].messages.push(userMessage);
 
@@ -340,7 +341,15 @@ module.exports = {
                             },
                             getChannel: (n) => interaction.client.channels.cache.get(cmdData[n]) || null,
                             getBoolean: (n) => cmdData[n] === undefined ? false : cmdData[n],
-                            getInteger: (n) => cmdData[n] || null
+                            getInteger: (n) => cmdData[n] || null,
+                            getMember: (n) => {
+                                const id = (cmdData[n] || "").toString().replace(/[<@!>]/g, '');
+                                return interaction.guild.members.cache.get(id) || null;
+                            },
+                            getUser: (n) => {
+                                const id = (cmdData[n] || "").toString().replace(/[<@!>]/g, '');
+                                return interaction.client.users.cache.get(id) || null;
+                            }
                         }, (str) => {
                             cmdOutput += str + " ";
                         }, sharedState);

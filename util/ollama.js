@@ -57,7 +57,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             return queryOllama(endpoint, payload, 2); // Drop to local if API key is missing
         }
 
-        logger.info(`Triggering Level 1 fallback: Gemini-3-flash-preview for ${endpoint}`);
+        logger.info(`Triggering Level 1 fallback: Gemini-3.1-flash-lite for ${endpoint}`);
 
         let geminiMessages = [];
         if (payload.messages) {
@@ -70,7 +70,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             const response = await axios.post(
                 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
                 {
-                    model: 'gemini-3-flash-preview',
+                    model: 'gemini-3.1-flash-lite-preview',
                     messages: geminiMessages,
                     stream: false
                 },
@@ -135,7 +135,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     const remoteHost = '192.168.50.182';
     const remotePort = 11434;
     const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`;
-    const remoteModel = 'gemma3:27b';
+    const remoteModel = 'gemma3:latest';
 
     // Quick TCP pre-flight check (1s timeout)
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000);
