@@ -50,26 +50,11 @@ async function getTwitchUser(identifier) {
     return user;
 }
 
-async function getTwitchUsersByIds(ids) {
-    if (ids.length === 0) return new Map();
-    const token = await getOAuthToken();
-    const response = await axios.get('https://api.twitch.tv/helix/users', {
-        headers: {
-            'Client-ID': process.env.TWITCH_CLIENTID,
-            'Authorization': `Bearer ${token}`
-        },
-        params: { id: ids }
-    });
-    const map = new Map();
-    response.data.data.forEach(user => map.set(user.id, user.display_name));
-    return map;
-}
-
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('twitch-notify')
-        .setDescription('Manage Twitch announcements for this server')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDescription('Manage Twitch announcements (Moderators Only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
         .addSubcommand(subcommand =>
             subcommand
                 .setName('add')
@@ -89,6 +74,13 @@ module.exports = {
                 .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
+                .setName('social')
+                .setDescription('Manage supplemental social links (e.g. youtube) for a streamer')
+                .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
+                .addStringOption(option => option.setName('platform').setDescription('The platform (e.g. youtube)').setRequired(true))
+                .addStringOption(option => option.setName('link').setDescription('The URL to the profile (Omit to remove)')))
+        .addSubcommand(subcommand =>
+            subcommand
                 .setName('edit-group')
                 .setDescription('Update the settings for an announcement group')
                 .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true))
@@ -104,10 +96,6 @@ module.exports = {
                 .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
-                .setName('list')
-                .setDescription('List all announcement groups for this server'))
-        .addSubcommand(subcommand =>
-            subcommand
                 .setName('sync')
                 .setDescription('Manually re-subscribe to all streamers')),
 
@@ -115,12 +103,17 @@ module.exports = {
         const ownerId = process.env.OWNER_ID;
         const botId = process.env.CLIENT_ID;
 
-        const isAdmin = interaction.member && interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+        // Discord handles UI visibility via setDefaultMemberPermissions, 
+        // but we keep the owner/bot check for robustness and manual overrides.
+        const isMod = interaction.member && (
+            interaction.member.permissions.has(PermissionFlagsBits.ManageMessages) || 
+            interaction.member.permissions.has(PermissionFlagsBits.Administrator)
+        );
         const isOwner = interaction.user.id === ownerId;
         const isBot = interaction.user.id === botId;
 
-        if (!isAdmin && !isOwner && !isBot) {
-            return interaction.reply({ content: 'Only server administrators, the bot owner, or Skynet can manage announcements.', ephemeral: true });
+        if (!isMod && !isOwner && !isBot) {
+            return interaction.reply({ content: 'Only server moderators, the bot owner, or Skynet can manage announcements.', ephemeral: true });
         }
 
         const subcommand = interaction.options.getSubcommand();
@@ -177,33 +170,50 @@ module.exports = {
             return interaction.reply({ content: `Successfully deleted group **${groupName}** and all its streamer associations.`, ephemeral: true });
         }
 
-        if (subcommand === 'list') {
+        if (subcommand === 'social') {
             await interaction.deferReply();
-            const guildGroups = config.groups.filter(g => g.guild_id === guildId);
-            
-            if (guildGroups.length === 0) {
-                return interaction.editReply({ content: 'No announcement groups configured for this server.', ephemeral: true });
+            try {
+                const identifier = interaction.options.getString('username');
+                const platform = interaction.options.getString('platform').toLowerCase();
+                const link = interaction.options.getString('link');
+
+                const user = await getTwitchUser(identifier);
+                if (!user) {
+                    return interaction.editReply(`Twitch user "${identifier}" not found.`);
+                }
+
+                if (!config.socials) config.socials = {};
+                if (!config.socials[user.id]) config.socials[user.id] = {};
+
+                if (link) {
+                    config.socials[user.id][platform] = link;
+                    saveConfig(config);
+                    if (interaction.client.configSync) {
+                        interaction.client.configSync.updateRemote(config);
+                    }
+                    return interaction.editReply(`Successfully set **${platform}** for **${user.display_name}** to: ${link}`);
+                } else {
+                    if (config.socials[user.id][platform]) {
+                        delete config.socials[user.id][platform];
+                        
+                        // Cleanup empty objects
+                        if (Object.keys(config.socials[user.id]).length === 0) {
+                            delete config.socials[user.id];
+                        }
+
+                        saveConfig(config);
+                        if (interaction.client.configSync) {
+                            interaction.client.configSync.updateRemote(config);
+                        }
+                        return interaction.editReply(`Successfully removed **${platform}** from **${user.display_name}**.`);
+                    } else {
+                        return interaction.editReply(`No **${platform}** link found for **${user.display_name}**.`);
+                    }
+                }
+            } catch (err) {
+                logger.error('Error managing social link:', err);
+                return interaction.editReply('Failed to manage social link. Check logs.');
             }
-
-            // Gather all IDs to resolve
-            const allIds = [...new Set(guildGroups.flatMap(g => g.streamers))];
-            const nameMap = await getTwitchUsersByIds(allIds);
-
-            const embed = new EmbedBuilder()
-                .setTitle(`Twitch Announcements - ${interaction.guild.name}`)
-                .setColor('#6441a5');
-
-            guildGroups.forEach(group => {
-                const names = group.streamers.map(id => nameMap.get(id) || `Unknown User (${id})`);
-                const mentionText = group.mention !== undefined ? group.mention : '@everyone';
-                
-                embed.addFields({
-                    name: `Group: ${group.name} (Channel: <#${group.channel_id}>)`,
-                    value: `**Mention:** ${mentionText}\n**Streamers:**\n${names.length > 0 ? names.join('\n') : '*No streamers*'}`
-                });
-            });
-
-            return interaction.editReply({ embeds: [embed] });
         }
 
         if (subcommand === 'sync') {
@@ -218,13 +228,13 @@ module.exports = {
             }
         }
 
-        const username = interaction.options.getString('username').toLowerCase();
+        const username = interaction.options.getString('username')?.toLowerCase();
         const groupName = interaction.options.getString('group');
         
-        // Find group, strictly scoped to this guild
         let group = config.groups.find(g => g.name === groupName && g.guild_id === guildId);
 
         if (subcommand === 'add') {
+            if (!username) return interaction.reply({ content: 'Username is required.', ephemeral: true });
             await interaction.deferReply();
             try {
                 const channel = interaction.options.getChannel('channel');
@@ -234,7 +244,6 @@ module.exports = {
                     if (!channel) {
                         return interaction.editReply(`New group "${groupName}" requires a channel! Please specify the \`channel\` option.`);
                     }
-                    // Create new group for this guild
                     group = {
                         name: groupName,
                         channel_id: channel.id,
@@ -244,7 +253,6 @@ module.exports = {
                     };
                     config.groups.push(group);
                 } else if (mention !== null) {
-                    // Update mention if provided even for existing group
                     group.mention = mention;
                 }
 
@@ -276,6 +284,7 @@ module.exports = {
         }
 
         if (subcommand === 'remove') {
+            if (!username) return interaction.reply({ content: 'Username is required.', ephemeral: true });
             if (!group) {
                 return interaction.reply({ content: `Group "${groupName}" not found in this server.`, ephemeral: true });
             }
