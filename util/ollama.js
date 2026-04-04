@@ -135,7 +135,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     const remoteHost = '192.168.50.182';
     const remotePort = 11434;
     const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`;
-    const remoteModel = 'gemma3:latest';
+    const remoteModel = 'gemma4:26b';
 
     // Quick TCP pre-flight check (1s timeout)
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000);
