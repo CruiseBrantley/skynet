@@ -6,6 +6,114 @@ const exec = util.promisify(require('child_process').exec);
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Resolves Discord mentions (Users, Roles, Channels) to their display names.
+ */
+async function resolveMentions(text, guild) {
+    if (!guild || !text) return text;
+    
+    // 1. Resolve Users/Members: <@123> or <@!123>
+    const userRegex = /<@!?(\d+)>/g;
+    let match;
+    // We use a clone of the text to avoid index issues during loop
+    let result = text;
+    while ((match = userRegex.exec(text)) !== null) {
+        const userId = match[1];
+        const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+        const displayName = member ? (member.nickname || member.user.username) : "someone";
+        result = result.replaceAll(match[0], displayName);
+    }
+    
+    // 2. Resolve Roles: <@&123>
+    const roleRegex = /<@&(\d+)>/g;
+    while ((match = roleRegex.exec(text)) !== null) {
+        const roleId = match[1];
+        const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId).catch(() => null);
+        const roleName = role ? role.name : "a role";
+        result = result.replaceAll(match[0], roleName);
+    }
+    
+    // 3. Resolve Channels: <#123>
+    const channelRegex = /<#(\d+)>/g;
+    while ((match = channelRegex.exec(text)) !== null) {
+        const channelId = match[1];
+        const channel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+        const channelName = channel ? channel.name : "a channel";
+        result = result.replaceAll(match[0], channelName);
+    }
+    
+    return result;
+}
+
+/**
+ * Strips Discord markdown and technical tags.
+ */
+function stripMarkdown(text) {
+    if (!text) return text;
+    return text
+        .replace(/<t:[0-9]+(:[a-zA-Z])?>/g, '') // Timestamps
+        .replace(/<:[a-zA-Z0-9_]+:[0-9]+>/g, '') // Custom Emojis
+        .replace(/[*_~`|]/g, '')                 // Markdown bold/italics/etc
+        .replace(/#+ /g, '')                     // Heading hashes
+        .replace(/>+ /g, '')                     // Quote symbols
+        .replace(/\s+/g, ' ')                  // Normalize whitespace
+        .trim();
+}
+ 
+/**
+ * Resolves Discord mentions (Users, Roles, Channels) to their display names.
+ */
+async function resolveMentions(text, guild) {
+    if (!guild || !text) return text;
+    
+    // 1. Resolve Users/Members: <@123> or <@!123>
+    const userRegex = /<@!?(\d+)>/g;
+    let match;
+    // We use a clone of the text to avoid index issues during loop
+    let result = text;
+    while ((match = userRegex.exec(text)) !== null) {
+        const userId = match[1];
+        const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+        const displayName = member ? (member.nickname || member.user.username) : "someone";
+        result = result.replaceAll(match[0], displayName);
+    }
+    
+    // 2. Resolve Roles: <@&123>
+    const roleRegex = /<@&(\d+)>/g;
+    while ((match = roleRegex.exec(text)) !== null) {
+        const roleId = match[1];
+        const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId).catch(() => null);
+        const roleName = role ? role.name : "a role";
+        result = result.replaceAll(match[0], roleName);
+    }
+    
+    // 3. Resolve Channels: <#123>
+    const channelRegex = /<#(\d+)>/g;
+    while ((match = channelRegex.exec(text)) !== null) {
+        const channelId = match[1];
+        const channel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+        const channelName = channel ? channel.name : "a channel";
+        result = result.replaceAll(match[0], channelName);
+    }
+    
+    return result;
+}
+
+/**
+ * Strips Discord markdown and technical tags.
+ */
+function stripMarkdown(text) {
+    if (!text) return text;
+    return text
+        .replace(/<t:[0-9]+(:[a-zA-Z])?>/g, '') // Timestamps
+        .replace(/<:[a-zA-Z0-9_]+:[0-9]+>/g, '') // Custom Emojis
+        .replace(/[*_~`|]/g, '')                 // Markdown bold/italics/etc
+        .replace(/#+ /g, '')                     // Heading hashes
+        .replace(/>+ /g, '')                     // Quote symbols
+        .replace(/\s+/g, ' ')                  // Normalize whitespace
+        .trim();
+}
+
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('speak')
@@ -68,7 +176,10 @@ module.exports = {
             return;
         }
 
-        const speakMessage = query;
+        // Natural Translation: Resolve mentions and strip markdown/tags
+        const translatedMessage = stripMarkdown(await resolveMentions(query, interaction.guild));
+        const speakMessage = translatedMessage || "I have nothing to say.";
+
         if (speakMessage.length > 300) {
             await interaction.reply({ content: `I can only speak up to 300 characters at a time.`, ephemeral: true });
             return;
