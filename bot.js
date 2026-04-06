@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+
 // Node 25 SlowBuffer polyfill for outdated dependencies
 const buffer = require('buffer');
 if (!buffer.SlowBuffer) {
@@ -21,8 +24,19 @@ exec('bash scripts/sync-youtube-cookies.sh', (err, stdout, stderr) => {
     }
 });
 
-const fs = require('fs');
-const path = require('path');
+// Periodic/Startup Cleanup: Purge temp_music directory
+const tempMusicDir = path.join(__dirname, 'temp_music');
+if (fs.existsSync(tempMusicDir)) {
+    const files = fs.readdirSync(tempMusicDir);
+    for (const file of files) {
+        try {
+            fs.unlinkSync(path.join(tempMusicDir, file));
+        } catch (err) {
+            logger.warn(`Failed to cleanup orphaned file ${file}: ${err.message}`);
+        }
+    }
+    logger.info(`Cleaned up ${files.length} orphaned music files on startup.`);
+}
 
 function discordBot() {
     // Initialize Discord Bot
@@ -77,6 +91,43 @@ function discordBot() {
 
     server(bot)
     linkSummarize(bot)
+
+    const musicManager = require('./util/MusicManager');
+    const aloneTimers = new Map();
+
+    bot.on('voiceStateUpdate', (oldState, newState) => {
+        const botId = bot.user.id;
+        const guildId = newState.guild.id;
+        const queue = musicManager.getQueue(guildId);
+
+        if (!queue || !queue.connection) return;
+
+        const myChannelId = queue.connection.joinConfig.channelId;
+        const channel = newState.guild.channels.cache.get(myChannelId);
+
+        if (!channel) return;
+
+        // Count non-bot members
+        const humanCount = channel.members.filter(m => !m.user.bot).size;
+
+        if (humanCount === 0) {
+            if (!aloneTimers.has(guildId)) {
+                logger.info(`Bot is alone in guild ${guildId}. Starting 60s auto-disconnect timer.`);
+                const timer = setTimeout(() => {
+                    logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity.`);
+                    musicManager.stop(guildId);
+                    aloneTimers.delete(guildId);
+                }, 60000);
+                aloneTimers.set(guildId, timer);
+            }
+        } else {
+            if (aloneTimers.has(guildId)) {
+                logger.info(`Humans returned to guild ${guildId}. Cancelling auto-disconnect timer.`);
+                clearTimeout(aloneTimers.get(guildId));
+                aloneTimers.delete(guildId);
+            }
+        }
+    });
 
     bot.on('interactionCreate', async interaction => {
         if (!interaction.isChatInputCommand()) return;
