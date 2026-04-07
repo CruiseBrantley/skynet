@@ -16,35 +16,38 @@ function formatTime(totalSeconds) {
 /**
  * Build a visual seek bar.
  */
-function buildSeekBar(position, duration, barLength = 18) {
+function buildSeekBar(position, duration, isPaused = false, barLength = 18) {
     const posStr = formatTime(position) || '0:00';
+    const statusIcon = isPaused ? '⏸️' : '▶️';
 
     if (!duration || duration <= 0) {
-        return `⏱️ ${posStr}`;
+        return `${statusIcon}  ⏱️ ${posStr}`;
     }
 
     const durStr = formatTime(duration);
     const fraction = Math.min(position / duration, 1);
     const filledCount = Math.round(fraction * barLength);
 
-    const bar = '▬'.repeat(Math.max(0, filledCount)) + '🔘' + '▬'.repeat(Math.max(0, barLength - filledCount));
-    return `${bar}  ${posStr} / ${durStr}`;
+    const full = '▒'.repeat(Math.max(0, filledCount));
+    const empty = '█'.repeat(Math.max(0, barLength - filledCount));
+    
+    return `${statusIcon}  ${full}⬛${empty}  ${posStr} / ${durStr}`;
 }
 
 /**
  * Build the "Now Playing" embed for a track.
  */
-function buildNowPlayingEmbed(track, upcoming, positionSeconds) {
+function buildNowPlayingEmbed(track, upcoming, positionSeconds, isPaused = false) {
     const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setAuthor({ name: '🎵 Now Playing' })
+        .setColor(isPaused ? 0xFEE75C : 0x5865F2)
+        .setAuthor({ name: isPaused ? '⏸ Paused' : '🎵 Now Playing' })
         .setTitle(track.title || track.url)
         .setURL(track.url);
 
     const lines = [];
     if (track.channel) lines.push(`**${track.channel}**`);
     if (typeof positionSeconds === 'number') {
-        lines.push(buildSeekBar(positionSeconds, track.durationSeconds || null));
+        lines.push(buildSeekBar(positionSeconds, track.durationSeconds || null, isPaused));
     }
     if (lines.length) embed.setDescription(lines.join('\n'));
 

@@ -74,6 +74,7 @@ service-account.json
 tts_engine/
 temp_audio/
 temp_music/
+metadata_cache.json
 test_raw.wav
 test_filtered.*
 test.m4a

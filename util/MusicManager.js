@@ -300,12 +300,8 @@ class MusicManager {
                 const track = queue.currentTrack;
                 const pos = queue.getPositionSeconds();
                 const upcoming = [...queue.queue];
-                const embed = musicUI.buildNowPlayingEmbed(track, upcoming, pos);
+                const embed = musicUI.buildNowPlayingEmbed(track, upcoming, pos, queue.isPaused());
                 const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay, queue.queue.length);
-
-                if (queue.isPaused()) {
-                    embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
-                }
 
                 await message.edit({ embeds: [embed], components: rows });
             } catch (err) {
@@ -343,8 +339,9 @@ class MusicManager {
 
             // 2. Send new message
             const queue = this.getQueue(guildId);
-            const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], 0);
-            const rows = musicUI.buildControlRow(false, queue.autoplay, queue.queue.length);
+            const isPaused = queue.isPaused();
+            const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], 0, isPaused);
+            const rows = musicUI.buildControlRow(isPaused, queue.autoplay, queue.queue.length);
             const newMessage = await textChannel.send({ embeds: [embed], components: rows });
 
             // 3. Restart loop
