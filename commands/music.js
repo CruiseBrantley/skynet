@@ -189,7 +189,9 @@ async function executeSkip(interaction) {
     const queue = musicManager.getQueue(guildId);
 
     if (!queue || (!queue.isPlaying() && !queue.isPaused())) {
-        return interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
     }
 
     const skipped = queue.currentTrack;
@@ -198,6 +200,7 @@ async function executeSkip(interaction) {
         content: `⏭ Skipped **${skipped?.title || 'current track'}**.`,
         flags: [MessageFlags.Ephemeral],
     });
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }
 
 async function handleStop(interaction) {
@@ -208,13 +211,16 @@ async function handleStop(interaction) {
         content: '⏹ Stopped playback and cleared the queue.',
         flags: [MessageFlags.Ephemeral],
     });
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }
 
 async function handleVolume(interaction) {
     const guildId = interaction.guildId;
     const queue = musicManager.getQueue(guildId);
     if (!queue) {
-        return interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
     }
 
     const volumePercent = interaction.options.getInteger('percent');
@@ -235,13 +241,16 @@ async function handleVolume(interaction) {
         content: `🔊 Volume set to **${volumePercent}%**.`,
         flags: [MessageFlags.Ephemeral],
     });
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }
 
 async function handleAutoplay(interaction) {
     const guildId = interaction.guildId;
     const queue = musicManager.getQueue(guildId);
     if (!queue) {
-        return interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
     }
 
     queue.autoplay = !queue.autoplay;
@@ -260,6 +269,7 @@ async function handleAutoplay(interaction) {
         content: `✨ Autoplay is now **${queue.autoplay ? 'ON' : 'OFF'}**.`,
         flags: [MessageFlags.Ephemeral],
     });
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }
 
 // ── Export ──

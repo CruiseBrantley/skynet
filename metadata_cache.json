@@ -360,5 +360,44 @@
     "channel": "DrowningPoolVEVO",
     "thumbnail": "https://i.ytimg.com/vi/04F4xlWSFh0/hqdefault.jpg",
     "durationSeconds": 210
+  },
+  "oI_918WWzCg": {
+    "title": "Soil - Halo [HQ]",
+    "channel": "Soerensen273",
+    "thumbnail": "https://i.ytimg.com/vi/oI_918WWzCg/hqdefault.jpg",
+    "durationSeconds": 199
+  },
+  "nqWzn3pKAz8": {
+    "title": "Bodies - Drowning Pool [HQ]",
+    "channel": "ElectTheMusic",
+    "thumbnail": "https://i.ytimg.com/vi/nqWzn3pKAz8/hqdefault.jpg",
+    "durationSeconds": 206
+  },
+  "cxim6DILoVU": {
+    "title": "Halo",
+    "channel": "SOiL - Topic",
+    "thumbnail": "https://i.ytimg.com/vi/cxim6DILoVU/hqdefault.jpg",
+    "durationSeconds": 199
+  },
+  "bTjCO7ylyYw": {
+    "loudnorm": {
+      "input_i": "-18.67",
+      "input_tp": "-9.30",
+      "input_lra": "2.20",
+      "input_thresh": "-28.70",
+      "target_offset": "0.32"
+    }
+  },
+  "X4bgXH3sJ2Q": {
+    "title": "Iron Maiden - The Trooper (Official Video)",
+    "channel": "Iron Maiden",
+    "thumbnail": "https://i.ytimg.com/vi/X4bgXH3sJ2Q/hqdefault.jpg",
+    "durationSeconds": 264
+  },
+  "eGtwgYt_QnA": {
+    "title": "Judas Priest - The Hellion / Electric Eye",
+    "channel": "JudasPriestVEVO",
+    "thumbnail": "https://i.ytimg.com/vi/eGtwgYt_QnA/hqdefault.jpg",
+    "durationSeconds": 262
   }
 }

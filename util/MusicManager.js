@@ -168,6 +168,7 @@ class MusicManager {
                     content: `⏭ Skipped **${skipped?.title || 'current track'}**.`,
                     flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                 });
+                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
             else if (btn.customId === 'music_stop') {
@@ -199,6 +200,7 @@ class MusicManager {
                         flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                     });
                 }
+                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
             // Manually trigger a UI update for instant feedback

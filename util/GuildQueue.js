@@ -352,7 +352,16 @@ class GuildQueue {
             }
             this.player.play(resource);
             logger.info(`Now playing in ${this.guildId}: ${track.title || track.url}`);
-            if (this.onTrackStart) this.onTrackStart(track);
+
+            // Refresh currentTrack from cache because playVideo native-extracted rich metadata (like duration)!
+            if (videoId) {
+                const updatedCached = youtube.cache.get(videoId);
+                if (updatedCached) {
+                    this.currentTrack = { ...this.currentTrack, ...updatedCached };
+                }
+            }
+
+            if (this.onTrackStart) this.onTrackStart(this.currentTrack);
 
             // Prefetch the next one immediately
             this._prefetchNext();

@@ -209,14 +209,19 @@ class YouTubeMetadata {
             const cleanTitle = lastTrack.title.replace(/(\(|\[).*(\)|\])/g, '').trim();
             const artistContext = lastTrack.channel ? ` (uploaded by ${lastTrack.channel})` : '';
 
-            logger.info(`Getting AI recommendation based on ${cleanTitle}...`);
+            const seed = Math.floor(Math.random() * 1000000);
+            logger.info(`Getting AI recommendation based on ${cleanTitle} (Seed: ${seed})...`);
             const prompt = `You are an expert DJ AI. The user just listened to the song "${cleanTitle}"${artistContext}.
 Recommend exactly ONE highly similar, great song by a DIFFERENT artist that fits the exact same mood, genre, and vibe.
+CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a different artist and a different track within this exact same genre.
 Reply with ONLY the song title and artist name in this format: "Artist - Title". Do NOT include any other text, formatting, quotes, or explanations.`;
 
             let aiSuggestion = '';
             try {
-                const result = await queryOllama('/api/generate', { prompt });
+                const result = await queryOllama('/api/generate', { 
+                    prompt, 
+                    options: { temperature: 0.9, seed } 
+                });
                 aiSuggestion = result.response.trim().replace(/["']/g, '');
                 logger.info(`AI suggested: ${aiSuggestion}`);
             } catch (llmErr) {

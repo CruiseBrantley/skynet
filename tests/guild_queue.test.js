@@ -1,11 +1,13 @@
 const { AudioPlayerStatus } = require('@discordjs/voice');
 const GuildQueue = require('../util/GuildQueue');
 
-jest.mock('../util/playVideo', () => ({
-    downloadVideo: jest.fn().mockResolvedValue('/tmp/music.opus'),
-    analyzeLoudness: jest.fn().mockResolvedValue({ input_i: -10 }),
-    extractVideoId: (url) => url.split('v=')[1],
-}));
+jest.mock('../util/playVideo', () => {
+    const fn = jest.fn().mockResolvedValue({ volume: { setVolume: jest.fn() } });
+    fn.downloadVideo = jest.fn().mockResolvedValue('/tmp/music.opus');
+    fn.analyzeLoudness = jest.fn().mockResolvedValue({ input_i: -10 });
+    fn.extractVideoId = (url) => url.split('v=')[1];
+    return fn;
+});
 
 jest.mock('../util/YouTubeMetadata', () => ({
     extractVideoId: (url) => url ? url.split('v=')[1] : null,
@@ -106,8 +108,37 @@ describe('GuildQueue', () => {
             // Advance by another 2000ms (2s)
             jest.advanceTimersByTime(2000);
             
-            // 5s played initially + 2s played after = 7 seconds
             expect(queue.getPositionSeconds()).toBe(7);
+        });
+    });
+
+    describe('skip', () => {
+        test('forces the audio player to stop even if paused', () => {
+            queue.skip();
+            expect(mockPlayer.stop).toHaveBeenCalledWith(true);
+        });
+    });
+
+    describe('playback metadata enrichment', () => {
+        test('refreshes currentTrack metadata from cache before emitting onTrackStart to capture yt-dlp native stats', async () => {
+            const track = { url: 'https://youtube.com/watch?v=mock' };
+            queue.queue = [track];
+            const onTrackStartMock = jest.fn();
+            queue.onTrackStart = onTrackStartMock;
+            queue._prefetchNext = jest.fn();
+            mockPlayer.play = jest.fn();
+            
+            // Mock cache to say some metadata was injected during playVideo
+            const youtube = require('../util/YouTubeMetadata');
+            youtube.cache.get.mockReturnValue({ durationSeconds: 42 });
+            youtube.extractVideoId = jest.fn().mockReturnValue('mock');
+            
+            await queue._playNext();
+            
+            expect(onTrackStartMock).toHaveBeenCalledWith(expect.objectContaining({
+                url: 'https://youtube.com/watch?v=mock',
+                durationSeconds: 42
+            }));
         });
     });
 });
