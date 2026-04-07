@@ -24,6 +24,10 @@ class GuildQueue {
         this._pausedAt = null;           // Date.now() when paused
         this.bitrate = 64000;            // Default 64kbps, updated on join()
         this.volume = 0.5;               // Default 50% volume
+        this.autoplay = false;           // Continue playing similar songs
+        this.lastPlayedTrack = null;     // Memory of last track for recommendations
+        this.history = new Set();        // Remember played video IDs to prevent autoplay loops
+        this._isProcessingNext = false;  // Lock for _playNext race conditions
 
         /** Optional callback fired when a new track starts playing. */
         this.onTrackStart = null;
@@ -34,6 +38,7 @@ class GuildQueue {
         this.player.on(AudioPlayerStatus.Idle, () => {
             logger.info(`Player idle in guild ${this.guildId}, advancing queue...`);
             this._cleanupCurrentTrackFile();
+            if (this.currentTrack) this.lastPlayedTrack = this.currentTrack;
             this.currentTrack = null;
             this._resetPosition();
             this._playNext();
@@ -41,6 +46,7 @@ class GuildQueue {
 
         this.player.on('error', (error) => {
             logger.error(`GuildQueue Player Error [${this.guildId}]: ${error.message}`);
+            if (this.currentTrack) this.lastPlayedTrack = this.currentTrack;
             this.currentTrack = null;
             this._resetPosition();
             this._playNext();
@@ -103,7 +109,24 @@ class GuildQueue {
      * Skip the current track. Triggers the Idle handler which calls _playNext.
      */
     skip() {
-        this.player.stop();
+        this.player.stop(true);
+    }
+
+    /**
+     * Randomize the upcoming tracks in the queue.
+     * Starts prefetching the new first track after shuffling.
+     */
+    shuffle() {
+        if (this.queue.length <= 1) return;
+        
+        // Fisher-Yates shuffle
+        for (let i = this.queue.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+        }
+        
+        // Kick off a fresh prefetch since the next song has changed
+        this._prefetchNext();
     }
 
     /**
@@ -124,9 +147,10 @@ class GuildQueue {
      */
     resume() {
         if (this.player.state.status === AudioPlayerStatus.Paused) {
-            // Account for time spent paused
+            // Account for time spent paused so the timer doesn't jump forward permanently
             if (this._pausedAt && this._playbackStartedAt) {
-                // Don't adjust offset — we adjust getPosition to subtract pause time
+                const pauseDuration = Date.now() - this._pausedAt;
+                this._playbackStartedAt += pauseDuration;
             }
             this._pausedAt = null;
             this.player.unpause();
@@ -194,9 +218,14 @@ class GuildQueue {
 
         try {
             logger.info(`Seeking to ${targetSeconds}s in guild ${this.guildId}`);
+            const youtube = require('./YouTubeMetadata');
+            const videoId = youtube.extractVideoId(this.currentTrack.url);
+            const cached = videoId ? youtube.cache.get(videoId) : null;
+
             const resource = await playVideo(this.currentTrack.url, { 
                 seekSeconds: targetSeconds,
                 bitrate: this.bitrate,
+                loudnorm: cached?.loudnorm || null
             });
 
             // Reset position tracking to the seek target
@@ -245,7 +274,17 @@ class GuildQueue {
         const next = this.queue[0];
         try {
             logger.info(`Prefetching next track: ${next.title || next.url}`);
-            await playVideo.downloadVideo(next.url);
+            const filePath = await playVideo.downloadVideo(next.url);
+            
+            // Analyze loudness in the background
+            const { analyzeLoudness } = require('./playVideo');
+            const youtube = require('./YouTubeMetadata');
+            const videoId = youtube.extractVideoId(next.url);
+            const stats = await analyzeLoudness(filePath);
+            if (stats && videoId) {
+                logger.info(`Dual-Pass: Captured loudness stats for ${videoId}`);
+                youtube.setLoudnormStats(videoId, stats);
+            }
         } catch (err) {
             logger.warn(`Prefetch failed for ${next.url}: ${err.message}`);
         }
@@ -264,24 +303,47 @@ class GuildQueue {
      * Internal: play the next track in the queue, or signal that the queue is done.
      */
     async _playNext() {
+        if (this._isProcessingNext) return;
+        this._isProcessingNext = true;
+
         if (this.queue.length === 0) {
             logger.info(`Queue empty for guild ${this.guildId}`);
-            if (this.onQueueEnd) this.onQueueEnd();
+            if (this.autoplay && this.lastPlayedTrack) {
+                logger.info(`Autoplay enabled for ${this.guildId}. Triggering recommendation...`);
+                if (this.onAutoplayTrigger) this.onAutoplayTrigger(this.lastPlayedTrack, this.history);
+            } else if (this.onQueueEnd) {
+                this.onQueueEnd();
+            }
+            this._isProcessingNext = false;
             return;
         }
 
         const youtube = require('./YouTubeMetadata');
         const track = this.queue.shift();
+        this.lastPlayedTrack = this.currentTrack;
         
+        // Enrich track metadata from cache (e.g. duration, thumbnail, loudnorm)
+        const videoId = youtube.extractVideoId(track.url);
+        if (videoId) this.history.add(videoId);
+
+        let cached = null;
         try {
-            // Enrich track metadata from cache (e.g. duration, thumbnail)
-            this.currentTrack = await youtube.getVideoInfo(track.url);
+            cached = await youtube.getVideoInfo(track.url);
+            if (cached.title === track.url) {
+                // If API failed and returned empty url placeholder, don't overwrite our good track data
+                this.currentTrack = { ...track, loudnorm: cached.loudnorm };
+            } else {
+                this.currentTrack = { ...track, ...cached };
+            }
         } catch (err) {
             this.currentTrack = track; // Fallback to original
         }
 
         try {
-            const resource = await playVideo(this.currentTrack.url, { bitrate: this.bitrate });
+            const resource = await playVideo(this.currentTrack.url, { 
+                bitrate: this.bitrate,
+                loudnorm: cached?.loudnorm || null
+            });
             this._playbackStartedAt = Date.now();
             this._seekOffsetMs = 0;
             this._pausedAt = null;
@@ -294,10 +356,12 @@ class GuildQueue {
 
             // Prefetch the next one immediately
             this._prefetchNext();
+            this._isProcessingNext = false;
         } catch (err) {
             logger.error(`Failed to play in ${this.guildId}: ${err.message}`);
             this.currentTrack = null;
             this._resetPosition();
+            this._isProcessingNext = false;
             // Avoid tight retry loop
             setTimeout(() => this._playNext(), 1000);
         }

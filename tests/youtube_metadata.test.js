@@ -50,4 +50,38 @@ describe('YouTubeMetadata', () => {
             expect(youtube._parseISO8601Duration('PT30S')).toBe(30);
         });
     });
+
+    describe('getRecommendation fallback and filtering', () => {
+        beforeEach(() => {
+            jest.spyOn(youtube, 'search').mockImplementation(() => Promise.resolve([
+                { title: 'Artist - Song (Official Video)', url: 'https://youtube.com/watch?v=11111111111' },
+                { title: 'Artist - Song (Lyric Video)', url: 'https://youtube.com/watch?v=22222222222' },
+                { title: 'Totally Different Song', url: 'https://youtube.com/watch?v=33333333333' },
+            ]));
+        });
+        afterEach(() => {
+            jest.restoreAllMocks();
+        });
+
+        test('filters out items in history', async () => {
+            // Mock ollama to fail so it falls back to basic search
+            jest.mock('../util/ollama', () => ({
+                queryOllama: jest.fn().mockRejectedValue(new Error('llm offline'))
+            }), { virtual: true });
+
+            const history = new Set(['11111111111']);
+            const lastTrack = { title: 'Some Base Track', url: 'https://youtube.com/watch?v=basebasebas' };
+            const rec = await youtube.getRecommendation(lastTrack, history);
+            
+            expect(rec.url).toBe('https://youtube.com/watch?v=22222222222'); // 1 is filtered by history
+        });
+        
+        test('filters out highly similar titles safely', async () => {
+             const lastTrack = { title: 'Artist - Song (Official Music Video)', url: 'https://youtube.com/watch?v=basebasebas' };
+             const history = new Set();
+             
+             const rec = await youtube.getRecommendation(lastTrack, history);
+             expect(rec.url).toBe('https://youtube.com/watch?v=22222222222');
+        });
+    });
 });

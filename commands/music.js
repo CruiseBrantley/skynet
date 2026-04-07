@@ -184,7 +184,7 @@ async function handleQueue(interaction) {
     await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 }
 
-async function handleSkip(interaction) {
+async function executeSkip(interaction) {
     const guildId = interaction.guildId;
     const queue = musicManager.getQueue(guildId);
 
@@ -237,6 +237,31 @@ async function handleVolume(interaction) {
     });
 }
 
+async function handleAutoplay(interaction) {
+    const guildId = interaction.guildId;
+    const queue = musicManager.getQueue(guildId);
+    if (!queue) {
+        return interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+    }
+
+    queue.autoplay = !queue.autoplay;
+    
+    // Sync UI
+    const state = musicManager.uiStates.get(guildId);
+    if (state && state.message) {
+        const track = queue.currentTrack;
+        const pos = queue.getPositionSeconds();
+        const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], pos);
+        const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
+        await state.message.edit({ embeds: [embed], components: rows }).catch(() => {});
+    }
+
+    await interaction.reply({
+        content: `✨ Autoplay is now **${queue.autoplay ? 'ON' : 'OFF'}**.`,
+        flags: [MessageFlags.Ephemeral],
+    });
+}
+
 // ── Export ──
 
 module.exports = {
@@ -267,6 +292,10 @@ module.exports = {
                         .setRequired(true)),
         )
         .addSubcommand(sub =>
+            sub.setName('autoplay')
+                .setDescription('Toggle automatic playback of similar songs'),
+        )
+        .addSubcommand(sub =>
             sub.setName('search')
                 .setDescription('Search YouTube and pick from the top 5 results')
                 .addStringOption(opt =>
@@ -294,9 +323,10 @@ module.exports = {
             case 'play':   return handlePlay(interaction);
             case 'search': return handleSearch(interaction);
             case 'queue':  return handleQueue(interaction);
-            case 'skip':   return handleSkip(interaction);
+            case 'skip':   return executeSkip(interaction);
             case 'stop':   return handleStop(interaction);
             case 'volume': return handleVolume(interaction);
+            case 'autoplay': return handleAutoplay(interaction);
         }
     },
 };

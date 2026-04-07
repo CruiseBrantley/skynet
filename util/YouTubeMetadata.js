@@ -46,6 +46,15 @@ class YouTubeMetadata {
     }
 
     /**
+     * Store loudness normalization stats for a video.
+     */
+    setLoudnormStats(videoId, stats) {
+        if (!videoId) return;
+        const info = this.cache.get(videoId) || {};
+        this._updateCache(videoId, { ...info, loudnorm: stats });
+    }
+
+    /**
      * Cache a video's metadata and trigger a persistent save.
      */
     _updateCache(videoId, info) {
@@ -93,8 +102,42 @@ class YouTubeMetadata {
                 }))
             };
         } catch (err) {
-            // Fallback for Mixes or other unsupported dynamic playlists
-            logger.warn(`Could not expand playlist ${url}, falling back to single video: ${err.message}`);
+            // Fallback for Mixes or other unsupported dynamic playlists using yt-dlp
+            logger.warn(`Could not expand playlist ${url} with ytpl, falling back to yt-dlp: ${err.message}`);
+            
+            try {
+                const { execFile } = require('child_process');
+                const YT_DLP = path.join(__dirname, '../tts_engine/piper_venv/bin/yt-dlp');
+                
+                const ytData = await new Promise((resolve, reject) => {
+                    execFile(YT_DLP, ['--flat-playlist', '-J', url], { maxBuffer: 1024 * 1024 * 10 }, (error, stdout) => {
+                        if (error) return reject(error);
+                        try {
+                            resolve(JSON.parse(stdout));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    });
+                });
+                
+                if (ytData && ytData.entries && ytData.entries.length > 0) {
+                    logger.info(`yt-dlp successfully parsed playlist with ${ytData.entries.length} tracks.`);
+                    return {
+                        title: ytData.title || 'YouTube Mix',
+                        tracks: ytData.entries.map(item => ({
+                            url: item.url,
+                            title: item.title,
+                            channel: item.uploader || item.channel || 'Unknown',
+                            thumbnail: item.thumbnails?.[0]?.url || null,
+                            durationSeconds: item.duration || null,
+                        }))
+                    };
+                }
+            } catch (fallbackErr) {
+                logger.warn(`yt-dlp playlist fallback also failed: ${fallbackErr.message}`);
+            }
+
+            // Ultimate fallback to single video
             const videoId = this.extractVideoId(url);
             if (videoId) {
                 const info = await this.getVideoInfo(url);
@@ -151,6 +194,61 @@ class YouTubeMetadata {
         } catch (err) {
             logger.warn(`getVideoInfo failed for ${videoId}: ${err.message}`);
             return { url, title: url };
+        }
+    }
+
+    /**
+     * Get a recommended song based on the last played track.
+     * Uses an LLM to generate a highly intelligent, genre-aware recommendation.
+     */
+    async getRecommendation(lastTrack, history = new Set()) {
+        if (!lastTrack || !lastTrack.title) return null;
+        
+        try {
+            const { queryOllama } = require('./ollama');
+            const cleanTitle = lastTrack.title.replace(/(\(|\[).*(\)|\])/g, '').trim();
+            const artistContext = lastTrack.channel ? ` (uploaded by ${lastTrack.channel})` : '';
+
+            logger.info(`Getting AI recommendation based on ${cleanTitle}...`);
+            const prompt = `You are an expert DJ AI. The user just listened to the song "${cleanTitle}"${artistContext}.
+Recommend exactly ONE highly similar, great song by a DIFFERENT artist that fits the exact same mood, genre, and vibe.
+Reply with ONLY the song title and artist name in this format: "Artist - Title". Do NOT include any other text, formatting, quotes, or explanations.`;
+
+            let aiSuggestion = '';
+            try {
+                const result = await queryOllama('/api/generate', { prompt });
+                aiSuggestion = result.response.trim().replace(/["']/g, '');
+                logger.info(`AI suggested: ${aiSuggestion}`);
+            } catch (llmErr) {
+                logger.warn(`AI recommendation failed, falling back to basic YouTube search: ${llmErr.message}`);
+                aiSuggestion = `related songs to ${cleanTitle}`;
+            }
+            
+            // Search YouTube for the AI's suggestion
+            const results = await this.search(`${aiSuggestion} official audio`, 5);
+            
+            // 1. Filter out videos that we have already played in this session
+            const unplayed = results.filter(r => {
+                const vidId = this.extractVideoId(r.url);
+                return vidId && !history.has(vidId);
+            });
+
+            // 2. Filter out highly similar titles (safety net just in case the AI ignored instructions)
+            const tokenize = (str) => str.toLowerCase().replace(/[^\w\s]/gi, '').split(/\s+/).slice(0, 3).join(' ');
+            const baseTokens = tokenize(lastTrack.title);
+
+            const distinctUnplayed = unplayed.filter(r => {
+                const rTokens = tokenize(r.title);
+                return rTokens !== baseTokens; 
+            });
+
+            // Fallback chain: best distinct unplayed -> any unplayed -> first result
+            if (distinctUnplayed.length > 0) return distinctUnplayed[0];
+            if (unplayed.length > 0) return unplayed[0];
+            return results.length > 0 ? results[0] : null;
+        } catch (err) {
+            logger.warn(`Failed to get recommendation for ${lastTrack.title}: ${err.message}`);
+            return null;
         }
     }
 

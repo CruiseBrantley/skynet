@@ -62,8 +62,8 @@ function buildNowPlayingEmbed(track, upcoming, positionSeconds) {
 /**
  * Build the playback control button row.
  */
-function buildControlRow(isPaused) {
-    const row = new ActionRowBuilder().addComponents(
+function buildControlRow(isPaused, autoplay = false) {
+    const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('music_pause')
             .setLabel(isPaused ? '▶ Resume' : '⏸ Pause')
@@ -82,7 +82,18 @@ function buildControlRow(isPaused) {
             .setStyle(ButtonStyle.Secondary),
     );
 
-    return [row];
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('music_shuffle')
+            .setLabel('🔀 Shuffle Queue')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('music_autoplay')
+            .setLabel(`✨ Autoplay: ${autoplay ? 'ON' : 'OFF'}`)
+            .setStyle(autoplay ? ButtonStyle.Success : ButtonStyle.Secondary),
+    );
+
+    return [row1, row2];
 }
 
 /**

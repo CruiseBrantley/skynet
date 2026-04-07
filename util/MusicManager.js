@@ -27,10 +27,8 @@ class MusicManager {
             queue.onTrackStart = (track) => {
                 this._handleTrackStart(guildId, track);
             };
-            queue.onQueueEnd = () => {
-                this.stopUIUpdate(guildId);
-            };
-
+            queue.onQueueEnd = () => this.stopUIUpdate(guildId);
+            queue.onAutoplayTrigger = (lastTrack, history) => this.triggerAutoplay(guildId, lastTrack, history);
             this.queues.set(guildId, queue);
         }
         return this.queues.get(guildId);
@@ -183,6 +181,26 @@ class MusicManager {
                 await btn.deferUpdate().catch(() => {});
             }
 
+            else if (btn.customId === 'music_autoplay') {
+                queue.autoplay = !queue.autoplay;
+                await btn.deferUpdate().catch(() => {});
+            }
+
+            else if (btn.customId === 'music_shuffle') {
+                if (queue.queue.length > 1) {
+                    queue.shuffle();
+                    await btn.reply({
+                        content: `🔀 Shuffled **${queue.queue.length}** upcoming tracks.`,
+                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
+                    });
+                } else {
+                    await btn.reply({
+                        content: `⚠️ Not enough tracks in the queue to shuffle.`,
+                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
+                    });
+                }
+            }
+
             // Manually trigger a UI update for instant feedback
             const state = this.uiStates.get(guildId);
             if (state && state.message) {
@@ -190,7 +208,7 @@ class MusicManager {
                 if (track) {
                     const pos = queue.getPositionSeconds();
                     const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], pos);
-                    const rows = musicUI.buildControlRow(queue.isPaused());
+                    const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
                     if (queue.isPaused()) {
                         embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
                     }
@@ -237,8 +255,13 @@ class MusicManager {
 
         state.interval = setInterval(async () => {
             const queue = this.getQueue(guildId);
-            if (!queue || !queue.currentTrack) {
+            if (!queue) {
                 this.stopUIUpdate(guildId);
+                return;
+            }
+            if (!queue.currentTrack) {
+                // If it's empty but queue hasn't ended yet (e.g. autoplay is fetching),
+                // just wait. The actual end is handled definitively by queue.onQueueEnd
                 return;
             }
 
@@ -247,7 +270,7 @@ class MusicManager {
                 const pos = queue.getPositionSeconds();
                 const upcoming = [...queue.queue];
                 const embed = musicUI.buildNowPlayingEmbed(track, upcoming, pos);
-                const rows = musicUI.buildControlRow(queue.isPaused());
+                const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
 
                 if (queue.isPaused()) {
                     embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
@@ -277,7 +300,7 @@ class MusicManager {
             // 2. Send new message
             const queue = this.getQueue(guildId);
             const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], 0);
-            const rows = musicUI.buildControlRow(false);
+            const rows = musicUI.buildControlRow(false, queue.autoplay);
             const newMessage = await state.textChannel.send({ embeds: [embed], components: rows });
 
             // 3. Restart loop
@@ -311,10 +334,33 @@ class MusicManager {
      */
     stop(guildId) {
         this.stopUIUpdate(guildId); // Cleanup UI first
-        const queue = this.queues.get(guildId);
+        const queue = this.getQueue(guildId);
         if (queue) {
             queue.stop();
-            this.queues.delete(guildId);
+            this.queues.delete(guildId); // Clear from map
+        }
+    }
+
+    /**
+     * Internal: fetch a recommendation and play it (Autoplay loop).
+     */
+    async triggerAutoplay(guildId, lastTrack, history) {
+        const youtube = require('./YouTubeMetadata');
+        const queue = this.getQueue(guildId);
+        if (!queue) return;
+
+        try {
+            const recommendation = await youtube.getRecommendation(lastTrack, history);
+            if (recommendation) {
+                logger.info(`Autoplay: Found recommendation for ${guildId} -> ${recommendation.title}`);
+                queue.add(recommendation);
+            } else {
+                logger.warn(`Autoplay: No recommendations found for guild ${guildId}`);
+                this.stopUIUpdate(guildId);
+            }
+        } catch (err) {
+            logger.error(`Autoplay failed for guild ${guildId}: ${err.message}`);
+            this.stopUIUpdate(guildId);
         }
     }
 }
