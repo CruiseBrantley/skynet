@@ -131,14 +131,76 @@ describe('GuildQueue', () => {
             // Mock cache to say some metadata was injected during playVideo
             const youtube = require('../util/YouTubeMetadata');
             youtube.cache.get.mockReturnValue({ durationSeconds: 42 });
-            youtube.extractVideoId = jest.fn().mockReturnValue('mock');
+            youtube.extractVideoId = jest.fn().mockReturnValueOnce('mock');
             
             await queue._playNext();
             
+            // Since _playbackStartedAt is now set on Playing event, getPositionSeconds should be 0 here
+            expect(queue.getPositionSeconds()).toBe(0);
+
+            // Emit playing event
+            queue.player.emit(AudioPlayerStatus.Playing);
+            expect(queue.getPositionSeconds()).toBeGreaterThanOrEqual(0);
+
             expect(onTrackStartMock).toHaveBeenCalledWith(expect.objectContaining({
                 url: 'https://youtube.com/watch?v=mock',
                 durationSeconds: 42
             }));
+        });
+    });
+
+    describe('autoplay triggering', () => {
+        test('triggers autoplay only if not already fetching', async () => {
+            queue.queue = [];
+            queue.autoplay = true;
+            queue.lastPlayedTrack = { title: 'Last Song' };
+            const onAutoplayTriggerMock = jest.fn().mockReturnValue(new Promise(() => {})); // Never resolves for this test
+            queue.onAutoplayTrigger = onAutoplayTriggerMock;
+            
+            await queue._playNext();
+            
+            expect(onAutoplayTriggerMock).toHaveBeenCalledTimes(1);
+            expect(queue.isAutoplayFetching).toBe(true);
+            
+            // Try triggering again while isAutoplayFetching is true
+            await queue._playNext();
+            expect(onAutoplayTriggerMock).toHaveBeenCalledTimes(1); // Should still be 1
+        });
+    });
+
+    describe('history context', () => {
+        test('getRecentHistory combines past tracks and current track', () => {
+            queue.recentTracks = [{ title: 'Past Song', channel: 'Artist' }];
+            queue.currentTrack = { title: 'Now Playing', channel: 'DJ' };
+            
+            const history = queue.getRecentHistory();
+            expect(history.length).toBe(2);
+            expect(history[0].title).toBe('Past Song');
+            expect(history[1].title).toBe('Now Playing');
+        });
+
+        test('recentTracks is capped at 5', () => {
+            const track = { title: 'Song', channel: 'Artist' };
+            for (let i = 0; i < 10; i++) {
+                queue._addToRecentHistory(track);
+            }
+            expect(queue.recentTracks.length).toBe(5);
+        });
+
+        test('skipNext removes the next song and adds to history', () => {
+            // First track becomes currentTrack
+            queue.add({ url: 'https://youtube.com/watch?v=12345678901', title: 'Current', channel: 'Artist' });
+            
+            // Second track stays in queue
+            const trackNext = { url: 'https://youtube.com/watch?v=ABCDEFGHIJK', title: 'Next Song', channel: 'Artist' };
+            queue.add(trackNext);
+            expect(queue.queue.length).toBe(1);
+
+            const skipped = queue.skipNext();
+            expect(skipped.title).toBe('Next Song');
+            expect(queue.queue.length).toBe(0);
+            expect(queue.history.has('ABCDEFGHIJK')).toBe(true);
+            expect(queue.recentTracks[queue.recentTracks.length - 1].title).toBe('Next Song');
         });
     });
 });

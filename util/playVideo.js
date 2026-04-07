@@ -40,6 +40,10 @@ async function downloadVideo(url, allowCookies = true) {
 
     if (fs.existsSync(targetPath)) {
         logger.info(`Using cached audio for ${videoId}`);
+        const infoPath = `${targetPath}.info.json`;
+        if (fs.existsSync(infoPath)) {
+            enrichMetadataFromInfoJson(videoId, infoPath);
+        }
         return targetPath;
     }
 
@@ -61,7 +65,7 @@ async function downloadVideo(url, allowCookies = true) {
         execFile(YT_DLP, args, {
             env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin` },
         }, (err) => {
-            const infoPath = targetPath.replace('.opus', '.info.json');
+            const infoPath = `${targetPath}.info.json`;
 
             if (err) {
                 if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
@@ -75,27 +79,7 @@ async function downloadVideo(url, allowCookies = true) {
 
             // Successfully downloaded, now intercept and cache the rich metadata native to yt-dlp
             if (fs.existsSync(infoPath)) {
-                try {
-                    const info = JSON.parse(fs.readFileSync(infoPath, 'utf8'));
-                    const youtube = require('./YouTubeMetadata');
-                    
-                    const enrichedData = {
-                        title: info.title,
-                        channel: info.uploader || info.channel || null,
-                        thumbnail: info.thumbnails?.[0]?.url || info.thumbnail || null,
-                        durationSeconds: info.duration || null,
-                    };
-                    
-                    // Merge with any existing cached loudnorm stats so we don't drop them
-                    const existing = youtube.cache.get(videoId) || {};
-                    youtube._updateCache(videoId, { ...existing, ...enrichedData });
-                    
-                    logger.info(`Natively captured metadata for ${videoId} from yt-dlp extraction phase.`);
-                } catch (parseErr) {
-                    logger.warn(`Failed to parse yt-dlp info json for ${videoId}: ${parseErr.message}`);
-                } finally {
-                    try { fs.unlinkSync(infoPath); } catch (e) {} // Always clean up temp json
-                }
+                enrichMetadataFromInfoJson(videoId, infoPath);
             }
 
             resolve(targetPath);
@@ -222,6 +206,33 @@ async function playVideo(url, { seekSeconds = 0, bitrate = 64000, loudnorm = nul
     } catch (err) {
         logger.error(`Resource Creation Error: ${err.message}`);
         throw err;
+    }
+}
+
+/**
+ * Internal: Parse info.json and update the global metadata cache.
+ */
+function enrichMetadataFromInfoJson(videoId, infoPath) {
+    try {
+        const info = JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+        const youtube = require('./YouTubeMetadata');
+        
+        const enrichedData = {
+            title: info.title,
+            channel: info.uploader || info.channel || null,
+            thumbnail: info.thumbnails?.[0]?.url || info.thumbnail || null,
+            durationSeconds: info.duration || null,
+        };
+        
+        // Merge with any existing cached loudnorm stats so we don't drop them
+        const existing = youtube.cache.get(videoId) || {};
+        youtube._updateCache(videoId, { ...existing, ...enrichedData });
+        
+        logger.info(`Natively captured metadata for ${videoId} from yt-dlp extraction phase.`);
+    } catch (parseErr) {
+        logger.warn(`Failed to parse yt-dlp info json for ${videoId}: ${parseErr.message}`);
+    } finally {
+        try { fs.unlinkSync(infoPath); } catch (e) {} // Always clean up temp json
     }
 }
 

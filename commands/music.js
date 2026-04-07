@@ -190,7 +190,7 @@ async function executeSkip(interaction) {
 
     if (!queue || (!queue.isPlaying() && !queue.isPaused())) {
         await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
-        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
         return;
     }
 
@@ -200,7 +200,7 @@ async function executeSkip(interaction) {
         content: `⏭ Skipped **${skipped?.title || 'current track'}**.`,
         flags: [MessageFlags.Ephemeral],
     });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
 }
 
 async function handleStop(interaction) {
@@ -211,7 +211,7 @@ async function handleStop(interaction) {
         content: '⏹ Stopped playback and cleared the queue.',
         flags: [MessageFlags.Ephemeral],
     });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
 }
 
 async function handleVolume(interaction) {
@@ -219,7 +219,7 @@ async function handleVolume(interaction) {
     const queue = musicManager.getQueue(guildId);
     if (!queue) {
         await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
-        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
         return;
     }
 

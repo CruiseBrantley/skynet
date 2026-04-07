@@ -62,7 +62,7 @@ function buildNowPlayingEmbed(track, upcoming, positionSeconds) {
 /**
  * Build the playback control button row.
  */
-function buildControlRow(isPaused, autoplay = false) {
+function buildControlRow(isPaused, autoplay = false, queueLength = 0) {
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('music_pause')
@@ -72,6 +72,11 @@ function buildControlRow(isPaused, autoplay = false) {
             .setCustomId('music_skip')
             .setLabel('⏭ Skip')
             .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId('music_skip_next')
+            .setLabel('⏭ Skip Next')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(queueLength === 0),
         new ButtonBuilder()
             .setCustomId('music_stop')
             .setLabel('⏹ Stop')
@@ -86,7 +91,8 @@ function buildControlRow(isPaused, autoplay = false) {
         new ButtonBuilder()
             .setCustomId('music_shuffle')
             .setLabel('🔀 Shuffle Queue')
-            .setStyle(ButtonStyle.Secondary),
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(queueLength <= 1),
         new ButtonBuilder()
             .setCustomId('music_autoplay')
             .setLabel(`✨ Autoplay: ${autoplay ? 'ON' : 'OFF'}`)

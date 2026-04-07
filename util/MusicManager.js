@@ -171,6 +171,23 @@ class MusicManager {
                 setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
+            else if (btn.customId === 'music_skip_next') {
+                const upcoming = queue.queue[0];
+                const skipped = queue.skipNext();
+                if (skipped) {
+                    await btn.reply({
+                        content: `⏭ Skipped upcoming track: **${skipped.title}**.`,
+                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
+                    });
+                } else {
+                    await btn.reply({
+                        content: `⚠️ No upcoming track to skip.`,
+                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
+                    });
+                }
+                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
+            }
+
             else if (btn.customId === 'music_stop') {
                 this.stop(guildId);
                 btn.client.user.setActivity(process.env.ACTIVITY || '');
@@ -210,7 +227,7 @@ class MusicManager {
                 if (track) {
                     const pos = queue.getPositionSeconds();
                     const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], pos);
-                    const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
+                    const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay, queue.queue.length);
                     if (queue.isPaused()) {
                         embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
                     }
@@ -267,12 +284,24 @@ class MusicManager {
                 return;
             }
 
+            // Instant Autoplay preload: keep exactly 1 song in the queue for visibility
+            if (queue.autoplay && queue.queue.length === 0 && !queue.isAutoplayFetching) {
+                logger.info(`Autoplay: Queue is empty, instantly preloading next recommendation for ${guildId}...`);
+                queue.isAutoplayFetching = true;
+                if (queue.onAutoplayTrigger) {
+                    // Fire and forget (it handles resetting the flag or adding to queue)
+                    queue.onAutoplayTrigger(queue.currentTrack, queue.history).finally(() => {
+                        queue.isAutoplayFetching = false;
+                    });
+                }
+            }
+
             try {
                 const track = queue.currentTrack;
                 const pos = queue.getPositionSeconds();
                 const upcoming = [...queue.queue];
                 const embed = musicUI.buildNowPlayingEmbed(track, upcoming, pos);
-                const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
+                const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay, queue.queue.length);
 
                 if (queue.isPaused()) {
                     embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
@@ -280,8 +309,20 @@ class MusicManager {
 
                 await message.edit({ embeds: [embed], components: rows });
             } catch (err) {
-                logger.warn(`UI update failed for guild ${guildId}: ${err.message}`);
-                this.stopUIUpdate(guildId, false);
+                if (err.code === 10008) { // Unknown Message
+                    logger.warn(`Now Playing message deleted in ${guildId}, attempting to regenerate UI...`);
+                    const recoveryChannel = state.textChannel;
+                    this.stopUIUpdate(guildId, false);
+                    
+                    // Recover: handle it like a new track start
+                    const track = queue.currentTrack;
+                    if (track && recoveryChannel) {
+                        this._handleTrackStart(guildId, track, recoveryChannel);
+                    }
+                } else {
+                    logger.warn(`UI update failed for guild ${guildId}: ${err.message}`);
+                    this.stopUIUpdate(guildId, false);
+                }
             }
         }, 5000);
 
@@ -291,9 +332,10 @@ class MusicManager {
     /**
      * Internal: handles when a new track starts (automatic UI advancement).
      */
-    async _handleTrackStart(guildId, track) {
+    async _handleTrackStart(guildId, track, forcedChannel = null) {
         const state = this.uiStates.get(guildId);
-        if (!state || !state.textChannel) return;
+        const textChannel = forcedChannel || state?.textChannel;
+        if (!textChannel) return;
 
         try {
             // 1. Delete the old message
@@ -302,11 +344,11 @@ class MusicManager {
             // 2. Send new message
             const queue = this.getQueue(guildId);
             const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], 0);
-            const rows = musicUI.buildControlRow(false, queue.autoplay);
-            const newMessage = await state.textChannel.send({ embeds: [embed], components: rows });
+            const rows = musicUI.buildControlRow(false, queue.autoplay, queue.queue.length);
+            const newMessage = await textChannel.send({ embeds: [embed], components: rows });
 
             // 3. Restart loop
-            this.startUIUpdate(guildId, newMessage, state.textChannel);
+            this.startUIUpdate(guildId, newMessage, textChannel);
         } catch (err) {
             logger.error(`Failed to advance UI for guild ${guildId}: ${err.message}`);
         }
@@ -346,13 +388,16 @@ class MusicManager {
     /**
      * Internal: fetch a recommendation and play it (Autoplay loop).
      */
-    async triggerAutoplay(guildId, lastTrack, history) {
+    async triggerAutoplay(guildId, lastTrack, sessionHistory) {
         const youtube = require('./YouTubeMetadata');
         const queue = this.getQueue(guildId);
         if (!queue) return;
 
         try {
-            const recommendation = await youtube.getRecommendation(lastTrack, history);
+            // Get last 5 tracks + current track for superior context
+            const historyContext = queue.getRecentHistory();
+            const recommendation = await youtube.getRecommendation(historyContext, sessionHistory);
+            
             if (recommendation) {
                 logger.info(`Autoplay: Found recommendation for ${guildId} -> ${recommendation.title}`);
                 queue.add(recommendation);

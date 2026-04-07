@@ -399,5 +399,84 @@
     "channel": "JudasPriestVEVO",
     "thumbnail": "https://i.ytimg.com/vi/eGtwgYt_QnA/hqdefault.jpg",
     "durationSeconds": 262
+  },
+  "4VZbjrDwQ28": {
+    "title": "The Trooper (1998 Remaster)",
+    "channel": "Iron Maiden - Topic",
+    "thumbnail": "https://i.ytimg.com/vi/4VZbjrDwQ28/hqdefault.jpg",
+    "durationSeconds": 251
+  },
+  "lL2ZwXj1tXM": {
+    "title": "Three Days Grace - Never Too Late (Official Video)",
+    "channel": "ThreeDaysGraceVEVO",
+    "thumbnail": "https://i.ytimg.com/vi/lL2ZwXj1tXM/hqdefault.jpg",
+    "durationSeconds": 212
+  },
+  "UkI4KejmSfY": {
+    "loudnorm": {
+      "input_i": "-9.69",
+      "input_tp": "-0.43",
+      "input_lra": "4.40",
+      "input_thresh": "-19.94",
+      "target_offset": "-0.80"
+    }
+  },
+  "d8ekz_CSBVg": {
+    "loudnorm": {
+      "input_i": "-9.90",
+      "input_tp": "-0.06",
+      "input_lra": "7.60",
+      "input_thresh": "-20.02",
+      "target_offset": "-1.56"
+    },
+    "title": "Three Days Grace - I Hate Everything About You (Official Video)",
+    "channel": "Three Days Grace",
+    "thumbnail": "https://i.ytimg.com/vi/d8ekz_CSBVg/3.jpg",
+    "durationSeconds": 220
+  },
+  "DWaB4PXCwFU": {
+    "loudnorm": {
+      "input_i": "-12.73",
+      "input_tp": "-1.20",
+      "input_lra": "4.70",
+      "input_thresh": "-22.89",
+      "target_offset": "-1.28"
+    },
+    "title": "Breaking Benjamin - The Diary of Jane",
+    "channel": "HollywoodRecordsVEVO",
+    "thumbnail": "https://i.ytimg.com/vi/DWaB4PXCwFU/3.jpg",
+    "durationSeconds": 208
+  },
+  "Ci_h4nJRga0": {
+    "title": "The Diary Of Jane",
+    "channel": "Breaking Benjamin",
+    "thumbnail": "https://i.ytimg.com/vi/Ci_h4nJRga0/3.jpg",
+    "durationSeconds": 200,
+    "loudnorm": {
+      "input_i": "-6.91",
+      "input_tp": "1.68",
+      "input_lra": "5.00",
+      "input_thresh": "-17.13",
+      "target_offset": "-1.26"
+    }
+  },
+  "trinU3VD1Zo": {
+    "title": "Chevelle - The Red (Official HD Video)",
+    "channel": "CheVelle",
+    "thumbnail": "https://i.ytimg.com/vi/trinU3VD1Zo/3.jpg",
+    "durationSeconds": 253,
+    "loudnorm": {
+      "input_i": "-9.13",
+      "input_tp": "1.31",
+      "input_lra": "8.70",
+      "input_thresh": "-19.43",
+      "target_offset": "-0.90"
+    }
+  },
+  "XM72AOmQcrc": {
+    "title": "Three Days Grace - Kill Me Fast (Official Video)",
+    "channel": "Three Days Grace",
+    "thumbnail": "https://i.ytimg.com/vi/XM72AOmQcrc/3.jpg",
+    "durationSeconds": 197
   }
 }

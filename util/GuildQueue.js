@@ -3,6 +3,7 @@ const playVideo = require('./playVideo');
 const logger = require('../logger');
 const fs = require('fs');
 const path = require('path');
+const youtube = require('./YouTubeMetadata');
 
 /**
  * Per-guild audio queue. Manages voice connection, playback, and track list.
@@ -26,6 +27,7 @@ class GuildQueue {
         this.volume = 0.5;               // Default 50% volume
         this.autoplay = false;           // Continue playing similar songs
         this.lastPlayedTrack = null;     // Memory of last track for recommendations
+        this.recentTracks = [];          // Rolling history of recent tracks for AI context
         this.history = new Set();        // Remember played video IDs to prevent autoplay loops
         this._isProcessingNext = false;  // Lock for _playNext race conditions
 
@@ -38,15 +40,28 @@ class GuildQueue {
         this.player.on(AudioPlayerStatus.Idle, () => {
             logger.info(`Player idle in guild ${this.guildId}, advancing queue...`);
             this._cleanupCurrentTrackFile();
-            if (this.currentTrack) this.lastPlayedTrack = this.currentTrack;
+            if (this.currentTrack) {
+                this.lastPlayedTrack = this.currentTrack;
+                this._addToRecentHistory(this.currentTrack);
+            }
             this.currentTrack = null;
             this._resetPosition();
             this._playNext();
         });
 
+        this.player.on(AudioPlayerStatus.Playing, () => {
+            if (!this._playbackStartedAt) {
+                this._playbackStartedAt = Date.now();
+                logger.info(`Playback started in guild ${this.guildId}`);
+            }
+        });
+
         this.player.on('error', (error) => {
             logger.error(`GuildQueue Player Error [${this.guildId}]: ${error.message}`);
-            if (this.currentTrack) this.lastPlayedTrack = this.currentTrack;
+            if (this.currentTrack) {
+                this.lastPlayedTrack = this.currentTrack;
+                this._addToRecentHistory(this.currentTrack);
+            }
             this.currentTrack = null;
             this._resetPosition();
             this._playNext();
@@ -105,11 +120,30 @@ class GuildQueue {
         }
     }
 
-    /**
-     * Skip the current track. Triggers the Idle handler which calls _playNext.
-     */
     skip() {
+        if (this.currentTrack) {
+            this.lastPlayedTrack = this.currentTrack;
+            this._addToRecentHistory(this.currentTrack);
+        }
         this.player.stop(true);
+    }
+
+    /**
+     * Skip the next song in the queue (without playing it).
+     * Adds it to history and recentTracks so the AI knows to avoid it.
+     */
+    skipNext() {
+        if (this.queue.length === 0) return null;
+        const skipped = this.queue.shift();
+        
+        // Contextually 'record' this track in our history as something the user skipped/didn't want now
+        const videoId = playVideo.extractVideoId(skipped.url);
+        if (videoId) this.history.add(videoId);
+        this._addToRecentHistory(skipped);
+
+        // Preload the NEW next song
+        this._prefetchNext();
+        return skipped;
     }
 
     /**
@@ -291,6 +325,38 @@ class GuildQueue {
     }
 
     /**
+     * Add a track to the rolling recent history for context.
+     * @param {object} track - Track object { title, channel, ... }
+     */
+    _addToRecentHistory(track) {
+        if (!track || !track.title) return;
+        // Optimization: only store what we need for the LLM
+        const summary = {
+            title: track.title,
+            channel: track.channel || 'Unknown'
+        };
+        this.recentTracks.push(summary);
+        if (this.recentTracks.length > 5) {
+            this.recentTracks.shift();
+        }
+    }
+
+    /**
+     * Get the current context for recommendations: [Past Songs..., Now Playing]
+     * @returns {object[]} Array of track summaries
+     */
+    getRecentHistory() {
+        const history = [...this.recentTracks];
+        if (this.currentTrack) {
+            history.push({
+                title: this.currentTrack.title,
+                channel: this.currentTrack.channel || 'Unknown'
+            });
+        }
+        return history;
+    }
+
+    /**
      * Internal: reset position tracking state.
      */
     _resetPosition() {
@@ -309,8 +375,17 @@ class GuildQueue {
         if (this.queue.length === 0) {
             logger.info(`Queue empty for guild ${this.guildId}`);
             if (this.autoplay && this.lastPlayedTrack) {
-                logger.info(`Autoplay enabled for ${this.guildId}. Triggering recommendation...`);
-                if (this.onAutoplayTrigger) this.onAutoplayTrigger(this.lastPlayedTrack, this.history);
+                if (this.isAutoplayFetching) {
+                    logger.info(`Autoplay is already fetching for ${this.guildId}, waiting...`);
+                } else {
+                    logger.info(`Autoplay enabled for ${this.guildId}. Triggering recommendation...`);
+                    this.isAutoplayFetching = true;
+                    if (this.onAutoplayTrigger) {
+                        this.onAutoplayTrigger(this.lastPlayedTrack, this.history).finally(() => {
+                            this.isAutoplayFetching = false;
+                        });
+                    }
+                }
             } else if (this.onQueueEnd) {
                 this.onQueueEnd();
             }
@@ -344,9 +419,6 @@ class GuildQueue {
                 bitrate: this.bitrate,
                 loudnorm: cached?.loudnorm || null
             });
-            this._playbackStartedAt = Date.now();
-            this._seekOffsetMs = 0;
-            this._pausedAt = null;
             if (resource.volume) {
                 resource.volume.setVolume(this.volume);
             }
@@ -358,6 +430,9 @@ class GuildQueue {
                 const updatedCached = youtube.cache.get(videoId);
                 if (updatedCached) {
                     this.currentTrack = { ...this.currentTrack, ...updatedCached };
+                    if (this.currentTrack.durationSeconds) {
+                        logger.info(`Enriched ${track.title} with duration: ${this.currentTrack.durationSeconds}s`);
+                    }
                 }
             }
 

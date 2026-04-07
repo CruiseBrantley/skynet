@@ -58,6 +58,12 @@ class YouTubeMetadata {
      * Cache a video's metadata and trigger a persistent save.
      */
     _updateCache(videoId, info) {
+        // Protect durationSeconds from being overwritten by null/undefined if we already have it
+        const existing = this.cache.get(videoId);
+        if (existing && existing.durationSeconds && !info.durationSeconds) {
+            info.durationSeconds = existing.durationSeconds;
+        }
+
         this.cache.set(videoId, info);
         this._saveCache();
     }
@@ -201,19 +207,31 @@ class YouTubeMetadata {
      * Get a recommended song based on the last played track.
      * Uses an LLM to generate a highly intelligent, genre-aware recommendation.
      */
-    async getRecommendation(lastTrack, history = new Set()) {
-        if (!lastTrack || !lastTrack.title) return null;
+    async getRecommendation(historyTracks, sessionHistory = new Set()) {
+        if (!historyTracks || historyTracks.length === 0) return null;
+        
+        const currentTrack = historyTracks[historyTracks.length - 1];
+        const pastTracks = historyTracks.slice(0, -1);
         
         try {
             const { queryOllama } = require('./ollama');
-            const cleanTitle = lastTrack.title.replace(/(\(|\[).*(\)|\])/g, '').trim();
-            const artistContext = lastTrack.channel ? ` (uploaded by ${lastTrack.channel})` : '';
+            
+            // Format history for the prompt
+            const historyList = pastTracks.map(t => ` - ${t.title} (${t.channel})`).join('\n');
+            const currentDesc = `${currentTrack.title} (${currentTrack.channel})`;
 
             const seed = Math.floor(Math.random() * 1000000);
-            logger.info(`Getting AI recommendation based on ${cleanTitle} (Seed: ${seed})...`);
-            const prompt = `You are an expert DJ AI. The user just listened to the song "${cleanTitle}"${artistContext}.
-Recommend exactly ONE highly similar, great song by a DIFFERENT artist that fits the exact same mood, genre, and vibe.
-CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a different artist and a different track within this exact same genre.
+            logger.info(`Getting AI recommendation based on history of ${historyTracks.length} tracks (Current: ${currentTrack.title})...`);
+            
+            const prompt = `You are an expert DJ AI. 
+The user recently listened to:
+${historyList || " (No previous history)"}
+
+They are NOW listening to:
+ - ${currentDesc}
+
+Recommend exactly ONE highly similar, great song by a DIFFERENT artist that fits the exact same mood, genre, and vibe as this sequence.
+CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a different artist and a different track than any of those listed above.
 Reply with ONLY the song title and artist name in this format: "Artist - Title". Do NOT include any other text, formatting, quotes, or explanations.`;
 
             let aiSuggestion = '';
@@ -226,7 +244,7 @@ Reply with ONLY the song title and artist name in this format: "Artist - Title".
                 logger.info(`AI suggested: ${aiSuggestion}`);
             } catch (llmErr) {
                 logger.warn(`AI recommendation failed, falling back to basic YouTube search: ${llmErr.message}`);
-                aiSuggestion = `related songs to ${cleanTitle}`;
+                aiSuggestion = `related songs to ${currentTrack.title}`;
             }
             
             // Search YouTube for the AI's suggestion
@@ -235,12 +253,12 @@ Reply with ONLY the song title and artist name in this format: "Artist - Title".
             // 1. Filter out videos that we have already played in this session
             const unplayed = results.filter(r => {
                 const vidId = this.extractVideoId(r.url);
-                return vidId && !history.has(vidId);
+                return vidId && !sessionHistory.has(vidId);
             });
 
             // 2. Filter out highly similar titles (safety net just in case the AI ignored instructions)
             const tokenize = (str) => str.toLowerCase().replace(/[^\w\s]/gi, '').split(/\s+/).slice(0, 3).join(' ');
-            const baseTokens = tokenize(lastTrack.title);
+            const baseTokens = tokenize(currentTrack.title);
 
             const distinctUnplayed = unplayed.filter(r => {
                 const rTokens = tokenize(r.title);
