@@ -193,6 +193,17 @@ module.exports = {
         const tempWav = path.join(tempDir, `speak_${interaction.id}.wav`);
         const tempMp3 = path.join(tempDir, `speak_${interaction.id}.mp3`);
 
+        let musicQueue = null;
+        const musicManager = require('../util/MusicManager');
+        const activeQueue = musicManager.getQueue(interaction.guildId);
+        const isMusicPlaying = activeQueue && activeQueue.isPlaying();
+
+        if (isMusicPlaying) {
+            musicQueue = activeQueue;
+            musicQueue.player.pause();
+            logger.info(`Speak: Pausing music in guild ${interaction.guildId} for TTS`);
+        }
+
         try {
             // Step 1: Generate high quality local TTS with Piper
             const piperPath = path.join(__dirname, '../tts_engine/piper_venv/bin/piper');
@@ -201,17 +212,20 @@ module.exports = {
             await exec(`echo "${speakMessage.replace(/"/g, '\\"')}" | "${piperPath}" --model "${modelPath}" --output_file "${tempWav}"`);
 
             // Step 2: Skip FFmpeg filtering, just copy to mp3 (or we can just stream wav)
-            // It's actually easier to just play the WAV file directly with Discord.js
             await exec(`/opt/homebrew/bin/ffmpeg -y -i "${tempWav}" -acodec libmp3lame "${tempMp3}"`);
 
-            const connection = joinVoiceChannel({
-                channelId: channelName.id,
-                guildId: channelName.guild.id,
-                adapterCreator: channelName.guild.voiceAdapterCreator,
-            });
+            // Step 3: Connection handling (Music-Aware)
+            let connection = getVoiceConnection(interaction.guildId);
+            
+            if (!connection) {
+                connection = joinVoiceChannel({
+                    channelId: channelName.id,
+                    guildId: channelName.guild.id,
+                    adapterCreator: channelName.guild.voiceAdapterCreator,
+                });
+            }
 
             // Wait for connection to be ready
-            logger.info(`Voice connection state: ${connection.state.status}`);
             if (connection.state.status !== VoiceConnectionStatus.Ready) {
                 await new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
@@ -227,32 +241,44 @@ module.exports = {
                     });
                 });
             }
-            logger.info('Voice connection ready, playing audio');
 
             const player = createAudioPlayer();
             const resource = createAudioResource(tempMp3, { inputType: StreamType.Arbitrary });
+            
+            // Subscribe the TTS player to the connection (overrides music)
+            const subscription = connection.subscribe(player);
             player.play(resource);
-            connection.subscribe(player);
             
             player.on('stateChange', (oldState, newState) => {
                 if (newState.status === 'idle') {
-                    setTimeout(() => {
-                        if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
-                            connection.destroy();
-                        }
-                        // Cleanup temp files
-                        try {
-                            if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);
-                            if (fs.existsSync(tempMp3)) fs.unlinkSync(tempMp3);
-                        } catch (e) {}
-                    }, 2000);
+                    // Restore music if it was paused
+                    if (musicQueue) {
+                        logger.info(`Speak: TTS finished, resuming music in guild ${interaction.guildId}`);
+                        subscription.unsubscribe();
+                        // Re-subscribe the music player
+                        connection.subscribe(musicQueue.player);
+                        musicQueue.player.unpause();
+                    } else {
+                        // Standard cleanup (No music)
+                        setTimeout(() => {
+                            if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                                connection.destroy();
+                            }
+                        }, 2000);
+                    }
+
+                    // Cleanup temp files
+                    try {
+                        if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);
+                        if (fs.existsSync(tempMp3)) fs.unlinkSync(tempMp3);
+                    } catch (e) {}
                 }
             });
-            // await interaction.editReply(`Speaking: "${speakMessage}"`);
             
         } catch (err) {
             logger.info('Encountered an error speaking: ', err);
-            // await interaction.editReply('There was an error trying to speak.');
+            if (musicQueue) musicQueue.player.unpause(); // Emergency resume
+            
             // Cleanup on error
             try {
                 if (fs.existsSync(tempWav)) fs.unlinkSync(tempWav);

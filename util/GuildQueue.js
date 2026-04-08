@@ -97,7 +97,8 @@ class GuildQueue {
      * If nothing is playing, starts playback immediately.
      * @param {object} track - { url, title, channel, duration, thumbnail }
      */
-    add(track) {
+    add(track, user = null) {
+        if (user) track.requestedBy = user.username || user;
         this.queue.push(track);
         if (this.player.state.status === AudioPlayerStatus.Idle && this.queue.length === 1) {
             this._playNext();
@@ -111,7 +112,10 @@ class GuildQueue {
      * If nothing is playing, starts playback immediately.
      * @param {object[]} tracks
      */
-    addBatch(tracks) {
+    addBatch(tracks, user = null) {
+        if (user) {
+            tracks.forEach(t => t.requestedBy = user.username || user);
+        }
         this.queue.push(...tracks);
         if (this.player.state.status === AudioPlayerStatus.Idle) {
             this._playNext();

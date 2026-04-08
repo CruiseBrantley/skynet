@@ -1,7 +1,6 @@
 const {
     SlashCommandBuilder,
     ComponentType,
-    MessageFlags,
 } = require('discord.js');
 const decode = require('unescape');
 const logger = require('../logger');
@@ -19,12 +18,12 @@ async function handlePlay(interaction) {
     if (!channel) {
         return interaction.reply({
             content: 'You need to be in a voice channel or specify one.',
-            flags: [MessageFlags.Ephemeral],
+            flags: [64],
         });
     }
 
     const isActive = musicManager.uiStates.has(interaction.guildId);
-    await interaction.deferReply({ flags: isActive ? [MessageFlags.Ephemeral] : [] });
+    await interaction.deferReply({ flags: isActive ? [64] : [] });
 
     try {
         let tracks = [];
@@ -55,48 +54,59 @@ async function handlePlay(interaction) {
         };
 
         if (tracks.length > 1) {
-            await musicManager.enqueueBatch(fakeInteraction, tracks);
+            await musicManager.enqueueBatch(fakeInteraction, tracks, interaction.user);
             interaction.client.user.setActivity('YouTube.');
 
-            // If this is a new session, start the UI with the first track
+            const isActive = musicManager.uiStates.has(interaction.guildId);
+
+            // If this is a new session, start the AIO UI with the first track
             if (!isActive && tracks.length > 0) {
                 // Enrich the first track metadata before showing the UI
                 const firstTrack = await youtube.getVideoInfo(tracks[0].url);
                 const upcoming = musicManager.getUpcoming(interaction.guildId);
-                const embed = musicUI.buildNowPlayingEmbed(firstTrack, upcoming, 0);
-                const rows = musicUI.buildControlRow(false);
-                const msg = await interaction.editReply({ embeds: [embed], components: rows });
+                const displayState = musicUI.buildFullDisplayState(
+                    firstTrack, upcoming, 0, false, false, { volume: 0.5, bitrate: 64000 }, null
+                );
+
+                const msg = await interaction.editReply(displayState);
                 musicManager.startUIUpdate(interaction.guildId, msg, interaction.channel);
             } else {
-                return interaction.editReply({
+                await interaction.editReply({
                     content: `📋 Added **${playlistTitle || 'Playlist'}** — ${tracks.length} tracks queued.`,
-                    flags: [MessageFlags.SuppressEmbeds],
+                    flags: [4096],
                 });
+                setTimeout(() => {
+                    interaction.deleteReply().catch(() => {});
+                }, 5000);
             }
         } else {
             const track = tracks[0];
-            const queue = await musicManager.enqueue(fakeInteraction, track);
+            const queue = await musicManager.enqueue(fakeInteraction, track, interaction.user);
             interaction.client.user.setActivity('YouTube.');
 
             const upcoming = musicManager.getUpcoming(interaction.guildId);
             const isQueued = queue.isPlaying() || queue.isPaused();
-            const position = upcoming.length;
+            const isActive = musicManager.uiStates.has(interaction.guildId);
 
-            if (isQueued && position > 0) {
-                return interaction.editReply({
-                    embeds: [
-                        musicUI.buildNowPlayingEmbed(track, upcoming, 0)
-                            .setAuthor({ name: '✅ Added to Queue' })
-                            .setDescription(`Position: **#${position}** in queue`)
-                    ],
+            if (isQueued && isActive) {
+                await interaction.editReply({
+                    content: `📋 Queued **${track.title}** at position **#${upcoming.length}**.`,
+                    flags: [4096],
                 });
+                setTimeout(() => {
+                    interaction.deleteReply().catch(() => {});
+                }, 5000);
+                return;
             }
 
-            // This track is now playing
-            const embed = musicUI.buildNowPlayingEmbed(track, upcoming, 0);
-            const rows = musicUI.buildControlRow(false);
-            const msg = await interaction.editReply({ embeds: [embed], components: rows });
-            
+            // This track is now playing (AIO Unification)
+            const enriched = await youtube.getVideoInfo(track.url);
+            const stats = { volume: queue.volume, bitrate: queue.bitrate };
+            const displayState = musicUI.buildFullDisplayState(
+                enriched, [...queue.queue], 0, false, queue.autoplay, stats, null
+            );
+
+            const msg = await interaction.editReply(displayState);
             musicManager.startUIUpdate(interaction.guildId, msg, interaction.channel);
         }
 
@@ -131,7 +141,7 @@ async function handleSearch(interaction) {
 
             const channel = interaction.guild.channels.cache.get(btn.member?.voice?.channelId);
             if (!channel) {
-                return btn.reply({ content: 'Join a voice channel first.', flags: [MessageFlags.Ephemeral] });
+                return btn.reply({ content: 'Join a voice channel first.', flags: [64] });
             }
 
             try {
@@ -145,22 +155,22 @@ async function handleSearch(interaction) {
                 btn.client.user.setActivity('YouTube.');
                 await btn.reply({
                     content: `✅ **${track.title}** added to queue.`,
-                    flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
+                    flags: [4096, 64],
                 });
 
-                // If this is now playing (no active UI yet), start it
+                // If this is now playing (no active UI yet), start the AIO UI
                 const queue = musicManager.getQueue(btn.guildId);
                 if (queue && queue.currentTrack === track && !musicManager.uiStates.has(btn.guildId)) {
                     // Enrich the track info before showing the UI
                     const enriched = await youtube.getVideoInfo(track.url);
-                    const embed = musicUI.buildNowPlayingEmbed(enriched, [], 0);
-                    const rows = musicUI.buildControlRow(false);
-                    const msg = await btn.channel.send({ embeds: [embed], components: rows });
+                    const displayState = musicUI.buildFullDisplayState(enriched, [], 0, false, queue.autoplay, { volume: queue.volume, bitrate: queue.bitrate }, null);
+
+                    const msg = await btn.channel.send(displayState);
                     musicManager.startUIUpdate(btn.guildId, msg, btn.channel);
                 }
             } catch (err) {
                 logger.error('Search play error:', err);
-                await btn.reply({ content: `Failed: ${err.message}`, flags: [MessageFlags.Ephemeral] });
+                await btn.reply({ content: `Failed: ${err.message}`, flags: [64] });
             }
         });
 
@@ -174,6 +184,7 @@ async function handleSearch(interaction) {
     } catch (err) {
         logger.error('Music search error:', err);
         await interaction.editReply(`Search failed: ${err.message}`);
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     }
 }
 
@@ -181,7 +192,7 @@ async function handleQueue(interaction) {
     const current = musicManager.nowPlaying(interaction.guildId);
     const upcoming = musicManager.getUpcoming(interaction.guildId);
     const embed = musicUI.buildQueueEmbed(current, upcoming);
-    await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+    await interaction.reply({ embeds: [embed], flags: [64] });
 }
 
 async function executeSkip(interaction) {
@@ -189,7 +200,7 @@ async function executeSkip(interaction) {
     const queue = musicManager.getQueue(guildId);
 
     if (!queue || (!queue.isPlaying() && !queue.isPaused())) {
-        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [64] });
         setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
         return;
     }
@@ -198,7 +209,7 @@ async function executeSkip(interaction) {
     musicManager.skip(guildId);
     await interaction.reply({
         content: `⏭ Skipped **${skipped?.title || 'current track'}**.`,
-        flags: [MessageFlags.Ephemeral],
+        flags: [64],
     });
     setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
 }
@@ -209,7 +220,7 @@ async function handleStop(interaction) {
     interaction.client.user.setActivity(process.env.ACTIVITY || '');
     await interaction.reply({
         content: '⏹ Stopped playback and cleared the queue.',
-        flags: [MessageFlags.Ephemeral],
+        flags: [64],
     });
     setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
 }
@@ -218,7 +229,7 @@ async function handleVolume(interaction) {
     const guildId = interaction.guildId;
     const queue = musicManager.getQueue(guildId);
     if (!queue) {
-        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [64] });
         setTimeout(() => { if (interaction.deleteReply) interaction.deleteReply().catch(() => {}); }, 5000);
         return;
     }
@@ -237,9 +248,22 @@ async function handleVolume(interaction) {
         }
     }
 
+    // Sync AIO UI via Abstraction
+    if (state && state.stageMessage) {
+        const displayState = musicUI.buildFullDisplayState(
+            queue.currentTrack, 
+            [...queue.queue], 
+            queue.getPositionSeconds(), 
+            queue.isPaused(), 
+            queue.autoplay, 
+            { volume: queue.volume, bitrate: queue.bitrate }
+        );
+        await state.stageMessage.edit(displayState).catch(() => {});
+    }
+
     await interaction.reply({
         content: `🔊 Volume set to **${volumePercent}%**.`,
-        flags: [MessageFlags.Ephemeral],
+        flags: [64],
     });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }
@@ -248,26 +272,30 @@ async function handleAutoplay(interaction) {
     const guildId = interaction.guildId;
     const queue = musicManager.getQueue(guildId);
     if (!queue) {
-        await interaction.reply({ content: 'Nothing is currently playing.', flags: [MessageFlags.Ephemeral] });
+        await interaction.reply({ content: 'Nothing is currently playing.', flags: [64] });
         setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
         return;
     }
 
     queue.autoplay = !queue.autoplay;
     
-    // Sync UI
+    // Sync AIO UI via Abstraction
     const state = musicManager.uiStates.get(guildId);
-    if (state && state.message) {
-        const track = queue.currentTrack;
-        const pos = queue.getPositionSeconds();
-        const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], pos);
-        const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay);
-        await state.message.edit({ embeds: [embed], components: rows }).catch(() => {});
+    if (state && state.stageMessage) {
+        const displayState = musicUI.buildFullDisplayState(
+            queue.currentTrack, 
+            [...queue.queue], 
+            queue.getPositionSeconds(), 
+            queue.isPaused(), 
+            queue.autoplay, 
+            { volume: queue.volume, bitrate: queue.bitrate }
+        );
+        await state.stageMessage.edit(displayState).catch(() => {});
     }
 
     await interaction.reply({
         content: `✨ Autoplay is now **${queue.autoplay ? 'ON' : 'OFF'}**.`,
-        flags: [MessageFlags.Ephemeral],
+        flags: [64],
     });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 }

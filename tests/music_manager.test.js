@@ -2,8 +2,12 @@ const client = {};
 
 // Mock components
 jest.mock('../util/MusicUI', () => ({
-    buildNowPlayingEmbed: jest.fn().mockReturnValue({ setColor: jest.fn().mockReturnThis(), setAuthor: jest.fn().mockReturnThis() }),
-    buildControlRow: jest.fn().mockReturnValue([]),
+    buildFullDisplayState: jest.fn().mockReturnValue({
+        content: '',
+        embeds: [{}, {}],
+        components: [{}, {}]
+    }),
+    normalizeThumbnail: jest.fn().mockImplementation(url => url),
 }));
 jest.mock('../util/playVideo', () => jest.fn());
 jest.mock('../logger', () => ({
@@ -18,26 +22,33 @@ const musicUI = require('../util/MusicUI');
 
 describe('MusicManager Autoplay UI tick', () => {
     let mockMessage;
+    let mockChannel;
     
     beforeEach(() => {
         jest.useFakeTimers();
         jest.clearAllMocks();
+        
         mockMessage = {
             edit: jest.fn().mockResolvedValue(),
+            delete: jest.fn().mockResolvedValue(),
             createMessageComponentCollector: jest.fn().mockReturnValue({ on: jest.fn() })
+        };
+
+        mockChannel = {
+            send: jest.fn().mockResolvedValue(mockMessage)
         };
     });
 
     afterEach(() => {
         jest.useRealTimers();
         if (manager.uiStates.has('guild-1')) {
-            clearInterval(manager.uiStates.get('guild-1').interval);
+            const state = manager.uiStates.get('guild-1');
+            if (state && state.interval) clearInterval(state.interval);
             manager.uiStates.delete('guild-1');
         }
     });
 
     test('instant autoplay preload triggers when queue is empty and autoplay is enabled', async () => {
-        // Mock queue
         const mockQueue = {
             guildId: 'guild-1',
             autoplay: true,
@@ -52,17 +63,12 @@ describe('MusicManager Autoplay UI tick', () => {
         
         manager.getQueue = jest.fn().mockReturnValue(mockQueue);
 
-        // Start UI interval
-        manager.startUIUpdate('guild-1', mockMessage, {});
+        manager.startUIUpdate('guild-1', mockMessage, mockChannel);
 
-        // Fast-forward interval (5 seconds)
         jest.advanceTimersByTime(5000);
 
-        // The UI should have ticked and checked the queue
         expect(mockQueue.isAutoplayFetching).toBe(true);
         expect(mockQueue.onAutoplayTrigger).toHaveBeenCalledWith(mockQueue.currentTrack, mockQueue.history);
-        
-        // Ensure UI update was also sent
         expect(mockMessage.edit).toHaveBeenCalled();
     });
     
@@ -72,7 +78,7 @@ describe('MusicManager Autoplay UI tick', () => {
             autoplay: true,
             queue: [],
             currentTrack: { title: 'Test Song', durationSeconds: 200 },
-            isAutoplayFetching: true, // ALREADY FETCHING!
+            isAutoplayFetching: true,
             getPositionSeconds: () => 5,
             onAutoplayTrigger: jest.fn().mockResolvedValue(),
             isPaused: () => false,
@@ -80,12 +86,34 @@ describe('MusicManager Autoplay UI tick', () => {
         };
         
         manager.getQueue = jest.fn().mockReturnValue(mockQueue);
-
-        manager.startUIUpdate('guild-1', mockMessage, {});
+        manager.startUIUpdate('guild-1', mockMessage, mockChannel);
 
         jest.advanceTimersByTime(5000);
 
-        // Should NOT trigger again
         expect(mockQueue.onAutoplayTrigger).not.toHaveBeenCalled();
+    });
+
+    test('advances UI when a new track starts', async () => {
+        const mockQueue = {
+            guildId: 'guild-1',
+            autoplay: false,
+            queue: [],
+            currentTrack: { title: 'New Track' },
+            isPaused: () => false
+        };
+        manager.getQueue = jest.fn().mockReturnValue(mockQueue);
+
+        // Setup existing state
+        manager.startUIUpdate('guild-1', mockMessage, mockChannel);
+        
+        // Trigger advancement manually (mimics onTrackStart)
+        await manager._handleTrackStart('guild-1', { title: 'New Track' });
+
+        // Should have deleted old message
+        expect(mockMessage.delete).toHaveBeenCalled();
+        // Should have sent new message to the channel
+        expect(mockChannel.send).toHaveBeenCalled();
+        // Should have restarted the ticker (verified by checking if interval exists)
+        expect(manager.uiStates.get('guild-1')).toBeDefined();
     });
 });

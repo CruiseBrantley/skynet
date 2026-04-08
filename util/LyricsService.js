@@ -1,0 +1,255 @@
+const axios = require('axios');
+const cheerio = require('cheerio');
+const logger = require('../logger');
+
+/**
+ * Service to fetch song lyrics from public sources.
+ * Implementation: Direct API Discovery with Multi-Scraper Fallback.
+ */
+class LyricsService {
+    constructor() {
+        this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+    }
+
+    /**
+     * Fetch lyrics for a given track title and channel/artist.
+     * @param {string} title
+     * @param {string} artist
+     * @returns {Promise<string|null>}
+     */
+    async fetchLyrics(title, artist) {
+        if (!title) return null;
+
+        // Clean query: Remove common YouTube clutter and specific punctuation
+        const cleanTitle = title.replace(/\(.*?\)|\[.*?\]/g, '').replace(/[!?]/g, '').trim();
+        
+        // Try with Artist first, then Title Only fallback
+        const queries = [
+            `${cleanTitle} ${artist || ''}`.trim(),
+            cleanTitle
+        ];
+
+        for (const query of queries) {
+            try {
+                // Priority 1: Direct Genius Search API
+                let lyrics = await this.discoveryviaGeniusAPI(query);
+                if (lyrics) return lyrics;
+
+                // Priority 2: AnimeSongLyrics (Specialized fallback for Anime)
+                const animeUrl = await this.findUrlViaGoogle(query, 'animesonglyrics.com');
+                if (animeUrl) {
+                    lyrics = await this.extractFromAnimeSongLyrics(animeUrl);
+                    if (lyrics) return lyrics;
+                }
+
+                // Priority 3: Google Search Scraper (Backup Discovery for Genius)
+                const geniusUrl = await this.findUrlViaGoogle(query, 'genius.com');
+                if (geniusUrl) {
+                    lyrics = await this.extractFromGenius(geniusUrl);
+                    if (lyrics) return lyrics;
+                }
+
+                // Priority 4: AZLyrics Fallback
+                const azUrl = await this.findUrlViaGoogle(query, 'azlyrics.com');
+                if (azUrl) {
+                    lyrics = await this.extractFromAZLyrics(azUrl);
+                    if (lyrics) return lyrics;
+                }
+            } catch (err) {
+                logger.warn(`LyricsService: Sub-query attempt failed for "${query}": ${err.message}`);
+                continue;
+            }
+        }
+
+        logger.warn(`LyricsService: All sources failed for "${cleanTitle}"`);
+        return null;
+    }
+
+    /**
+     * Use Genius's internal search API for reliable discovery.
+     */
+    async discoveryviaGeniusAPI(query) {
+        try {
+            const searchUrl = `https://genius.com/api/search/multi?q=${encodeURIComponent(query)}`;
+            const response = await axios.get(searchUrl, {
+                headers: { 'User-Agent': this.userAgent, 'Accept': 'application/json' }
+            });
+
+            const sections = response.data?.response?.sections || [];
+            const topHit = sections.find(s => s.type === 'top_hit')?.hits?.[0]?.result;
+            const songHit = sections.find(s => s.type === 'song')?.hits?.[0]?.result;
+
+            const bestHit = topHit?.url?.includes('/lyrics') ? topHit : songHit;
+            
+            if (bestHit && bestHit.url) {
+                logger.info(`LyricsService: Found Genius API hit: ${bestHit.full_title}`);
+                return await this.extractFromGenius(bestHit.url);
+            }
+            return null;
+        } catch (err) {
+            logger.warn(`LyricsService: Genius API search failed: ${err.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Fallback: Search Google to find a specific website's URL.
+     */
+    async findUrlViaGoogle(query, domain) {
+        try {
+            // Try DuckDuckGo first (Lite)
+            let searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(`${query} site:${domain}`)}`;
+            let response = await axios.get(searchUrl, { headers: { 'User-Agent': this.userAgent } });
+            let html = response.data;
+
+            // If DDG fails (e.g. detected), try Bing (very lenient with scraper headers)
+            if (!html.includes(domain)) {
+                searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(`${query} site:${domain}`)}`;
+                response = await axios.get(searchUrl, { headers: { 'User-Agent': this.userAgent } });
+                html = response.data;
+            }
+
+            const regex = new RegExp(`https://${domain.replace(/\./g, '\\.')}/[^"&\\s>]+`, 'g');
+            const matches = html.match(regex);
+            
+            if (matches && matches.length > 0) {
+                return matches[0].split(/[">]/)[0];
+            }
+
+            return null;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    /**
+     * Extract lyrics from Genius.com.
+     */
+    async extractFromGenius(url) {
+        try {
+            const response = await axios.get(url, { headers: { 'User-Agent': this.userAgent } });
+            const $ = cheerio.load(response.data);
+            
+            let lyrics = '';
+            
+            // Container 1: Modern dynamic layout
+            $('[data-lyrics-container="true"]').each((i, el) => {
+                $(el).find('br').replaceWith('\n');
+                lyrics += $(el).text() + '\n\n';
+            });
+
+            // Container 2: Legacy layout
+            if (!lyrics.trim()) {
+                lyrics = $('.lyrics').text();
+            }
+
+            return await this.sanitizeLyrics(lyrics);
+        } catch (err) {
+            return null;
+        }
+    }
+
+    /**
+     * Extract lyrics from AZLyrics.com.
+     */
+    async extractFromAZLyrics(url) {
+        try {
+            const response = await axios.get(url, { headers: { 'User-Agent': this.userAgent } });
+            const $ = cheerio.load(response.data);
+            
+            // AZLyrics puts lyrics in a div with no class/id, usually preceded by a certain comment
+            let lyrics = '';
+            $('div.col-xs-12.col-lg-8 div').each((i, el) => {
+                const text = $(el).text().trim();
+                // Check if this looks like the lyrics block (long text, no class)
+                if (text.length > 100 && !$(el).attr('class') && !$(el).attr('id')) {
+                    lyrics = $(el).html().replace(/<br>/g, '\n').replace(/<[^>]*>/g, '').trim();
+                }
+            });
+
+            return await this.sanitizeLyrics(lyrics);
+        } catch (err) {
+            return null;
+        }
+    }
+
+    /**
+     * Extract lyrics from AnimeSongLyrics.com (Romaji focus).
+     */
+    async extractFromAnimeSongLyrics(url) {
+        try {
+            const response = await axios.get(url, { headers: { 'User-Agent': this.userAgent } });
+            const $ = cheerio.load(response.data);
+            
+            // Prefer Romaji column if it exists, otherwise the main lyrics body
+            let lyrics = $('.romaji').text();
+            if (!lyrics.trim()) {
+                lyrics = $('#lyrics-body').text();
+            }
+            if (!lyrics.trim()) {
+                lyrics = $('.lyrics').text();
+            }
+
+            return await this.sanitizeLyrics(lyrics);
+        } catch (err) {
+            return null;
+        }
+    }
+
+    /**
+     * Clean up formatting and remove technical tags.
+     */
+    async sanitizeLyrics(text) {
+        if (!text || !text.trim()) return null;
+
+        // Stage 1: Fast Regex Pre-Filter (Genius Specific Metadata)
+        let cleaned = text
+            .replace(/\d+\s+Contributors.*?Lyrics/is, '') // Strip "XX Contributors... Lyrics" header
+            .replace(/Read More.*?$/is, '') // Strip "Read More" and anything after
+            .replace(/\[.*?\]/g, '') // Remove [Chorus], [Verse], etc.
+            .replace(/\n{3,}/g, '\n\n') // Normalize repeats
+            .replace(/^\n+|\n+$/g, '') 
+            .trim();
+
+        // Stage 2: AI Refinement Pass (Deep Clean)
+        try {
+            const aiCleaned = await this.cleanLyricsWithAI(cleaned);
+            if (aiCleaned && aiCleaned.length > 50) {
+                cleaned = aiCleaned;
+            }
+        } catch (err) {
+            logger.warn(`LyricsService: AI cleaning failed, using regex fallback: ${err.message}`);
+        }
+
+        return cleaned;
+    }
+
+    /**
+     * Use Gemini (via ollama.js) to strip metadata and return pure lyrics.
+     */
+    async cleanLyricsWithAI(text) {
+        try {
+            const { queryOllama } = require('./ollama');
+            
+            const prompt = `You are a high-fidelity lyrics curator. 
+Below is a raw scrape of song lyrics which may contain metadata, contributor notes, website jargon (like "Read More"), or descriptions.
+
+CLEANING RULES:
+1. Return ONLY the actual song lyrics.
+2. Strip all platform metadata, contributor credits, and song descriptions.
+3. Preserve the structure of the verses and choruses.
+4. Do NOT include any introductory or concluding remarks.
+5. If the text appears to be entirely metadata/description with no lyrics, return an empty string.
+
+RAW TEXT:
+${text.substring(0, 5000)}`;
+
+            const result = await queryOllama('/api/generate', { prompt }, 1); // Level 1: Gemini
+            return result?.response?.trim() || null;
+        } catch (err) {
+            return null;
+        }
+    }
+}
+
+module.exports = new LyricsService();

@@ -51,6 +51,30 @@ describe('YouTubeMetadata', () => {
         });
     });
 
+    describe('_getBestThumbnail', () => {
+        test('prioritizes maxres from API', () => {
+            const thumbs = {
+                default: { url: 'def' },
+                high: { url: 'high' },
+                maxres: { url: 'https://i.ytimg.com/vi/abc/maxresdefault.jpg' }
+            };
+            expect(youtube._getBestThumbnail(thumbs)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+        });
+
+        test('force-upgrades search results to maxres', () => {
+            const hq = { high: { url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' } };
+            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+
+            const numbered = { default: { url: 'https://i.ytimg.com/vi/abc/3.jpg' } };
+            expect(youtube._getBestThumbnail(numbered)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+        });
+
+        test('handles URLs with query parameters', () => {
+            const hq = { high: { url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=123' } };
+            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+        });
+    });
+
     describe('getRecommendation fallback and filtering', () => {
         beforeEach(() => {
             jest.spyOn(youtube, 'search').mockImplementation(() => Promise.resolve([
@@ -71,7 +95,7 @@ describe('YouTubeMetadata', () => {
 
             const history = new Set(['11111111111']);
             const lastTrack = { title: 'Some Base Track', url: 'https://youtube.com/watch?v=basebasebas' };
-            const rec = await youtube.getRecommendation(lastTrack, history);
+            const rec = await youtube.getRecommendation([lastTrack], history);
             
             expect(rec.url).toBe('https://youtube.com/watch?v=22222222222'); // 1 is filtered by history
         });
@@ -80,7 +104,7 @@ describe('YouTubeMetadata', () => {
              const lastTrack = { title: 'Artist - Song (Official Music Video)', url: 'https://youtube.com/watch?v=basebasebas' };
              const history = new Set();
              
-             const rec = await youtube.getRecommendation(lastTrack, history);
+             const rec = await youtube.getRecommendation([lastTrack], history);
              expect(rec.url).toBe('https://youtube.com/watch?v=22222222222');
         });
     });

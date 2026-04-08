@@ -21,48 +21,107 @@ describe('MusicUI', () => {
     });
 
     describe('buildSeekBar', () => {
-        test('renders progress bar with knob', () => {
-            const bar = musicUI.buildSeekBar(60, 300, 10);
-            expect(bar).toContain('🔘');
+        test('renders progress bar with high-fidelity blocks', () => {
+            const bar = musicUI.buildSeekBar(60, 300);
+            expect(bar).toContain('█');
+            expect(bar).toContain('┃');
+            expect(bar).toContain('▒');
             expect(bar).toContain('1:00 / 5:00');
         });
 
-        test('falls back to stopwatch icon without duration', () => {
+        test('shows pause icon when isPaused is true', () => {
+            const bar = musicUI.buildSeekBar(60, 300, true);
+            expect(bar).toContain('⏸️');
+        });
+
+        test('falls back to durationless format correctly', () => {
             const bar = musicUI.buildSeekBar(45, null);
             expect(bar).toContain('⏱️ 0:45');
         });
     });
 
     describe('buildNowPlayingEmbed', () => {
-        test('creates valid embed structure', () => {
-            const track = { title: 'Song', url: 'https://x', channel: 'Artist', durationSeconds: 300 };
-            const upcoming = [{ title: 'Next' }];
-            const embed = musicUI.buildNowPlayingEmbed(track, upcoming, 60);
+        test('returns an array of 2 embeds if queue is empty (Banner, Player)', () => {
+            const track = { title: 'Song', url: 'https://x' };
+            const embeds = musicUI.buildNowPlayingEmbed(track, [], 60);
 
-            expect(embed).toBeInstanceOf(EmbedBuilder);
-            expect(embed.data.title).toBe('Song');
-            expect(embed.data.description).toContain('Artist');
-            expect(embed.data.description).toContain('1:00 / 5:00');
-            expect(embed.data.fields).toHaveLength(1);
-            expect(embed.data.fields[0].name).toBe('Up Next');
+            expect(embeds).toHaveLength(2);
+            expect(embeds[0]).toBeInstanceOf(EmbedBuilder); // Banner
+            expect(embeds[1]).toBeInstanceOf(EmbedBuilder); // Player
+        });
+
+        test('returns an array of 3 embeds if queue has tracks', () => {
+            const track = { title: 'Song', url: 'https://x' };
+            const embeds = musicUI.buildNowPlayingEmbed(track, [{ title: 'Next' }], 60);
+
+            expect(embeds).toHaveLength(3);
+        });
+
+        test('places the "Now Playing" label in the Banner (index 0)', () => {
+            const track = { title: 'Song', url: 'https://x', durationSeconds: 300 };
+            const [banner] = musicUI.buildNowPlayingEmbed(track, [], 60);
+            
+            expect(banner.data.author.name).toContain('Playing');
+        });
+
+        test('places the Technical Stats in Grid Fields (index 1)', () => {
+            const track = { title: 'Song', channel: 'Artist', durationSeconds: 300, requestedBy: 'User' };
+            const stats = { volume: 0.5, bitrate: 128000 };
+            const [, player] = musicUI.buildNowPlayingEmbed(track, [], 60, false, stats);
+            
+            expect(player.data.fields).toContainEqual(expect.objectContaining({ name: '📺 Channel', value: 'Artist' }));
+            expect(player.data.fields).toContainEqual(expect.objectContaining({ name: '🔊 Volume', value: '50%' }));
+            expect(player.data.footer.text).toContain('Track requested by User • 🎬 Skynet Cinematic Audio');
+            // Verify spacing in description
+            expect(player.data.description).toContain('\n\u200B');
+        });
+
+        test('live-upgrades low-res thumbnails to HD in the Banner', () => {
+            const track = { 
+                title: 'Song', 
+                thumbnail: 'https://i.ytimg.com/vi/abc/3.jpg' 
+            };
+            const [banner] = musicUI.buildNowPlayingEmbed(track, [], 0);
+            
+            expect(banner.data.image.url).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg');
         });
     });
 
-    describe('buildControlRow', () => {
-        test('returns array with one action row', () => {
-            const rows = musicUI.buildControlRow(false);
-            expect(rows).toHaveLength(1);
-            expect(rows[0]).toBeInstanceOf(ActionRowBuilder);
-            expect(rows[0].components).toHaveLength(4);
+    describe('Control Rows', () => {
+        test('buildCoreControlRow returns single row with 4 buttons', () => {
+            const row = musicUI.buildCoreControlRow(false);
+            expect(row).toBeInstanceOf(ActionRowBuilder);
+            expect(row.components).toHaveLength(4);
+            expect(row.components[0].data.label).toBe('⏸ Pause');
         });
 
-        test('toggles pause/resume label and includes Restart', () => {
-            const row1 = musicUI.buildControlRow(false);
-            expect(row1[0].components[0].data.label).toBe('⏸ Pause');
-            expect(row1[0].components[3].data.label).toBe('🔄 Restart');
-            
-            const row2 = musicUI.buildControlRow(true);
-            expect(row2[0].components[0].data.label).toBe('▶ Resume');
+        test('buildQueueControlRow returns single row with 4 buttons', () => {
+            const row = musicUI.buildQueueControlRow(true, 5);
+            expect(row).toBeInstanceOf(ActionRowBuilder);
+            expect(row.components).toHaveLength(4);
+            expect(row.components[0].data.label).toContain('ON');
+        });
+
+        test('Restart Song is correctly labeled in Core row', () => {
+            const row = musicUI.buildCoreControlRow(false);
+            expect(row.components[3].data.label).toBe('🔄 Restart Song');
+        });
+
+        test('Remove Next is correctly labeled in Queue row', () => {
+            const row = musicUI.buildQueueControlRow(false, 1);
+            expect(row.components[3].data.label).toBe('🗑 Remove Next');
+        });
+    });
+
+    describe('buildFullDisplayState', () => {
+        test('returns a complete AIO dispatch object', () => {
+            const track = { title: 'Song' };
+            const state = musicUI.buildFullDisplayState(track, [], 0, false, false, { volume: 0.5 }, null);
+
+            expect(state).toHaveProperty('embeds');
+            expect(state).toHaveProperty('components');
+            expect(state.embeds).toHaveLength(2); // Banner + Player
+            expect(state.components).toHaveLength(2); // Logic + Queue rows
         });
     });
 });

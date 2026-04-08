@@ -11,7 +11,7 @@ class MusicManager {
     constructor() {
         /** @type {Map<string, GuildQueue>} */
         this.queues = new Map();
-        /** @type {Map<string, { message: any, interval: NodeJS.Timeout }>} */
+        /** @type {Map<string, { stageMessage: any, textChannel: any, interval: NodeJS.Timeout }>} */
         this.uiStates = new Map();
     }
 
@@ -48,7 +48,7 @@ class MusicManager {
      * @param {object} track - { url, title, channel?, duration?, thumbnail? }
      * @returns {GuildQueue} The guild queue instance
      */
-    async enqueue(interaction, track) {
+    async enqueue(interaction, track, user = null) {
         const guildId = interaction.guildId;
         const channelId = interaction.member?.voice?.channelId;
 
@@ -59,7 +59,10 @@ class MusicManager {
         const queue = this.getOrCreateQueue(guildId, interaction.guild.voiceAdapterCreator);
         const channel = interaction.guild.channels.cache.get(channelId);
         await queue.join(channel);
-        queue.add(track);
+        
+        // Add to queue with requester info
+        const requester = user || interaction.user || 'Unknown';
+        queue.add(track, requester);
 
         return queue;
     }
@@ -70,7 +73,7 @@ class MusicManager {
      * @param {object[]} tracks - Array of { url, title, channel?, duration?, thumbnail? }
      * @returns {GuildQueue}
      */
-    async enqueueBatch(interaction, tracks) {
+    async enqueueBatch(interaction, tracks, user = null) {
         const guildId = interaction.guildId;
         const channelId = interaction.member?.voice?.channelId;
 
@@ -81,7 +84,10 @@ class MusicManager {
         const queue = this.getOrCreateQueue(guildId, interaction.guild.voiceAdapterCreator);
         const channel = interaction.guild.channels.cache.get(channelId);
         await queue.join(channel);
-        queue.addBatch(tracks);
+        
+        // Add to queue with requester info
+        const requester = user || interaction.user || 'Unknown';
+        queue.addBatch(tracks, requester);
 
         return queue;
     }
@@ -172,16 +178,15 @@ class MusicManager {
             }
 
             else if (btn.customId === 'music_skip_next') {
-                const upcoming = queue.queue[0];
                 const skipped = queue.skipNext();
                 if (skipped) {
                     await btn.reply({
-                        content: `⏭ Skipped upcoming track: **${skipped.title}**.`,
+                        content: `🗑 Removed upcoming track: **${skipped.title}**.`,
                         flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                     });
                 } else {
                     await btn.reply({
-                        content: `⚠️ No upcoming track to skip.`,
+                        content: `⚠️ No upcoming track to remove.`,
                         flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                     });
                 }
@@ -204,6 +209,27 @@ class MusicManager {
                 await btn.deferUpdate().catch(() => {});
             }
 
+            else if (btn.customId === 'music_lyrics') {
+                const state = this.uiStates.get(guildId);
+                if (state) {
+                    if (state.showLyrics) {
+                        state.showLyrics = false;
+                    } else {
+                        state.showLyrics = true;
+                        // Fetch if not already present
+                        if (!state.lyrics && queue.currentTrack) {
+                            const lyricsService = require('./LyricsService');
+                            state.lyrics = await lyricsService.fetchLyrics(
+                                queue.currentTrack.title, 
+                                queue.currentTrack.channel
+                            );
+                            if (!state.lyrics) state.lyrics = '⚠️ No lyrics found for this track.';
+                        }
+                    }
+                }
+                await btn.deferUpdate().catch(() => {});
+            }
+
             else if (btn.customId === 'music_shuffle') {
                 if (queue.queue.length > 1) {
                     queue.shuffle();
@@ -220,18 +246,21 @@ class MusicManager {
                 setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
-            // Manually trigger a UI update for instant feedback
+            // Manually trigger a UI update for instant feedback (AIO Abstraction)
             const state = this.uiStates.get(guildId);
-            if (state && state.message) {
+            if (state && state.stageMessage) {
                 const track = queue.currentTrack;
                 if (track) {
-                    const pos = queue.getPositionSeconds();
-                    const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], pos);
-                    const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay, queue.queue.length);
-                    if (queue.isPaused()) {
-                        embed.setColor(0xFEE75C).setAuthor({ name: '⏸ Paused' });
-                    }
-                    await state.message.edit({ embeds: [embed], components: rows }).catch(() => {});
+                    const displayState = musicUI.buildFullDisplayState(
+                        track, 
+                        [...queue.queue], 
+                        queue.getPositionSeconds(), 
+                        queue.isPaused(), 
+                        queue.autoplay, 
+                        { volume: queue.volume, bitrate: queue.bitrate },
+                        state.showLyrics ? state.lyrics : null
+                    );
+                    await state.stageMessage.edit(displayState).catch(() => {});
                 }
             }
         } catch (err) {
@@ -258,19 +287,25 @@ class MusicManager {
     }
 
     /**
-     * Start a periodic UI update loop for the now playing embed.
+     * Start a periodic UI update loop for the dual-message dashboard.
      */
-    startUIUpdate(guildId, message, textChannel) {
+    startUIUpdate(guildId, stageMessage, textChannel) {
         this.stopUIUpdate(guildId, false);
 
         const state = {
-            message,
+            stageMessage,
             textChannel,
             interval: null,
+            lyrics: null,
+            showLyrics: false
         };
 
-        // Attach global button listener
-        this._attachControlCollector(message, guildId);
+        const queue = this.getQueue(guildId);
+        const dispatchedThumb = musicUI.normalizeThumbnail(queue?.currentTrack?.thumbnail);
+        logger.info(`Starting UI ticker for guild ${guildId}. Dispatched Thumbnail: ${dispatchedThumb || 'None'}`);
+
+        // Attach global button listener to ONE message
+        this._attachControlCollector(stageMessage, guildId);
 
         state.interval = setInterval(async () => {
             const queue = this.getQueue(guildId);
@@ -278,18 +313,12 @@ class MusicManager {
                 this.stopUIUpdate(guildId);
                 return;
             }
-            if (!queue.currentTrack) {
-                // If it's empty but queue hasn't ended yet (e.g. autoplay is fetching),
-                // just wait. The actual end is handled definitively by queue.onQueueEnd
-                return;
-            }
+            if (!queue.currentTrack) return;
 
-            // Instant Autoplay preload: keep exactly 1 song in the queue for visibility
+            // Instant Autoplay preload logic...
             if (queue.autoplay && queue.queue.length === 0 && !queue.isAutoplayFetching) {
-                logger.info(`Autoplay: Queue is empty, instantly preloading next recommendation for ${guildId}...`);
                 queue.isAutoplayFetching = true;
                 if (queue.onAutoplayTrigger) {
-                    // Fire and forget (it handles resetting the flag or adding to queue)
                     queue.onAutoplayTrigger(queue.currentTrack, queue.history).finally(() => {
                         queue.isAutoplayFetching = false;
                     });
@@ -300,20 +329,25 @@ class MusicManager {
                 const track = queue.currentTrack;
                 const pos = queue.getPositionSeconds();
                 const upcoming = [...queue.queue];
-                const embed = musicUI.buildNowPlayingEmbed(track, upcoming, pos, queue.isPaused());
-                const rows = musicUI.buildControlRow(queue.isPaused(), queue.autoplay, queue.queue.length);
+                const stats = { volume: queue.volume, bitrate: queue.bitrate };
 
-                await message.edit({ embeds: [embed], components: rows });
+                const displayState = musicUI.buildFullDisplayState(
+                    track, 
+                    upcoming, 
+                    pos, 
+                    queue.isPaused(), 
+                    queue.autoplay, 
+                    stats,
+                    state.showLyrics ? state.lyrics : null
+                );
+                await stageMessage.edit(displayState);
             } catch (err) {
                 if (err.code === 10008) { // Unknown Message
-                    logger.warn(`Now Playing message deleted in ${guildId}, attempting to regenerate UI...`);
-                    const recoveryChannel = state.textChannel;
+                    logger.warn(`UI message deleted in ${guildId}, regenerating...`);
+                    const channel = state.textChannel;
                     this.stopUIUpdate(guildId, false);
-                    
-                    // Recover: handle it like a new track start
-                    const track = queue.currentTrack;
-                    if (track && recoveryChannel) {
-                        this._handleTrackStart(guildId, track, recoveryChannel);
+                    if (queue.currentTrack && channel) {
+                        this._handleTrackStart(guildId, queue.currentTrack, channel);
                     }
                 } else {
                     logger.warn(`UI update failed for guild ${guildId}: ${err.message}`);
@@ -329,23 +363,47 @@ class MusicManager {
      * Internal: handles when a new track starts (automatic UI advancement).
      */
     async _handleTrackStart(guildId, track, forcedChannel = null) {
-        const state = this.uiStates.get(guildId);
-        const textChannel = forcedChannel || state?.textChannel;
-        if (!textChannel) return;
+        let textChannel = forcedChannel || this.uiStates.get(guildId)?.textChannel;
+        
+        // --- DEEP RESOLUTION FALLBACK ---
+        if (typeof textChannel?.send !== 'function') {
+            const queue = this.getQueue(guildId);
+            if (queue?.client && textChannel?.id) {
+                logger.debug(`Heuristic: Re-fetching channel ${textChannel.id} for guild ${guildId}`);
+                textChannel = queue.client.channels.cache.get(textChannel.id) || await queue.client.channels.fetch(textChannel.id).catch(() => null);
+            }
+        }
+        
+        if (!textChannel || typeof textChannel.send !== 'function') {
+            logger.warn(`Failed to advance UI for guild ${guildId}: No valid text channel found.`);
+            return;
+        }
 
         try {
             // 1. Delete the old message
             await this.stopUIUpdate(guildId, true);
 
-            // 2. Send new message
+            // 2. Prepare Display State via Abstraction
             const queue = this.getQueue(guildId);
-            const isPaused = queue.isPaused();
-            const embed = musicUI.buildNowPlayingEmbed(track, [...queue.queue], 0, isPaused);
-            const rows = musicUI.buildControlRow(isPaused, queue.autoplay, queue.queue.length);
-            const newMessage = await textChannel.send({ embeds: [embed], components: rows });
+            const displayState = musicUI.buildFullDisplayState(
+                track, 
+                [...queue.queue], 
+                0, 
+                queue.isPaused(), 
+                queue.autoplay, 
+                { volume: queue.volume, bitrate: queue.bitrate }
+            );
 
-            // 3. Restart loop
-            this.startUIUpdate(guildId, newMessage, textChannel);
+            // 3. Send single AIO message with defensive check
+            if (typeof textChannel?.send !== 'function') {
+                logger.warn(`Failed to advance UI for guild ${guildId}: textChannel is not a sender. Re-fetching...`);
+                return;
+            }
+
+            const stageMessage = await textChannel.send(displayState);
+
+            // 4. Restart loop
+            this.startUIUpdate(guildId, stageMessage, textChannel);
         } catch (err) {
             logger.error(`Failed to advance UI for guild ${guildId}: ${err.message}`);
         }
@@ -357,10 +415,11 @@ class MusicManager {
     async stopUIUpdate(guildId, deleteMessage = true) {
         const state = this.uiStates.get(guildId);
         if (state) {
-            clearInterval(state.interval);
-            if (deleteMessage && state.message) {
+            if (state.interval) clearInterval(state.interval);
+            if (deleteMessage) {
                 try {
-                    await state.message.delete();
+                    if (state.stageMessage) await state.stageMessage.delete().catch(() => {});
+                    if (state.dashboardMessage) await state.dashboardMessage.delete().catch(() => {});
                 } catch (err) {
                     // Ignore deletion errors
                 }
@@ -397,7 +456,7 @@ class MusicManager {
             
             if (recommendation) {
                 logger.info(`Autoplay: Found recommendation for ${guildId} -> ${recommendation.title}`);
-                queue.add(recommendation);
+                queue.add(recommendation, 'Skynet Autoplay');
             } else {
                 logger.warn(`Autoplay: No recommendations found for guild ${guildId}`);
                 this.stopUIUpdate(guildId);

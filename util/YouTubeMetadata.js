@@ -69,6 +69,32 @@ class YouTubeMetadata {
     }
 
     /**
+     * Utility to select the best available thumbnail or upgrade to HD.
+     */
+    _getBestThumbnail(thumbnails) {
+        if (!thumbnails) return null;
+        
+        // Priority waterfall: maxres -> standard -> high -> medium -> default
+        const url = thumbnails.maxres?.url 
+                 || thumbnails.standard?.url 
+                 || thumbnails.high?.url 
+                 || thumbnails.medium?.url 
+                 || thumbnails.default?.url;
+
+        if (!url) return null;
+
+        // If we only have medium, low, or numbered frames (0.jpg-3.jpg) from a search result, try to force-upgrade to hqdefault.
+        // hqdefault.jpg exists for almost every video ever uploaded to YouTube and is safe.
+        // maxresdefault.jpg (1080p) is only available for newer/high-res videos and often 404s on older content.
+        if (url.includes('ytimg.com') && !url.includes('maxresdefault') && !url.includes('hqdefault') && !url.includes('sddefault')) {
+            // Replace the low-res filename with the safe hqdefault bypass
+            return url.replace(/\/(default|mqdefault|[0-3])\.jpg(\?.*)?$/, '/hqdefault.jpg');
+        }
+
+        return url;
+    }
+
+    /**
      * Search YouTube and return the top N results.
      */
     async search(query, maxResults = 5) {
@@ -85,7 +111,7 @@ class YouTubeMetadata {
                     url: r.link,
                     title: r.title,
                     channel: r.channelTitle,
-                    thumbnail: r.thumbnails?.high?.url || r.thumbnails?.default?.url || null,
+                    thumbnail: this._getBestThumbnail(r.thumbnails),
                 }));
                 resolve(processed);
             });
@@ -104,7 +130,10 @@ class YouTubeMetadata {
                     url: item.shortUrl || item.url,
                     title: item.title,
                     channel: item.author?.name || 'Unknown',
-                    thumbnail: item.bestThumbnail?.url || null,
+                    thumbnail: this._getBestThumbnail({
+                        default: { url: item.thumbnail },
+                        high: { url: item.bestThumbnail?.url }
+                    }),
                 }))
             };
         } catch (err) {
@@ -131,10 +160,13 @@ class YouTubeMetadata {
                     return {
                         title: ytData.title || 'YouTube Mix',
                         tracks: ytData.entries.map(item => ({
-                            url: item.url,
+                            url: item.url || (item.id ? `https://www.youtube.com/watch?v=${item.id}` : null),
                             title: item.title,
                             channel: item.uploader || item.channel || 'Unknown',
-                            thumbnail: item.thumbnails?.[0]?.url || null,
+                        thumbnail: this._getBestThumbnail({
+                            default: { url: item.thumbnail },
+                            high: { url: item.thumbnails?.[0]?.url }
+                        }),
                             durationSeconds: item.duration || null,
                         }))
                     };
@@ -189,9 +221,7 @@ class YouTubeMetadata {
             const info = {
                 title: item.snippet.title || url,
                 channel: item.snippet.channelTitle || null,
-                thumbnail: item.snippet.thumbnails?.high?.url
-                    || item.snippet.thumbnails?.default?.url
-                    || null,
+                thumbnail: this._getBestThumbnail(item.snippet.thumbnails),
                 durationSeconds: this._parseISO8601Duration(item.contentDetails?.duration) || null,
             };
 

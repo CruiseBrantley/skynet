@@ -6,15 +6,18 @@ jest.mock('../util/MusicManager', () => ({
     nowPlaying: jest.fn(),
     skip: jest.fn(),
     stop: jest.fn(),
-    uiStates: { has: jest.fn().mockReturnValue(true) },
+    uiStates: { has: jest.fn().mockReturnValue(false) },
     startUIUpdate: jest.fn(),
 }));
 
 jest.mock('../util/MusicUI', () => ({
-    buildNowPlayingEmbed: jest.fn().mockReturnValue({ setAuthor: jest.fn().mockReturnThis(), setDescription: jest.fn().mockReturnThis() }),
-    buildControlRow: jest.fn().mockReturnValue([]),
+    buildFullDisplayState: jest.fn().mockReturnValue({
+        content: '',
+        embeds: [{}, {}],
+        components: [{}, {}]
+    }),
     buildSearchEmbed: jest.fn().mockReturnValue({ embed: {}, row: {} }),
-    buildQueueEmbed: jest.fn().mockReturnValue({}),
+    normalizeThumbnail: jest.fn().mockImplementation(url => url),
 }));
 
 jest.mock('../util/YouTubeMetadata', () => ({
@@ -56,6 +59,7 @@ function mockInteraction(subcommand, options = {}) {
             getChannel: (key) => optionValues[key] || null,
         },
         reply: jest.fn().mockResolvedValue(),
+        followUp: jest.fn().mockResolvedValue({}),
         deferReply: jest.fn().mockResolvedValue(),
         editReply: jest.fn().mockResolvedValue({
             createMessageComponentCollector: jest.fn().mockReturnValue({
@@ -76,25 +80,57 @@ describe('/music Command Integration', () => {
             youtube.isYouTubeURL.mockReturnValue(true);
             youtube.isPlaylistURL.mockReturnValue(false);
             youtube.getVideoInfo.mockResolvedValue({ title: 'Test Video', url: 'https://abc' });
-            musicManager.enqueue.mockResolvedValue({ isPlaying: () => false, isPaused: () => false });
+            musicManager.enqueue.mockResolvedValue({ 
+                isPlaying: () => false, 
+                isPaused: () => false, 
+                volume: 0.5, 
+                bitrate: 64000, 
+                autoplay: false, 
+                queue: [] 
+            });
+            musicManager.uiStates.has.mockReturnValue(false);
 
             await musicCmd.execute(interaction);
 
             expect(youtube.getVideoInfo).toHaveBeenCalledWith('https://youtube.com/watch?v=abc');
             expect(musicManager.enqueue).toHaveBeenCalled();
-            expect(musicUI.buildNowPlayingEmbed).toHaveBeenCalled();
+            expect(musicUI.buildFullDisplayState).toHaveBeenCalled();
+            expect(musicManager.startUIUpdate).toHaveBeenCalled();
         });
 
         test('handles searches', async () => {
             const interaction = mockInteraction('play', { query: 'lofi beats' });
             youtube.isYouTubeURL.mockReturnValue(false);
             youtube.search.mockResolvedValue([{ title: 'Search Result', url: 'https://res' }]);
-            musicManager.enqueue.mockResolvedValue({ isPlaying: () => false, isPaused: () => false });
+            musicManager.enqueue.mockResolvedValue({ isPlaying: () => false, isPaused: () => false, volume: 0.5, bitrate: 64000, queue: [] });
+            musicManager.uiStates.has.mockReturnValue(false); 
 
             await musicCmd.execute(interaction);
 
             expect(youtube.search).toHaveBeenCalledWith('lofi beats', 1);
             expect(musicManager.enqueue).toHaveBeenCalled();
+            expect(musicUI.buildFullDisplayState).toHaveBeenCalled();
+            expect(musicManager.startUIUpdate).toHaveBeenCalled();
+        });
+
+        test('plays a playlist', async () => {
+            const interaction = mockInteraction('play', { query: 'https://youtube.com/playlist?list=pl1' });
+            youtube.isYouTubeURL.mockReturnValue(true);
+            youtube.isPlaylistURL.mockReturnValue(true);
+            youtube.expandPlaylist.mockResolvedValue({ 
+                title: 'Mix', 
+                tracks: [{ url: 't1', title: 'T1' }, { url: 't2', title: 'T2' }] 
+            });
+            youtube.getVideoInfo.mockResolvedValue({ title: 'T1', url: 't1' });
+            musicManager.uiStates.has.mockReturnValue(false); 
+
+            await musicCmd.execute(interaction);
+
+            expect(youtube.expandPlaylist).toHaveBeenCalled();
+            expect(youtube.getVideoInfo).toHaveBeenCalled(); 
+            expect(musicUI.buildFullDisplayState).toHaveBeenCalled();
+            expect(musicManager.startUIUpdate).toHaveBeenCalled();
+            expect(interaction.editReply).toHaveBeenCalled();
         });
     });
 
@@ -108,7 +144,7 @@ describe('/music Command Integration', () => {
             expect(musicManager.skip).toHaveBeenCalledWith('guild-123');
             expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
                 content: expect.stringContaining('Skipped'),
-                flags: [64],
+                flags: [64]
             }));
         });
     });
@@ -122,7 +158,7 @@ describe('/music Command Integration', () => {
             expect(musicManager.stop).toHaveBeenCalledWith('guild-123');
             expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
                 content: expect.stringContaining('Stopped'),
-                flags: [64],
+                flags: [64]
             }));
         });
     });
