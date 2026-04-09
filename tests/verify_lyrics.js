@@ -16,7 +16,8 @@ async function runTests() {
     await test('Maji de Kansha!', 'T-Pistonz+KMC');
     await test("The Kids Aren't Alright", 'The Offspring');
     await test('The Taste of Ink', 'The Used');
-    await test('7iNbnineUCI', ''); // Testing direct ID (should handle title from elsewhere usually, but testing cleanup)
+    await test('Writing On The Walls', 'Underoath');
+    await test('The Pretender', 'Foo Fighters'); // More reliable test case
 }
 
 runTests();

@@ -109,7 +109,7 @@ class LyricsService {
                 html = response.data;
             }
 
-            const regex = new RegExp(`https://${domain.replace(/\./g, '\\.')}/[^"&\\s>]+`, 'g');
+            const regex = new RegExp(`https://${domain.replace(/\./g, '\\.')}/[^"\\s<>]{5,100}`, 'g');
             const matches = html.match(regex);
             
             if (matches && matches.length > 0) {
@@ -205,8 +205,7 @@ class LyricsService {
         // Stage 1: Fast Regex Pre-Filter (Genius Specific Metadata)
         let cleaned = text
             .replace(/\d+\s+Contributors.*?Lyrics/is, '') // Strip "XX Contributors... Lyrics" header
-            .replace(/Read More.*?$/is, '') // Strip "Read More" and anything after
-            .replace(/\[.*?\]/g, '') // Remove [Chorus], [Verse], etc.
+            .replace(/\[(?:Chorus|Verse|Pre-Chorus|Bridge|Outro|Intro|Hook)\]/gi, '') // Remove specific metadata brackets only
             .replace(/\n{3,}/g, '\n\n') // Normalize repeats
             .replace(/^\n+|\n+$/g, '') 
             .trim();
@@ -236,10 +235,11 @@ Below is a raw scrape of song lyrics which may contain metadata, contributor not
 
 CLEANING RULES:
 1. Return ONLY the actual song lyrics.
-2. Strip all platform metadata, contributor credits, and song descriptions.
-3. Preserve the structure of the verses and choruses.
-4. Do NOT include any introductory or concluding remarks.
-5. If the text appears to be entirely metadata/description with no lyrics, return an empty string.
+2. Strip all platform metadata, contributor credits, and song descriptions (the "About" or "Background" text).
+3. If you see text about the song's meaning, history, or band trivia, DISCARD IT.
+4. Preserve the structure of the verses and choruses.
+5. Do NOT include any introductory or concluding remarks.
+6. If the text appears to be entirely metadata/description with no lyrics, return an empty string.
 
 RAW TEXT:
 ${text.substring(0, 5000)}`;
@@ -247,7 +247,8 @@ ${text.substring(0, 5000)}`;
             const result = await queryOllama('/api/generate', { prompt }, 1); // Level 1: Gemini
             return result?.response?.trim() || null;
         } catch (err) {
-            return null;
+            logger.warn(`LyricsService: AI cleaning failed: ${err.message}`);
+            return text; // Return regex-cleaned text as fallback
         }
     }
 }
