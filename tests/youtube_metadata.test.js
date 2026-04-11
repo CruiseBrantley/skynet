@@ -61,17 +61,24 @@ describe('YouTubeMetadata', () => {
             expect(youtube._getBestThumbnail(thumbs)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
         });
 
-        test('force-upgrades search results to maxres', () => {
-            const hq = { high: { url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' } };
-            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
-
+        test('upgrades low-res and numbered thumbnails to hqdefault', () => {
+            // Numbered frames (e.g. 3.jpg from search results) → hqdefault
             const numbered = { default: { url: 'https://i.ytimg.com/vi/abc/3.jpg' } };
-            expect(youtube._getBestThumbnail(numbered)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+            expect(youtube._getBestThumbnail(numbered)).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg');
+
+            // mqdefault → hqdefault
+            const mq = { high: { url: 'https://i.ytimg.com/vi/abc/mqdefault.jpg' } };
+            expect(youtube._getBestThumbnail(mq)).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg');
+
+            // Already hqdefault → pass through unchanged (it's the target quality)
+            const hq = { high: { url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' } };
+            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg');
         });
 
-        test('handles URLs with query parameters', () => {
+        test('passes through hqdefault URLs with query parameters unchanged', () => {
+            // The low-res regex only matches plain filenames, not hqdefault.jpg
             const hq = { high: { url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=123' } };
-            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/maxresdefault.jpg');
+            expect(youtube._getBestThumbnail(hq)).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=123');
         });
     });
 

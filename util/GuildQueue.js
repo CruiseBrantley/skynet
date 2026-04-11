@@ -44,8 +44,14 @@ class GuildQueue {
                 this.lastPlayedTrack = this.currentTrack;
                 this._addToRecentHistory(this.currentTrack);
             }
-            this.currentTrack = null;
             this._resetPosition();
+            // Only clear currentTrack if there's something next to play or autoplay
+            // will fill the queue. When the queue is empty and autoplay is off, keep
+            // currentTrack alive so the idle-window UI and Restart button still work.
+            // MusicManager._scheduleIdleDelete will null it out after 5 minutes.
+            if (this.queue.length > 0 || this.autoplay) {
+                this.currentTrack = null;
+            }
             this._playNext();
         });
 

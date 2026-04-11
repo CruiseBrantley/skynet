@@ -79,7 +79,7 @@ describe('Ollama Fallback Hierarchy (Level 0: Remote -> Level 1: Gemini -> Level
         const result = await queryOllama('/api/chat', { messages: [] });
 
         expect(result.message.content).toBe('local response');
-        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('127.0.0.1:11434'), expect.objectContaining({ model: 'qwen3.5:4b' }), expect.any(Object));
+        expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('127.0.0.1:11434'), expect.objectContaining({ model: 'gemma4:e4b' }), expect.any(Object));
     });
 
     test('should throw error if all tiers fail', async () => {

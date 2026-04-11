@@ -1,14 +1,132 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const fs = require('fs');
+const path = require('path');
 const logger = require('../logger');
+
+// Cache directory for lyrics
+const CACHE_DIR = path.join(__dirname, '..', '.lyrics_cache');
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+// Ensure cache directory exists
+if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+}
 
 /**
  * Service to fetch song lyrics from public sources.
  * Implementation: Direct API Discovery with Multi-Scraper Fallback.
+ * Features: Caching to avoid repeated API calls
  */
 class LyricsService {
     constructor() {
         this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+        this.cache = new Map(); // In-memory cache for fast access
+    }
+
+    /**
+     * Get cache file path for a given song
+     */
+    getCachePath(title, artist) {
+        const key = `${this.normalizeKey(title)}-${this.normalizeKey(artist)}`;
+        return path.join(CACHE_DIR, `${key}.json`);
+    }
+
+    /**
+     * Normalize key for cache file naming
+     */
+    normalizeKey(str) {
+        return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+
+    /**
+     * Check if cached lyrics are still valid
+     */
+    isCacheValid(cacheFile) {
+        try {
+            const stats = fs.statSync(cacheFile);
+            const now = Date.now();
+            return (now - stats.mtimeMs) < CACHE_TTL;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Get lyrics from cache
+     */
+    getCachedLyrics(title, artist) {
+        const cacheFile = this.getCachePath(title, artist);
+        
+        // Check in-memory cache first
+        const cacheKey = `${title}-${artist}`;
+        if (this.cache.has(cacheKey)) {
+            logger.debug(`LyricsService: Cache hit (in-memory) for ${title} by ${artist}`);
+            return this.cache.get(cacheKey);
+        }
+
+        // Check file cache
+        if (fs.existsSync(cacheFile) && this.isCacheValid(cacheFile)) {
+            try {
+                const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+                logger.debug(`LyricsService: Cache hit (file) for ${title} by ${artist}`);
+                // Update in-memory cache
+                this.cache.set(cacheKey, cached.lyrics);
+                return cached.lyrics;
+            } catch (err) {
+                logger.warn(`LyricsService: Failed to read cache file: ${err.message}`);
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Save lyrics to cache
+     */
+    saveToCache(title, artist, lyrics) {
+        const cacheFile = this.getCachePath(title, artist);
+        const cacheKey = `${title}-${artist}`;
+        
+        try {
+            const data = {
+                lyrics,
+                timestamp: Date.now(),
+                ttl: CACHE_TTL
+            };
+            fs.writeFileSync(cacheFile, JSON.stringify(data, null, 2), 'utf8');
+            this.cache.set(cacheKey, lyrics);
+            logger.debug(`LyricsService: Saved to cache for ${title} by ${artist}`);
+        } catch (err) {
+            logger.warn(`LyricsService: Failed to save to cache: ${err.message}`);
+        }
+    }
+
+    /**
+     * Clear cache for a specific song or all cache
+     */
+    clearCache(title, artist) {
+        if (title && artist) {
+            const cacheFile = this.getCachePath(title, artist);
+            if (fs.existsSync(cacheFile)) {
+                fs.unlinkSync(cacheFile);
+                logger.info(`LyricsService: Cleared cache for ${title} by ${artist}`);
+            }
+        } else {
+            // Clear all cache
+            try {
+                if (fs.existsSync(CACHE_DIR)) {
+                    fs.readdirSync(CACHE_DIR).forEach(file => {
+                        fs.unlinkSync(path.join(CACHE_DIR, file));
+                    });
+                    logger.info('LyricsService: Cleared all cache files');
+                }
+            } catch (err) {
+                logger.warn(`LyricsService: Failed to clear cache: ${err.message}`);
+            }
+        }
+        // Clear in-memory cache
+        this.cache.clear();
     }
 
     /**
@@ -19,6 +137,10 @@ class LyricsService {
      */
     async fetchLyrics(title, artist) {
         if (!title) return null;
+
+        // Priority 0: Check cache first (fastest path)
+        const cachedLyrics = this.getCachedLyrics(title, artist);
+        if (cachedLyrics) return cachedLyrics;
 
         // Clean query: Remove common YouTube clutter and specific punctuation
         const cleanTitle = title.replace(/\(.*?\)|\[.*?\]/g, '').replace(/[!?]/g, '').trim();
@@ -33,27 +155,40 @@ class LyricsService {
             try {
                 // Priority 1: Direct Genius Search API
                 let lyrics = await this.discoveryviaGeniusAPI(query);
-                if (lyrics) return lyrics;
+                if (lyrics) {
+                    // Cache the lyrics before returning
+                    this.saveToCache(title, artist, lyrics);
+                    return lyrics;
+                }
 
                 // Priority 2: AnimeSongLyrics (Specialized fallback for Anime)
                 const animeUrl = await this.findUrlViaGoogle(query, 'animesonglyrics.com');
                 if (animeUrl) {
                     lyrics = await this.extractFromAnimeSongLyrics(animeUrl);
-                    if (lyrics) return lyrics;
+                    if (lyrics) {
+                        this.saveToCache(title, artist, lyrics);
+                        return lyrics;
+                    }
                 }
 
                 // Priority 3: Google Search Scraper (Backup Discovery for Genius)
                 const geniusUrl = await this.findUrlViaGoogle(query, 'genius.com');
                 if (geniusUrl) {
                     lyrics = await this.extractFromGenius(geniusUrl);
-                    if (lyrics) return lyrics;
+                    if (lyrics) {
+                        this.saveToCache(title, artist, lyrics);
+                        return lyrics;
+                    }
                 }
 
                 // Priority 4: AZLyrics Fallback
                 const azUrl = await this.findUrlViaGoogle(query, 'azlyrics.com');
                 if (azUrl) {
                     lyrics = await this.extractFromAZLyrics(azUrl);
-                    if (lyrics) return lyrics;
+                    if (lyrics) {
+                        this.saveToCache(title, artist, lyrics);
+                        return lyrics;
+                    }
                 }
             } catch (err) {
                 logger.warn(`LyricsService: Sub-query attempt failed for "${query}": ${err.message}`);
@@ -230,8 +365,7 @@ class LyricsService {
         try {
             const { queryOllama } = require('./ollama');
             
-            const prompt = `You are a high-fidelity lyrics curator. 
-Below is a raw scrape of song lyrics which may contain metadata, contributor notes, website jargon (like "Read More"), or descriptions.
+            const prompt = `Below is a raw scrape of song lyrics which may contain metadata, contributor notes, website jargon (like "Read More"), or descriptions.
 
 CLEANING RULES:
 1. Return ONLY the actual song lyrics.

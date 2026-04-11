@@ -98,9 +98,10 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     }
 
     // Level 2: Local Fallback (The final fail-safe)
+    // Model: gemma4:e4b (keeps in RAM for fast responses)
     if (fallbackLevel >= 2) {
         const localUrl = `http://127.0.0.1:11434${endpoint}`;
-        const localModel = 'qwen3.5:4b'; 
+        const localModel = 'gemma4:e4b';
 
         logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`);
 

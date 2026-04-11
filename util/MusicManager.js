@@ -11,7 +11,7 @@ class MusicManager {
     constructor() {
         /** @type {Map<string, GuildQueue>} */
         this.queues = new Map();
-        /** @type {Map<string, { stageMessage: any, textChannel: any, interval: NodeJS.Timeout }>} */
+        /** @type {Map<string, { stageMessage: any, textChannel: any, interval: NodeJS.Timeout, deleteTimer: NodeJS.Timeout|null }>} */
         this.uiStates = new Map();
     }
 
@@ -27,7 +27,7 @@ class MusicManager {
             queue.onTrackStart = (track) => {
                 this._handleTrackStart(guildId, track);
             };
-            queue.onQueueEnd = () => this.stopUIUpdate(guildId);
+            queue.onQueueEnd = () => this._scheduleIdleDelete(guildId);
             queue.onAutoplayTrigger = (lastTrack, history) => this.triggerAutoplay(guildId, lastTrack, history);
             this.queues.set(guildId, queue);
         }
@@ -201,6 +201,9 @@ class MusicManager {
 
             else if (btn.customId === 'music_restart') {
                 await queue.restart();
+                // If the queue had ended and the idle-delete timer is running,
+                // cancel it and bring the live ticker back — the song is playing again.
+                this._cancelIdleDelete(guildId);
                 await btn.deferUpdate().catch(() => {});
             }
 
@@ -296,6 +299,7 @@ class MusicManager {
             stageMessage,
             textChannel,
             interval: null,
+            deleteTimer: null,
             lyrics: null,
             showLyrics: false
         };
@@ -416,6 +420,8 @@ class MusicManager {
         const state = this.uiStates.get(guildId);
         if (state) {
             if (state.interval) clearInterval(state.interval);
+            // Always cancel any pending idle-delete timer when the state is torn down
+            if (state.deleteTimer) clearTimeout(state.deleteTimer);
             if (deleteMessage) {
                 try {
                     if (state.stageMessage) await state.stageMessage.delete().catch(() => {});
@@ -426,6 +432,56 @@ class MusicManager {
             }
             this.uiStates.delete(guildId);
         }
+    }
+
+    /**
+     * Called when the queue empties naturally (last track finishes).
+     * Stops the live-update ticker but keeps the message visible for 5 minutes
+     * so users can still see what was playing before it disappears.
+     * Any call to stop() or a new track starting will cancel this timer early.
+     */
+    _scheduleIdleDelete(guildId) {
+        const IDLE_DELETE_MS = 5 * 60 * 1000; // 5 minutes
+        const state = this.uiStates.get(guildId);
+        if (!state) return;
+
+        // currentTrack is kept alive (see GuildQueue Idle handler), so the ticker
+        // keeps running and the UI stays fully interactive. We just arm the cleanup.
+        // Guard against a double-timer if Restart is hit and the song finishes again.
+        if (state.deleteTimer) clearTimeout(state.deleteTimer);
+
+        logger.info(`Queue ended for guild ${guildId}. Music message will be deleted in 5 minutes.`);
+        state.deleteTimer = setTimeout(async () => {
+            // Only act if this state is still the active one
+            if (this.uiStates.get(guildId) === state) {
+                // Null out the preserved last track now that the idle window has expired
+                const queue = this.getQueue(guildId);
+                if (queue) {
+                    queue.currentTrack = null;
+                    queue._resetPosition();
+                }
+                try {
+                    if (state.stageMessage) await state.stageMessage.delete().catch(() => {});
+                    if (state.dashboardMessage) await state.dashboardMessage.delete().catch(() => {});
+                } catch (_) { /* ignore */ }
+                this.uiStates.delete(guildId);
+                logger.info(`Idle music message cleaned up for guild ${guildId}.`);
+            }
+        }, IDLE_DELETE_MS);
+    }
+
+    /**
+     * Cancel a pending idle-delete for a guild (e.g. when a song is restarted
+     * after the queue emptied). The live ticker never stopped (currentTrack stays
+     * alive), so all we need to do is disarm the timer.
+     */
+    _cancelIdleDelete(guildId) {
+        const state = this.uiStates.get(guildId);
+        if (!state || !state.deleteTimer) return; // Nothing pending, no-op
+
+        clearTimeout(state.deleteTimer);
+        state.deleteTimer = null;
+        logger.info(`Idle-delete cancelled for guild ${guildId} (song restarted).`);
     }
 
     /**
