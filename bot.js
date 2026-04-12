@@ -73,6 +73,11 @@ function discordBot() {
     const database = loginFirebase()
     const setupConfigSync = require('./util/configSync')
     bot.configSync = setupConfigSync(database)
+    
+    // Guardian setup for singleton detection
+    const InstanceGuardian = require('./util/InstanceGuardian');
+    const guardian = new InstanceGuardian(database);
+    guardian.init();
 
     bot.on('ready', () => {
         logger.info('Connected')
@@ -242,6 +247,8 @@ function discordBot() {
     });
 }
 
-discordBot()
+if (require.main === module) {
+    discordBot();
+}
 
-module.exports = discordBot
+module.exports = discordBot;

@@ -22,10 +22,12 @@ describe('ngrok.getURL', () => {
     });
 
     test('returns undefined and does not throw when ngrok fails', async () => {
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
         ngrok.connect.mockRejectedValueOnce(new Error('session limit reached'));
 
         const url = await getURL();
 
         expect(url).toBeUndefined();
+        consoleSpy.mockRestore();
     });
 });

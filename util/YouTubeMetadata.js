@@ -142,7 +142,7 @@ class YouTubeMetadata {
             
             try {
                 const { execFile } = require('child_process');
-                const YT_DLP = path.join(__dirname, '../tts_engine/piper_venv/bin/yt-dlp');
+                const { YT_DLP } = require('./paths');
                 
                 const ytData = await new Promise((resolve, reject) => {
                     execFile(YT_DLP, ['--flat-playlist', '-J', url], { maxBuffer: 1024 * 1024 * 10 }, (error, stdout) => {

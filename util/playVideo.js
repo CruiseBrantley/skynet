@@ -6,11 +6,7 @@ const fs = require('fs');
 const play = require('play-dl');
 const logger = require('../logger');
 
-const PROJECT_DIR = '/Users/cruise/git/skynet';
-const YT_DLP = path.join(PROJECT_DIR, 'tts_engine/piper_venv/bin/yt-dlp');
-const COOKIE_FILE = path.join(PROJECT_DIR, 'youtube_cookies.txt');
-const FFMPEG = '/opt/homebrew/bin/ffmpeg';
-const TEMP_DIR = path.join(PROJECT_DIR, 'temp_music');
+const { PROJECT_ROOT, YT_DLP, COOKIE_FILE, FFMPEG, TEMP_DIR } = require('./paths');
 
 /**
  * Get yt-dlp cookie args if the cookie file exists.
