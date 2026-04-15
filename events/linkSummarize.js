@@ -3,7 +3,7 @@ const logger = require('../logger');
 const { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage } = require('../util/summarize');
 
 const SUMMARY_CHANNELS = [
-    process.env.LINK_SUMMARY_CHANNEL || '898583333716525107',  // prod
+    // process.env.LINK_SUMMARY_CHANNEL || '898583333716525107',  // prod
     process.env.TEST_CHANNEL || '558430903072718868'            // dev / test (always active)
 ];
 
@@ -11,7 +11,7 @@ function linkSummarize(bot) {
     bot.on('messageCreate', async message => {
         if (message.author.bot) return;
         if (!SUMMARY_CHANNELS.includes(message.channelId)) return;
-        
+
         // If the bot is mentioned, let the chat command handle the link instead of the auto-summarizer
         if (message.mentions.has(bot.user)) return;
 

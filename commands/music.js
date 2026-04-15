@@ -244,7 +244,7 @@ async function handleVolume(interaction) {
     if (queue.player && queue.player.state && queue.player.state.resource) {
         const resource = queue.player.state.resource;
         if (resource.volume) {
-            resource.volume.setVolume(volumeDec);
+            resource.volume.setVolume(volumeDec * 0.25);
         }
     }
 
@@ -321,7 +321,7 @@ module.exports = {
         )
         .addSubcommand(sub =>
             sub.setName('volume')
-                .setDescription('Set the music volume (default 50%)')
+                .setDescription('Set the music volume (default 100%)')
                 .addIntegerOption(opt =>
                     opt.setName('percent')
                         .setDescription('Volume percentage (0-200)')

@@ -1,4 +1,4 @@
-const { createAudioPlayer, AudioPlayerStatus, joinVoiceChannel } = require('@discordjs/voice');
+const { createAudioPlayer, AudioPlayerStatus, joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const playVideo = require('./playVideo');
 const logger = require('../logger');
 const fs = require('fs');
@@ -24,7 +24,7 @@ class GuildQueue {
         this._seekOffsetMs = 0;          // Accumulated offset from seeks
         this._pausedAt = null;           // Date.now() when paused
         this.bitrate = 64000;            // Default 64kbps, updated on join()
-        this.volume = 0.5;               // Default 50% volume
+        this.volume = 1.0;               // Default 100% volume (internally 25%)
         this.autoplay = false;           // Continue playing similar songs
         this.lastPlayedTrack = null;     // Memory of last track for recommendations
         this.recentTracks = [];          // Rolling history of recent tracks for AI context
@@ -92,6 +92,16 @@ class GuildQueue {
             guildId: this.guildId,
             adapterCreator: this.adapterCreator,
         });
+
+        // Wait for connection to be ready before proceeding
+        try {
+            await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
+            logger.info(`Voice connection ready in channel ${channel.name} (${channelId})`);
+        } catch (err) {
+            this.connection.destroy();
+            this.connection = null;
+            throw new Error(`Failed to join voice channel ${channel.name} within 20 seconds: ${err.message}`);
+        }
 
         this.bitrate = channel.bitrate || 64000;
         this.currentSubscription = this.connection.subscribe(this.player);
@@ -277,7 +287,7 @@ class GuildQueue {
             this._playbackStartedAt = Date.now();
             this._pausedAt = null;
             if (resource.volume) {
-                resource.volume.setVolume(this.volume);
+                resource.volume.setVolume(this.volume * 0.25);
             }
             this.player.play(resource);
             return true;
@@ -430,7 +440,7 @@ class GuildQueue {
                 loudnorm: cached?.loudnorm || null
             });
             if (resource.volume) {
-                resource.volume.setVolume(this.volume);
+                resource.volume.setVolume(this.volume * 0.25);
             }
             this.player.play(resource);
             logger.info(`Now playing in ${this.guildId}: ${track.title || track.url}`);
