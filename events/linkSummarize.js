@@ -26,7 +26,7 @@ function linkSummarize(bot) {
         try {
             message.channel.sendTyping();
 
-            const summary = await summarizeUrl(url);
+            const summary = await summarizeUrl(url, false);
             if (summary) {
                 const chunks = splitMessage(`📰 **Summary:**\n${summary}`);
                 for (let i = 0; i < chunks.length; i++) {

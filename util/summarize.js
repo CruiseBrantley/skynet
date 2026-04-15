@@ -16,6 +16,21 @@ const SKIP_PATTERNS = [
     /giphy\.com/i
 ];
 
+const SUCCINCT_PROMPT = `Given the text content of a web page, provide an extremely brief, one-sentence summary.
+Focus ONLY on the single most important takeaway or the "bottom line". 
+Use Discord markdown formatting, but NEVER use markdown link syntax like [text](url).
+DO NOT repeat the source URL. 
+If the page is a login/captcha or has no substantive content, reply with "SKIP".`;
+
+const LONG_PROMPT = `Given the text content of a web page, provide a detailed but concise summary.
+Focus on the SPECIFIC details, changes, or facts — not generic descriptions of what the page is about. 
+For patch notes or changelogs, list the most important individual changes as bullet points. 
+For news articles, highlight the key facts and findings.
+Avoid vague statements like "the update includes fixes" — instead say what was fixed. 
+Use Discord markdown formatting, but NEVER use markdown link syntax like [text](url).
+DO NOT repeat the source URL. 
+If the page is a login/captcha or has no substantive content, reply with "SKIP".`;
+
 function extractUrls(text) {
     if (!text) return [];
     return text.match(URL_REGEX) || [];
@@ -103,17 +118,19 @@ async function fetchPageText(url) {
     }
 }
 
-async function summarizeUrl(url) {
+async function summarizeUrl(url, isLong = false) {
     const pageText = await fetchPageText(url);
     if (!pageText || pageText.length < 100) {
         return null;
     }
 
+    const systemPrompt = isLong ? LONG_PROMPT : SUCCINCT_PROMPT;
+
     const result = await queryOllama('/api/chat', {
         messages: [
             {
                 role: 'system',
-                content: 'Given the text content of a web page, provide a detailed but concise summary. Focus on the SPECIFIC details, changes, or facts — not generic descriptions of what the page is about. For patch notes or changelogs, list the most important individual changes as bullet points. For news articles, highlight the key facts and findings. Avoid vague statements like "the update includes fixes" — instead say what was fixed. Use Discord markdown formatting, BUT NEVER USE markdown link syntax like `[text](url)` since Discord does not support it in standard messages. DO NOT repeat the original source URL in your response (neither at the beginning nor at the end). If the text has no substantive content (e.g. login page, captcha, access denied), DO NOT summarize it. Instead, reply with exactly the word "SKIP".'
+                content: systemPrompt
             },
             {
                 role: 'user',

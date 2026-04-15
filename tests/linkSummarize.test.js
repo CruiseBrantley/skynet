@@ -50,7 +50,7 @@ describe('Link Summarize Event', () => {
 
         await eventHandler(mockMessage);
 
-        expect(summarizeUrl).toHaveBeenCalledWith('https://example.com');
+        expect(summarizeUrl).toHaveBeenCalledWith('https://example.com', false);
         expect(mockMessage.reply).toHaveBeenCalled();
     });
 

@@ -9,9 +9,14 @@ module.exports = {
         .addStringOption(option =>
             option.setName('url')
                 .setDescription('The URL to summarize')
-                .setRequired(true)),
+                .setRequired(true))
+        .addBooleanOption(option =>
+            option.setName('long')
+                .setDescription('Provide a more detailed summary')
+                .setRequired(false)),
     async execute(interaction) {
         const input = interaction.options.getString('url');
+        const isLong = interaction.options.getBoolean('long') || false;
         const urls = extractUrls(input);
 
         if (urls.length === 0) {
@@ -28,7 +33,7 @@ module.exports = {
         await interaction.deferReply();
 
         try {
-            const summary = await summarizeUrl(url);
+            const summary = await summarizeUrl(url, isLong);
             if (summary) {
                 const chunks = splitMessage(`📰 **Summary:**\n${summary}`);
                 for (let i = 0; i < chunks.length; i++) {
