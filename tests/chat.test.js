@@ -288,11 +288,11 @@ describe('Chat Command', () => {
         expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('unknown command') }));
     });
 
-    // --- Vocal Playback "tell me" ---
-    test('triggers /speak when user says "tell me"', async () => {
+    // --- Vocal Playback "tell me" (LLM-Driven) ---
+    test('triggers /speak when LLM decides to respond vocally', async () => {
         mockInteraction.options.getString = jest.fn((n) => n === 'message' ? 'tell me a joke' : '');
         executeOllama.mockResolvedValue({
-            message: { role: 'assistant', content: 'Why did the chicken cross the road?' }
+            message: { role: 'assistant', content: 'Sure! <<<RUN_COMMAND: {"command": "speak", "message": "Why did the chicken cross the road?"}>>>' }
         });
         const speakExec = jest.fn().mockResolvedValue();
         mockInteraction.client.commands.get = jest.fn().mockReturnValue({ execute: speakExec });
@@ -300,29 +300,9 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('chicken') }));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Sure!') }));
     });
 
-    // --- Double-speak prevention ---
-    test('does NOT double-fire /speak when tool chain already executed it', async () => {
-        mockInteraction.options.getString = jest.fn((n) => n === 'message' ? 'tell me the weather' : '');
-        executeOllama
-            .mockResolvedValueOnce({
-                message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "search", "query": "weather"}>>>' }
-            })
-            .mockResolvedValueOnce({
-                message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "speak", "message": "Sunny and warm"}>>>' }
-            });
-
-        googleIt.mockResolvedValue([{ title: 'W', snippet: 'Sunny', link: 'http://w.com' }]);
-        const speakExec = jest.fn().mockResolvedValue();
-        mockInteraction.client.commands.get = jest.fn().mockReturnValue({ execute: speakExec });
-
-        await chat.execute(mockInteraction);
-
-        // speak should only be called ONCE (from the tool loop), not twice
-        expect(speakExec).toHaveBeenCalledTimes(1);
-    });
 
     // --- Ollama Failure ---
     test('handles Ollama failure gracefully', async () => {

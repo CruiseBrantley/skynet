@@ -9,7 +9,7 @@ wiki.setUserAgent('SkynetBot/1.0 (https://github.com/CruiseBrantley/skynet; crui
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
-const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. If you are asked to 'speak' to someone or want to reply vocally to a specific user, use the 'speak' command and include the 'user' ID to follow them into their voice channel. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"command_name\", \"param\": \"value\"}>>>. Otherwise, answer directly. Do not include any other text when calling a command.";
+const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. If you are asked to 'speak' to someone, to 'tell' the user something vocally, or if you feel a spoken response is contextually appropriate (e.g. they use vocal cues), use the 'speak' command. Always include the 'user' ID parameter in the 'speak' command to follow them into their voice channel. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"command_name\", \"param\": \"value\"}>>>. Otherwise, answer directly. Do not include any other text when calling a command.";
 
 const channelHistories = {}; // { [channelId]: { time: Date.now(), messages: [] } }
 const MAX_CHANNEL_HISTORIES = 50;
@@ -60,11 +60,8 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
 
 const { queryOllama: executeOllama } = require('../util/ollama');
 
-async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "", isVocal = false) {
+async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "") {
   let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
-  if (isVocal) {
-      sysMsg += "\n\nThe user wants you to SPEAK this answer. Keep your final response UNDER 300 CHARACTERS and do NOT use markdown, code blocks, or emojis so it can be read aloud.";
-  }
 
   let processedMessages = messages.map((msg, idx) => {
       if (idx === 0 && msg.role === 'system') {
@@ -86,7 +83,7 @@ async function queryOllama(messages, isBackup = false, commandsContext = "", log
   } catch (err) {
       if (!isBackup) {
           logger.info(`Primary Ollama failed, falling back to local: ${err.message}`);
-          return queryOllama(messages, true, commandsContext, logsContext, isVocal);
+          return queryOllama(messages, true, commandsContext, logsContext);
       }
       throw err;
   }
@@ -183,8 +180,6 @@ module.exports = {
       if (base64Image) {
           userMessage.images = [base64Image];
       }
-      const isVocal = messageText.toLowerCase().includes("tell ") || messageText.toLowerCase().includes("speak") || messageText.toLowerCase().includes("say ");
-
       channelHistories[channelId].messages.push(userMessage);
 
       // Inject dynamic system context
@@ -208,7 +203,7 @@ module.exports = {
       }
 
       let currentIsBackup = false;
-      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, isVocal);
+      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext);
 
       if (responseData && responseData.message) {
         channelHistories[channelId].messages.push(responseData.message); // store assistant reply
@@ -305,7 +300,7 @@ module.exports = {
                         
                         logger.info(`NESTED SEARCH HISTORY (Backup: ${currentIsBackup}): ${JSON.stringify(channelHistories[channelId].messages.slice(-3))}`);
                         
-                        const nestedResponse = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, isVocal);
+                        const nestedResponse = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext);
                         
                         replyContent = replyContent ? (replyContent + "\n\n" + (nestedResponse.message.content || "")) : (nestedResponse.message.content || "");
                         ttsContent = replyContent;
@@ -413,22 +408,6 @@ module.exports = {
             }
         }
 
-        // Vocal playback — skip if a tool already triggered /speak
-        if (isVocal && ttsContent.length > 0 && !speakAlreadyFired) {
-             const speakCmd = interaction.client.commands.get('speak');
-             if (speakCmd) {
-                 const cleanText = ttsContent.replace(/<t:[0-9]+(:[a-zA-Z])?>/g, '').replace(/[*_~`#\[\]\|)(]/g, '').trim().substring(0, 290);
-                 const mockVoice = createMockInteraction(interaction, {
-                     getString: (n) => n === 'message' ? cleanText : null,
-                 });
-                 // Swallow the status replies from speakCmd so it doesn't duplicate text in the channel
-                 mockVoice.reply = async () => {};
-                 mockVoice.deferReply = async () => {};
-                 mockVoice.editReply = async () => {};
-                 mockVoice.followUp = async () => {};
-                 await speakCmd.execute(mockVoice).catch(() => {});
-             }
-        }
       } else {
         throw new Error("Invalid response from Ollama");
       }

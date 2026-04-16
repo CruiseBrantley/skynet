@@ -68,7 +68,8 @@ module.exports = {
         .addStringOption(option => 
             option.setName('message')
                 .setDescription('The message to speak')
-                .setRequired(true))
+                .setRequired(true)
+                .setMaxLength(6000))
         .addChannelOption(option =>
             option.setName('channel')
                 .setDescription('The voice channel to join')
@@ -127,10 +128,6 @@ module.exports = {
         const translatedMessage = stripMarkdown(await resolveMentions(query, interaction.guild));
         const speakMessage = translatedMessage || "I have nothing to say.";
 
-        if (speakMessage.length > 300) {
-            await interaction.reply({ content: `I can only speak up to 300 characters at a time.`, ephemeral: true });
-            return;
-        }
 
         await interaction.deferReply();
         
