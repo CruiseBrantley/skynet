@@ -6,6 +6,9 @@ const path = require('path');
 
 const configPath = path.join(__dirname, '../config/announcements.json');
 
+const recentAnnouncements = new Map(); // broadcaster_id -> timestamp
+const ANNOUNCE_COOLDOWN = 30 * 60 * 1000; // 30 minutes
+
 function loadConfig() {
   try {
     const data = fs.readFileSync(configPath, 'utf8');
@@ -51,6 +54,21 @@ async function announce(bot, data, group, config) {
 
 async function botAnnounce(bot, data) {
   try {
+    // 2. Session Deduplication (Online/Offline flicker)
+    const now = Date.now();
+    const lastAnnounce = recentAnnouncements.get(data.broadcaster_id);
+    if (lastAnnounce && (now - lastAnnounce < ANNOUNCE_COOLDOWN)) {
+      logger.info(`botAnnounce: Skipping duplicate announcement for ${data.broadcaster_name} (Cooldown active)`);
+      return;
+    }
+    recentAnnouncements.set(data.broadcaster_id, now);
+    // Prune stale entries from recentAnnouncements to keep memory low
+    if (recentAnnouncements.size > 100) {
+        for (const [id, ts] of recentAnnouncements) {
+            if (now - ts > ANNOUNCE_COOLDOWN * 2) recentAnnouncements.delete(id);
+        }
+    }
+
     const config = loadConfig();
     const imageUrl = data.game_image
       ? data.game_image.replace('{width}', '900').replace('{height}', '1200')

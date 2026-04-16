@@ -15,6 +15,8 @@ server.use(express.json())
 
 let streamID
 let oauthToken
+const processedMessageIds = new Set();
+const MESSAGE_ID_CACHE_SIZE = 1000;
 
 async function twitchSubscribe(id, url, twitchToken) {
   const data = {
@@ -161,7 +163,23 @@ function setupServer(bot) {
   })
 
   server.post('/', async (req, res) => {
-    logger.info('Post Received.')
+    const messageId = req.headers['twitch-eventsub-message-id'];
+    
+    // 1. Strict Webhook Deduplication (Twitch Retries)
+    if (messageId) {
+      if (processedMessageIds.has(messageId)) {
+        logger.info(`Webhook Deduplicated: ${messageId}`);
+        return res.status(200).send('Deduplicated');
+      }
+      processedMessageIds.add(messageId);
+      // Prune cache if it gets too large
+      if (processedMessageIds.size > MESSAGE_ID_CACHE_SIZE) {
+        const firstValue = processedMessageIds.values().next().value;
+        processedMessageIds.delete(firstValue);
+      }
+    }
+
+    logger.info('Post Received.');
     const { body } = req
 
     if (body.challenge) {
@@ -176,10 +194,16 @@ function setupServer(bot) {
       body.subscription.id !== streamID
     ) {
       const response = await getChannelInfo(body.event.broadcaster_user_id)
+      if (!response) {
+        return res.status(500).send('Failed to get channel info');
+      }
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
       botAnnounce(bot, betterResponse)
       streamID = body.subscription.id
+      res.status(200).send('OK')
+    } else {
+      res.status(200).send('OK')
     }
   })
 
