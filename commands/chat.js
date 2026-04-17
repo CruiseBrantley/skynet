@@ -7,6 +7,7 @@ const ddg = require('duck-duck-scrape');
 const wiki = require('wikipedia');
 const botName = process.env.BOT_NAME || 'Bot';
 wiki.setUserAgent(`${botName}Bot/1.0`);
+const puppeteerSearch = require('../util/puppeteerSearch');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
@@ -274,6 +275,16 @@ module.exports = {
                                 }
                             } catch (ddgErr) {
                                 logger.error(`DuckDuckGo fallback failed for "${query}": ${ddgErr.message}`);
+                            }
+                        }
+
+                        // Hardened Fallback: Full Headless Browser search using Puppeteer (ignores 403 blocks)
+                        if (!results || results.length === 0) {
+                            try {
+                                logger.info(`Spinning up heavy headless Chromium instance for "${query}"...`);
+                                results = await puppeteerSearch.performSearch(query);
+                            } catch (pupErr) {
+                                logger.error(`Puppeteer crawler also failed: ${pupErr.message}`);
                             }
                         }
 

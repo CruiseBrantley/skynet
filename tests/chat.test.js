@@ -5,6 +5,7 @@ jest.mock('../util/ollama', () => ({
 jest.mock('google-it');
 jest.mock('duck-duck-scrape');
 jest.mock('wikipedia');
+jest.mock('../util/puppeteerSearch', () => ({ performSearch: jest.fn() }));
 jest.mock('../logger');
 jest.mock('fs');
 jest.mock('axios');

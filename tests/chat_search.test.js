@@ -8,6 +8,7 @@ const ollama = require('../util/ollama');
 jest.mock('google-it');
 jest.mock('duck-duck-scrape');
 jest.mock('wikipedia');
+jest.mock('../util/puppeteerSearch', () => ({ performSearch: jest.fn() }));
 jest.mock('../util/ollama');
 jest.mock('../logger');
 
