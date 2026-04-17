@@ -112,7 +112,10 @@ describe('YouTubeMetadata', () => {
              const history = new Set();
              
              const rec = await youtube.getRecommendation([lastTrack], history);
-             expect(rec.url).toBe('https://youtube.com/watch?v=22222222222');
+             // With the new deep semantic deduplication, both "Official Video" and "Lyric Video"
+             // are correctly flagged as the exact same song as "Official Music Video", leaving
+             // "Totally Different Song" as the only valid recommendation.
+             expect(rec.url).toBe('https://youtube.com/watch?v=33333333333');
         });
     });
 });

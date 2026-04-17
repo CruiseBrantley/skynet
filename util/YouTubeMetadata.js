@@ -241,6 +241,8 @@ class YouTubeMetadata {
         if (!historyTracks || historyTracks.length === 0) return null;
         
         const currentTrack = historyTracks[historyTracks.length - 1];
+        
+        // Deep context for deduplication and full history awareness in the LLM
         const pastTracks = historyTracks.slice(0, -1);
         
         try {
@@ -260,15 +262,17 @@ ${historyList || " (No previous history)"}
 They are NOW listening to:
  - ${currentDesc}
 
-Recommend exactly ONE highly similar, great song by a DIFFERENT artist that fits the exact same mood, genre, and vibe as this sequence.
-CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a different artist and a different track than any of those listed above.
+Recommend exactly ONE highly similar, great song that fits the exact same mood, genre, and vibe as this sequence.
+CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a DIFFERENT track than any of those explicitly listed above. It is okay to occasionally suggest a different track by the same artist, but strive for variety.
 Reply with ONLY the song title and artist name in this format: "Artist - Title". Do NOT include any other text, formatting, quotes, or explanations.`;
 
             let aiSuggestion = '';
             try {
+                // Temperature scales with queue depth (0.7 -> 1.2) to encourage "wandering" over long sessions
+                const dynamicTemp = Math.min(1.2, 0.7 + (historyTracks.length * 0.02));
                 const result = await queryOllama('/api/generate', { 
                     prompt, 
-                    options: { temperature: 0.9, seed } 
+                    options: { temperature: dynamicTemp, seed } 
                 });
                 aiSuggestion = result.response.trim().replace(/["']/g, '');
                 logger.info(`AI suggested: ${aiSuggestion}`);
@@ -286,13 +290,33 @@ Reply with ONLY the song title and artist name in this format: "Artist - Title".
                 return vidId && !sessionHistory.has(vidId);
             });
 
-            // 2. Filter out highly similar titles (safety net just in case the AI ignored instructions)
-            const tokenize = (str) => str.toLowerCase().replace(/[^\w\s]/gi, '').split(/\s+/).slice(0, 3).join(' ');
-            const baseTokens = tokenize(currentTrack.title);
+            // 2. High-Efficiency Semantic Deduplication
+            // Identify and drop useless vocabulary that pollutes string comparisons.
+            const noiseWords = new Set(['official', 'music', 'video', 'lyric', 'lyrics', 'audio', 'hd', '4k', 'live', 'feat', 'ft']);
+            
+            // Pre-compute O(1) Sets for all 50 tracks in history ONCE per recommendation.
+            const pastTokenSets = historyTracks.map(t => {
+                const clean = t.title.toLowerCase().replace(/[^\w\s]/gi, ' ');
+                const validTokens = clean.split(/\s+/).filter(w => w.length > 2 && !noiseWords.has(w));
+                return new Set(validTokens);
+            });
 
+            // Filter out videos that acoustically or semantically match anything in our deep history
             const distinctUnplayed = unplayed.filter(r => {
-                const rTokens = tokenize(r.title);
-                return rTokens !== baseTokens; 
+                const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ');
+                const rTokens = new Set(clean.split(/\s+/).filter(w => w.length > 2 && !noiseWords.has(w)));
+                
+                // Compare this unplayed result against our deep history memory banks
+                return !pastTokenSets.some(pastSet => {
+                    let overlap = 0;
+                    for (const word of rTokens) {
+                        if (pastSet.has(word)) overlap++;
+                    }
+                    // A track is a duplicate if it shares 3+ significant words (Artist + Song Name overlap), 
+                    // or 60% of the token space of shorter titles.
+                    const threshold = Math.max(2, Math.min(pastSet.size, rTokens.size) * 0.6);
+                    return overlap >= threshold;
+                });
             });
 
             // Fallback chain: best distinct unplayed -> any unplayed -> first result

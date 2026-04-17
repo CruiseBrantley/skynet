@@ -356,7 +356,7 @@ class GuildQueue {
             channel: track.channel || 'Unknown'
         };
         this.recentTracks.push(summary);
-        if (this.recentTracks.length > 5) {
+        if (this.recentTracks.length > 50) {
             this.recentTracks.shift();
         }
     }

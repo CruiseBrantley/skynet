@@ -179,12 +179,12 @@ describe('GuildQueue', () => {
             expect(history[1].title).toBe('Now Playing');
         });
 
-        test('recentTracks is capped at 5', () => {
-            const track = { title: 'Song', channel: 'Artist' };
-            for (let i = 0; i < 10; i++) {
+        test('recentTracks is capped at 50', () => {
+            const track = { title: 'Track', url: 'http://youtube' };
+            for (let i = 0; i < 60; i++) {
                 queue._addToRecentHistory(track);
             }
-            expect(queue.recentTracks.length).toBe(5);
+            expect(queue.recentTracks.length).toBe(50);
         });
 
         test('skipNext removes the next song and adds to history', () => {
