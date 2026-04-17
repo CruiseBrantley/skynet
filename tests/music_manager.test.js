@@ -83,11 +83,14 @@ describe('MusicManager Autoplay UI tick', () => {
         mockChannel = makeChannel(mockMessage);
     });
 
-    afterEach(cleanup);
+    afterEach(() => {
+        jest.restoreAllMocks();
+        cleanup();
+    });
 
     test('instant autoplay preload triggers when queue is empty and autoplay is enabled', async () => {
         const mockQueue = makeQueue({ autoplay: true });
-        manager.getQueue = jest.fn().mockReturnValue(mockQueue);
+        jest.spyOn(manager, 'getQueue').mockReturnValue(mockQueue);
 
         seedUIState(mockMessage, mockChannel);
         jest.advanceTimersByTime(5000);
@@ -99,7 +102,7 @@ describe('MusicManager Autoplay UI tick', () => {
 
     test('does not trigger autoplay preload if already fetching', async () => {
         const mockQueue = makeQueue({ autoplay: true, isAutoplayFetching: true });
-        manager.getQueue = jest.fn().mockReturnValue(mockQueue);
+        jest.spyOn(manager, 'getQueue').mockReturnValue(mockQueue);
 
         seedUIState(mockMessage, mockChannel);
         jest.advanceTimersByTime(5000);
@@ -109,7 +112,7 @@ describe('MusicManager Autoplay UI tick', () => {
 
     test('advances UI when a new track starts', async () => {
         const mockQueue = makeQueue({ currentTrack: { title: 'New Track' } });
-        manager.getQueue = jest.fn().mockReturnValue(mockQueue);
+        jest.spyOn(manager, 'getQueue').mockReturnValue(mockQueue);
 
         seedUIState(mockMessage, mockChannel);
         await manager._handleTrackStart('guild-1', { title: 'New Track' });
@@ -135,14 +138,15 @@ describe('MusicManager idle-delete window', () => {
         mockMessage = makeMessage();
         mockChannel = makeChannel(mockMessage);
         mockQueue = makeQueue();
-        // Always return mockQueue from getQueue so the ticker never hits a null
-        // branch and inadvertently creates an infinite stop/restart loop in tests.
-        manager.getQueue = jest.fn().mockReturnValue(mockQueue);
+        jest.spyOn(manager, 'getQueue').mockReturnValue(mockQueue);
         manager.queues.set('guild-1', mockQueue);
         seedUIState(mockMessage, mockChannel);
     });
 
-    afterEach(cleanup);
+    afterEach(() => {
+        jest.restoreAllMocks();
+        cleanup();
+    });
 
     test('_scheduleIdleDelete does NOT delete the message immediately', () => {
         manager._scheduleIdleDelete('guild-1');
@@ -255,4 +259,226 @@ describe('MusicManager idle-delete window', () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// Suite: API Methods (enqueue, controls)
+// ---------------------------------------------------------------------------
 
+describe('MusicManager API and Controls', () => {
+    let mockInteraction;
+    let mockQueue;
+
+    beforeEach(() => {
+        jest.useFakeTimers();
+        jest.clearAllMocks();
+        
+        mockInteraction = {
+            guildId: 'guild-1',
+            member: { voice: { channelId: 'channel-1' } },
+            guild: { voiceAdapterCreator: {}, channels: { cache: { get: jest.fn().mockReturnValue({}) } } },
+            user: { username: 'test-user' }
+        };
+
+        mockQueue = makeQueue({
+            join: jest.fn().mockResolvedValue(),
+            add: jest.fn(),
+            addBatch: jest.fn(),
+            skip: jest.fn(),
+            pause: jest.fn().mockReturnValue(true),
+            resume: jest.fn().mockReturnValue(true),
+            seek: jest.fn().mockResolvedValue(true),
+            queue: [{ title: 'Track 2' }]
+        });
+
+        const GuildQueue = require('../util/GuildQueue');
+        jest.spyOn(manager, 'getOrCreateQueue').mockReturnValue(mockQueue);
+        manager.queues.set('guild-1', mockQueue);
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+        cleanup();
+    });
+
+    test('enqueue successfully joins and adds track', async () => {
+        const track = { title: 'Track 1', url: 'http' };
+        await manager.enqueue(mockInteraction, track);
+        
+        expect(manager.getOrCreateQueue).toHaveBeenCalledWith('guild-1', mockInteraction.guild.voiceAdapterCreator);
+        expect(mockQueue.join).toHaveBeenCalled();
+        expect(mockQueue.add).toHaveBeenCalledWith(track, mockInteraction.user);
+    });
+
+    test('enqueueBatch successfully joins and adds multiple tracks', async () => {
+        const tracks = [{ title: 'Track 1', url: 'http' }, { title: 'Track 2' }];
+        await manager.enqueueBatch(mockInteraction, tracks);
+        
+        expect(mockQueue.join).toHaveBeenCalled();
+        expect(mockQueue.addBatch).toHaveBeenCalledWith(tracks, mockInteraction.user);
+    });
+
+    test('enqueue throws if user not in voice', async () => {
+        mockInteraction.member.voice.channelId = null;
+        await expect(manager.enqueue(mockInteraction, {})).rejects.toThrow('You need to be in a voice channel');
+        await expect(manager.enqueueBatch(mockInteraction, [])).rejects.toThrow('You need to be in a voice channel');
+    });
+
+    test('skip calls queue.skip', () => {
+        manager.skip('guild-1');
+        expect(mockQueue.skip).toHaveBeenCalled();
+    });
+
+    test('pause and resume', () => {
+        manager.pause('guild-1');
+        expect(mockQueue.pause).toHaveBeenCalled();
+        manager.resume('guild-1');
+        expect(mockQueue.resume).toHaveBeenCalled();
+    });
+
+    test('nowPlaying and upcoming', () => {
+        expect(manager.nowPlaying('guild-1').title).toBe('Last Song');
+        expect(manager.getUpcoming('guild-1').length).toBe(1);
+    });
+
+    test('seek', async () => {
+        await manager.seek('guild-1', 30);
+        expect(mockQueue.seek).toHaveBeenCalledWith(30);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Suite: Interaction Handler (Buttons)
+// ---------------------------------------------------------------------------
+
+describe('MusicManager handleInteraction', () => {
+    let mockBtn;
+    let mockQueue;
+    let mockMessage;
+    let mockClient;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        
+        mockClient = { user: { setActivity: jest.fn() } };
+        mockBtn = {
+            guildId: 'guild-1',
+            customId: 'music_pause',
+            deferUpdate: jest.fn().mockResolvedValue(),
+            reply: jest.fn().mockResolvedValue(),
+            deleteReply: jest.fn().mockResolvedValue(),
+            client: mockClient
+        };
+
+        mockQueue = makeQueue({
+            isPaused: jest.fn().mockReturnValue(false),
+            isPlaying: jest.fn().mockReturnValue(true),
+            pause: jest.fn(),
+            resume: jest.fn(),
+            skip: jest.fn(),
+            skipNext: jest.fn().mockReturnValue({ title: 'Removed Track' }),
+            restart: jest.fn().mockResolvedValue(),
+            shuffle: jest.fn(),
+            queue: [{ title: 'Track 2' }, { title: 'Track 3' }]
+        });
+
+        manager.queues.set('guild-1', mockQueue);
+
+        mockMessage = makeMessage();
+        seedUIState(mockMessage, makeChannel(mockMessage));
+    });
+
+    afterEach(cleanup);
+
+    test('music_pause toggles pause logic', async () => {
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.pause).toHaveBeenCalled();
+        expect(mockBtn.deferUpdate).toHaveBeenCalled();
+
+        mockQueue.isPaused.mockReturnValue(true);
+        mockQueue.isPlaying.mockReturnValue(false);
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.resume).toHaveBeenCalled();
+    });
+
+    test('music_skip skips current track', async () => {
+        mockBtn.customId = 'music_skip';
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.skip).toHaveBeenCalled();
+        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Skipped') }));
+    });
+
+    test('music_skip_next removes upcoming track', async () => {
+        mockBtn.customId = 'music_skip_next';
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.skipNext).toHaveBeenCalled();
+        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Removed upcoming track: **Removed Track**') }));
+    });
+
+    test('music_stop stops queue and resets activity', async () => {
+        mockBtn.customId = 'music_stop';
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.stop).toHaveBeenCalled();
+        expect(mockClient.user.setActivity).toHaveBeenCalled();
+        expect(manager.queues.has('guild-1')).toBe(false);
+    });
+
+    test('music_restart restarts track and cancels idle cleanup', async () => {
+        mockBtn.customId = 'music_restart';
+        const spyCancel = jest.spyOn(manager, '_cancelIdleDelete');
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.restart).toHaveBeenCalled();
+        expect(spyCancel).toHaveBeenCalledWith('guild-1');
+        spyCancel.mockRestore();
+    });
+
+    test('music_shuffle shuffles the queue if tracks > 1', async () => {
+        mockBtn.customId = 'music_shuffle';
+        await manager.handleInteraction(mockBtn);
+        expect(mockQueue.shuffle).toHaveBeenCalled();
+        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Shuffled') }));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Suite: Autoplay Triggering via YouTube
+// ---------------------------------------------------------------------------
+
+describe('MusicManager Autoplay integration', () => {
+    let mockQueue;
+    let mockMessage;
+    
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockQueue = makeQueue({
+            add: jest.fn(),
+            getRecentHistory: jest.fn().mockReturnValue([{ title: 'Song 1' }])
+        });
+        manager.queues.set('guild-1', mockQueue);
+        
+        mockMessage = makeMessage();
+        seedUIState(mockMessage, makeChannel(mockMessage));
+    });
+
+    afterEach(cleanup);
+
+    test('triggerAutoplay adds song if recommendation found', async () => {
+        const youtube = require('../util/YouTubeMetadata');
+        jest.spyOn(youtube, 'getRecommendation').mockResolvedValueOnce({ title: 'New Auto Track', url: 'http://auto' });
+
+        await manager.triggerAutoplay('guild-1', { title: 'Last' }, new Set());
+
+        expect(youtube.getRecommendation).toHaveBeenCalled();
+        expect(mockQueue.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'New Auto Track' }), 'Skynet Autoplay');
+    });
+
+    test('triggerAutoplay stops UI update if no recommendation found', async () => {
+        const youtube = require('../util/YouTubeMetadata');
+        jest.spyOn(youtube, 'getRecommendation').mockResolvedValueOnce(null);
+        
+        const spyStopUI = jest.spyOn(manager, 'stopUIUpdate');
+
+        await manager.triggerAutoplay('guild-1', { title: 'Last' }, new Set());
+
+        expect(spyStopUI).toHaveBeenCalledWith('guild-1');
+        spyStopUI.mockRestore();
+    });
+});
