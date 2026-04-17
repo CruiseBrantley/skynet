@@ -79,21 +79,25 @@ module.exports = {
     _formatElapsed: formatElapsed,
     _steamApps: steamApps,
 
-    data: new SlashCommandBuilder()
-        .setName('update-server')
-        .setDescription('Update and restart a dedicated game server')
-        .addStringOption(option =>
-            option.setName('app')
-                .setDescription('The game server to update')
-                .setRequired(true)
-                .addChoices(
-                    ...steamApps.map(app => ({ name: app.name, value: app.key }))
-                )),
+    data: (() => {
+        const builder = new SlashCommandBuilder()
+            .setName('update-server')
+            .setDescription('Update and restart a dedicated game server');
+        
+        steamApps.forEach(app => {
+            builder.addSubcommand(sub => 
+                sub.setName(app.key)
+                   .setDescription(`Update and restart the ${app.name} server`)
+            );
+        });
+        
+        return builder;
+    })(),
 
     async execute(interaction) {
         await interaction.deferReply();
         const startTime = Date.now();
-        const appKey = interaction.options.getString('app');
+        const appKey = interaction.options.getSubcommand();
         const app = steamApps.find(a => a.key === appKey);
 
         if (!app) {

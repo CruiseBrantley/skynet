@@ -16,7 +16,7 @@ function mockInteraction(appKey = 'icarus') {
         editReply: jest.fn().mockResolvedValue(),
         channel: { send: jest.fn().mockResolvedValue() },
         options: {
-            getString: jest.fn().mockReturnValue(appKey)
+            getSubcommand: jest.fn().mockReturnValue(appKey)
         }
     };
 }
