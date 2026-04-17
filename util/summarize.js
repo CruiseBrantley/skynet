@@ -176,4 +176,4 @@ function splitMessage(text, limit = 1900) {
     return chunks;
 }
 
-module.exports = { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage, URL_REGEX };
+module.exports = { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage, URL_REGEX, fetchPageText };

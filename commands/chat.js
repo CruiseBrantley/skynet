@@ -8,6 +8,7 @@ const wiki = require('wikipedia');
 const botName = process.env.BOT_NAME || 'Bot';
 wiki.setUserAgent(`${botName}Bot/1.0`);
 const puppeteerSearch = require('../util/puppeteerSearch');
+const { fetchPageText } = require('../util/summarize');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
@@ -226,7 +227,7 @@ module.exports = {
         let commandExecuted = false;
         const sharedState = { primaryResponseUsed: false, primaryContent: "" };
 
-        while (loopCount < 3) {
+        while (loopCount < 5) {
             if (!replyContent || typeof replyContent !== 'string') break;
             // More robust regex to handle various formatting (missing brackets, extra whitespace, /json prefix, etc.)
             const commandMatch = replyContent.match(/<<<?RUN_COMMAND:?\s*([\s\S]*?)\s*>>>?/) || 
@@ -250,7 +251,7 @@ module.exports = {
                 replyContent = replyContent.replace(commandMatch[0], '').trim();
 
                 if (cmdData.command === 'search' || cmdData.command === 'web_search') {
-                    const query = cmdData.query || cmdData.arg1 || cmdData.message;
+                    const query = cmdData.query || cmdData.params?.query || cmdData.arg1 || cmdData.message;
                     if (!sharedState.primaryResponseUsed) {
                         await interaction.editReply({ content: `*${botName} is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                     }
@@ -306,11 +307,24 @@ module.exports = {
 
                         let searchResultContext;
                         if (results && results.length > 0) {
-                            const searchResultsStr = results.slice(0, 3).map(r => `Title: ${r.title}\nSnippet: ${r.snippet || r.description || ""}\nLink: ${r.link}`).join('\n\n');
-                            searchResultContext = `[SYSTEM: WEB SEARCH RESULTS FOR "${query}"]\n${searchResultsStr}\n\nUsing these results, answer the user's initial request directly and concisely.`;
+                            const searchResultsStr = results.slice(0, 6).map(r => `Title: ${r.title}\nSnippet: ${r.snippet || r.description || ""}\nLink: ${r.link}`).join('\n\n');
+                            
+                            // Deep Context Pull: Fetch the raw text of the #1 top ranking link to heavily enrich the RAG payload
+                            let topLinkContext = '';
+                            try {
+                                const rawText = await fetchPageText(results[0].link);
+                                if (rawText) {
+                                    // Limit the page text to ~18000 characters to provide massive context without blowing the local Ollama context window size
+                                    topLinkContext = `\n\n[FULL TEXT HOMEPAGE OF TOP RESULT (${results[0].link})]:\n${rawText.substring(0, 18000)}`;
+                                }
+                            } catch (e) {
+                                logger.info(`Deep Context Pull failed for top link ${results[0].link}, falling back to snippet-only.`);
+                            }
+
+                            searchResultContext = `[SYSTEM: WEB SEARCH RESULTS FOR "${query}"]\n${searchResultsStr}${topLinkContext}\n\nUsing these results, answer the user's initial request. If you still lack sufficient context to fully answer or verify the information, you may autonomously issue another RUN_COMMAND to perform an additional search with a different/more specific query. Otherwise, answer directly and comprehensively.`;
                         } else {
                             // Inform the LLM that the search system is failing so it stops recursively attempting to search
-                            searchResultContext = `[SYSTEM: WEB SEARCH UNAVAILABLE FOR "${query}"]\nThe search integration returned no results (possibly rate limited). Do not attempt to search again for this query. Instead, answer the user immediately using your internal knowledge base and memory. ONLY apologize/mention the failure if the request absolutely requires real-time data (like current weather or breaking news).`;
+                            searchResultContext = `[SYSTEM: WEB SEARCH UNAVAILABLE FOR "${query}"]\nThe search integration returned no results (possibly rate limited). Do not attempt to search again for this specific query. Instead, answer the user immediately using your internal knowledge base and memory. ONLY apologize/mention the failure if the request absolutely requires real-time data (like current weather or breaking news).`;
                         }
 
                         // Keep the assistant's message in history so it knows it requested the search

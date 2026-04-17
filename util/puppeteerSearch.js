@@ -25,7 +25,7 @@ async function performSearch(query) {
         
         const results = await page.evaluate(() => {
             const items = Array.from(document.querySelectorAll('.result'));
-            return items.slice(0, 4).map(el => {
+            return items.slice(0, 10).map(el => {
                 const titleEl = el.querySelector('.result__title');
                 const snippetEl = el.querySelector('.result__snippet');
                 const linkEl = el.querySelector('.result__url');
