@@ -59,6 +59,20 @@ A high-fidelity music player and multipurpose Discord bot with AI chat, image ge
 
 See `.env.example` for the full list of available configuration options.
 
+## Configuration Backup & Restore
+
+Skynet relies on several critical unversioned files (API keys, session cookies, local JSON databases, and environment files) that are actively excluded from Git. 
+
+To easily backup all these local states into a highly compressed archive outside the repository:
+```bash
+./scripts/backup_config.sh
+```
+This utility auto-aggregates `.env`, `youtube_cookies.txt`, `service-account.json`, and all `config/*.json` files into a timestamped `.tar.gz` in your `~/skynet-backups/` directory.
+
+**To restore on a fresh clone:**
+1. Copy the generated `.tar.gz` archive directly into the root of the new `skynet` repository.
+2. Run `tar -xzf skynet_config_backup_YYYY-MM-DD.tar.gz`. The paths will unpack exactly into their original relative structures automatically.
+
 ## Features
 
 - **AI Chat** — Multi-tier LLM with automatic failover (Remote → Gemini → Local)
