@@ -2,7 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const googleIt = require('google-it');
 const ddg = require('duck-duck-scrape');
 const wiki = require('wikipedia');
-wiki.setUserAgent('SkynetBot/1.0 (https://github.com/CruiseBrantley/skynet; cruise@example.com)');
+wiki.setUserAgent(`${process.env.BOT_NAME || 'Bot'}/1.0`);
 const logger = require('../logger');
 
 module.exports = {

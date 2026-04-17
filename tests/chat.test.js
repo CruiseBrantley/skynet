@@ -33,6 +33,7 @@ describe('Chat Command', () => {
                 attachments: { first: () => null, size: 0 }
             },
             client: {
+                user: { id: '558428214805135370' },
                 commands: {
                     map: jest.fn().mockReturnValue(['- /test: description']),
                     values: jest.fn().mockReturnValue([]),

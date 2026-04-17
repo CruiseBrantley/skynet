@@ -6,7 +6,7 @@ const { queryOllama } = require('../util/ollama');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('imagine')
-        .setDescription('Generate an image using Skynet (Remote SwarmUI RTX 5090)')
+        .setDescription('Generate an image using AI')
         .addStringOption(option =>
             option.setName('prompt')
                 .setDescription('Visual description of the image to generate')
@@ -30,7 +30,7 @@ module.exports = {
                 .setRequired(false))
         .addBooleanOption(option =>
             option.setName('enhance_prompt')
-                .setDescription('Use Skynet AI to rewrite and enhance your prompt with rich visual details before generating')
+                .setDescription('Use AI to rewrite and enhance your prompt with rich visual details before generating')
                 .setRequired(false))
         .addStringOption(option =>
             option.setName('creativity')
@@ -73,12 +73,12 @@ module.exports = {
             const creativity = parseFloat(interaction.options.getString('creativity') || '0.6');
             const modelKey = interaction.options.getString('model') || 'turbo';
 
-            let customModel = 'ZImage/SwarmUI_Z-Image-Turbo-FP8Mix.safetensors';
+            let customModel = process.env.IMAGE_MODEL_DEFAULT;
             let defaultSteps = 8;
             let defaultCfg = 1.0;
 
             if (modelKey === 'flux') {
-                customModel = 'flux2-dev-Q6_K.gguf';
+                customModel = process.env.IMAGE_MODEL_FLUX;
                 defaultSteps = 30;
                 defaultCfg = 1.0;
             }
@@ -136,17 +136,16 @@ module.exports = {
             }
 
             // 1. Get Session ID
-            let baseUrl = 'http://192.168.50.182:7801';
+            let baseUrl = process.env.SWARMUI_REMOTE_URL;
             let sessionRes;
             let useComfyDirect = false;
 
             try {
                 sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 10000 });
             } catch (err) {
-                logger.info(`Remote SwarmUI Core offline at ${baseUrl}. Re-routing to local Mac Mini fallback.`);
-                baseUrl = 'http://127.0.0.1:7801';
+                baseUrl = process.env.SWARMUI_LOCAL_URL || 'http://127.0.0.1:7801';
 
-                if (customModel === 'ZImage/SwarmUI_Z-Image-Turbo-FP8Mix.safetensors' || customModel === 'z-image-turbo-Q8_0.gguf') {
+                if (customModel && (customModel.includes('Turbo') || customModel.includes('turbo'))) {
                     useComfyDirect = true;
                 }
 
@@ -155,7 +154,7 @@ module.exports = {
                         sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 5000 });
                     }
                 } catch (localErr) {
-                    throw new Error("Skynet Image Core offline. Both remote PC and local Mac Mini are unreachable.");
+                    throw new Error("Image Core offline. Both remote and local endpoints are unreachable.");
                 }
             }
 
@@ -230,7 +229,7 @@ module.exports = {
         } catch (err) {
             stopTyping();
             logger.error(`Generation error: ${err.message}`);
-            const errorMsg = err.message.includes('offline') ? err.message : 'There was an error communicating with the Skynet Image Core.';
+            const errorMsg = err.message.includes('offline') ? err.message : `There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} Image Core.`;
             try {
                 await interaction.editReply(errorMsg);
             } catch (discordErr) {

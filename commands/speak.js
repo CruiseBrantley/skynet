@@ -151,7 +151,8 @@ module.exports = {
         try {
             // Step 1: Generate high quality local TTS with Piper
             const piperPath = path.join(__dirname, '../tts_engine/piper_venv/bin/piper');
-            const modelPath = path.join(__dirname, '../tts_engine/en_US-danny-low.onnx');
+            const ttsModel = process.env.TTS_MODEL;
+            const modelPath = path.join(__dirname, '../tts_engine', ttsModel);
             
             await exec(`echo "${speakMessage.replace(/"/g, '\\"')}" | "${piperPath}" --model "${modelPath}" --output_file "${tempWav}"`);
 

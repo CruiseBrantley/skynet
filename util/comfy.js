@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 /**
- * Generates an image using raw ComfyUI API on localhost:7821 (GGUF Q8_0)
+ * Generates an image using raw ComfyUI API (GGUF Q8_0)
  * @param {string} prompt - The image prompt.
  * @param {object} options - Options: { width, height, steps, cfg }
  * @returns {Promise<Buffer>} - Respective image buffer.
@@ -33,20 +33,22 @@ async function generateWithComfyDirect(prompt, options = {}) {
         "6": { "inputs": { "text": prompt, "clip": ["9", 0] }, "class_type": "CLIPTextEncode" },
         "7": { "inputs": { "text": "blurry ugly bad", "clip": ["9", 0] }, "class_type": "CLIPTextEncode" },
         "8": { "inputs": { "samples": ["3", 0], "vae": ["4", 0] }, "class_type": "VAEDecode" },
-        "9": { "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2" }, "class_type": "CLIPLoader" },
-        "10": { "inputs": { "unet_name": "z-image-turbo-Q8_0.gguf" }, "class_type": "UnetLoaderGGUF" },
+        "9": { "inputs": { "clip_name": process.env.COMFYUI_CLIP_NAME || "clip_model.safetensors", "type": "lumina2" }, "class_type": "CLIPLoader" },
+        "10": { "inputs": { "unet_name": process.env.COMFYUI_UNET_NAME || "unet_model.gguf" }, "class_type": "UnetLoaderGGUF" },
         "11": { "inputs": { "model": ["10", 0], "shift": 3 }, "class_type": "ModelSamplingAuraFlow" },
         "12": { "inputs": { "images": ["8", 0], "filename_prefix": "ComfyUI" }, "class_type": "SaveImage" }
     };
 
-    const promptRes = await axios.post('http://127.0.0.1:7821/prompt', { prompt: comfyGraph });
+    const comfyUrl = process.env.COMFYUI_URL;
+
+    const promptRes = await axios.post(`${comfyUrl}/prompt`, { prompt: comfyGraph });
     const promptId = promptRes.data.prompt_id;
     if (!promptId) throw new Error("No prompt ID returned from ComfyUI Direct API.");
 
     let finished = false;
     let images = [];
     while (!finished) {
-        const check = await axios.get(`http://127.0.0.1:7821/history/${promptId}`);
+        const check = await axios.get(`${comfyUrl}/history/${promptId}`);
         if (check.data && check.data[promptId] && check.data[promptId].outputs) {
             images = check.data[promptId].outputs["12"] ? check.data[promptId].outputs["12"].images : [];
             finished = true;
@@ -57,7 +59,7 @@ async function generateWithComfyDirect(prompt, options = {}) {
 
     if (images.length === 0) throw new Error("ComfyUI Direct failed to return image output buffers.");
     const outputName = images[0].filename;
-    const directUrl = `http://127.0.0.1:7821/view?filename=${outputName}`;
+    const directUrl = `${comfyUrl}/view?filename=${outputName}`;
 
     const imageResponse = await axios.get(directUrl, { responseType: 'arraybuffer', timeout: 60000 });
     return Buffer.from(imageResponse.data, 'binary');

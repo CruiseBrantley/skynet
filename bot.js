@@ -83,7 +83,7 @@ function discordBot() {
         logger.info('Connected')
         logger.info('Logged in as: ')
         logger.info(bot.user.username + ' - (' + bot.user.id + ')')
-        bot.user.setActivity('for John Connor', { type: 'WATCHING' })
+        bot.user.setActivity(process.env.BOT_ACTIVITY || 'for you', { type: 'WATCHING' })
     })
 
     bot.on('error', err => {
@@ -240,7 +240,7 @@ function discordBot() {
                     await chatCommand.execute(mockInteraction, database);
                 } catch (err) {
                     console.error('Mention error:', err);
-                    message.channel.send('There was an error communicating with the Skynet AI Core.');
+                    message.channel.send(`There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} AI Core.`);
                 }
             }
         }

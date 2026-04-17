@@ -63,7 +63,7 @@ describe('/twitch-notify', () => {
         await twitchNotifyCmd.execute(mockInteraction);
         
         expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
-            content: 'Only server moderators, the bot owner, or Skynet can manage announcements.',
+            content: 'Only server moderators or the bot owner can manage announcements.',
             ephemeral: true
         }));
     });

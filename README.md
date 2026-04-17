@@ -1,26 +1,93 @@
 # Skynet
 
-A high-fidelity music player and multipurpose Discord bot.
+A high-fidelity music player and multipurpose Discord bot with AI chat, image generation, TTS, Twitch stream announcements, and more.
 
-## 🤖 Instructions for AI Assistants
-If you are an AI assistant working on this repository, please adhere to the following guidelines:
+## Quick Start
 
-1. **Service Management**: The bot is deployed as a macOS Launch Agent. Before attempting to restart the bot or diagnosing service issues, **read [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md)**.
-   - Restart the service using: `launchctl kickstart -k gui/$(id -u)/com.user.skynet`
-2. **Test-Driven Development**: Maintain high confidence in code changes by utilizing the test suite.
-   - Run tests with `npm test`.
-   - **Requirement**: If you modify core logic (especially in `MusicManager.js`, `GuildQueue.js`, or `YouTubeMetadata.js`), you **must** run the unit tests and update them if necessary to ensure 100% pass rate and coverage of new features.
-   - GitHub Actions CI is configured to run tests on every push.
-3. **Music Fidelity**: Volume normalization and stable YouTube playback are critical. Use `YouTubeMetadata.js` for enriched metadata and `MusicManager.js` for queue state.
+1. **Clone & Install**
+   ```bash
+   git clone https://github.com/CruiseBrantley/skynet.git
+   cd skynet
+   npm install
+   ```
 
-## Getting Started
-1. Install dependencies: `npm install`
-2. Configure `.env` (see `.env.example` if available, or check `util/` for required keys)
-3. Run locally for development: `npm run dev-env`
-4. Deploy/Restart via Launch Agent: See `MACOS_MANAGEMENT.md`
+2. **Configure Environment**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` with your own values. At minimum you need:
+   - `TOKEN` — Your Discord bot token
+   - `CLIENT_ID` — Your bot's application ID
+   - `BOT_NAME` — Your bot's display name (used in prompts and UI)
+
+3. **Configure Bot Personality** (Optional)
+   Edit `config/system_prompt.txt` to customize the AI assistant's personality and behavior.
+
+4. **Configure Twitch Announcements** (Optional)
+   ```bash
+   cp config/announcements.json.template config/announcements.json
+   ```
+   Edit `config/announcements.json` with your Twitch streamer IDs and Discord channel IDs.
+
+5. **Run**
+   ```bash
+   npm run dev-env    # Development
+   npm start          # Production
+   ```
+
+## Configuration Reference
+
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TOKEN` | ✅ | Discord bot token |
+| `CLIENT_ID` | ✅ | Discord application ID |
+| `BOT_NAME` | ❌ | Bot display name (default: `Bot`) |
+| `BOT_ACTIVITY` | ❌ | Status activity text (default: `for you`) |
+| `OLLAMA_REMOTE_HOST` | ❌ | Remote Ollama server IP |
+| `OLLAMA_REMOTE_PORT` | ❌ | Remote Ollama server port (default: `11434`) |
+| `OLLAMA_REMOTE_MODEL` | ❌ | Remote Ollama model name |
+| `OLLAMA_LOCAL_MODEL` | ❌ | Local fallback model name |
+| `GEMINI_API_KEY` | ❌ | Google Gemini API key (Level 1 fallback) |
+| `GEMINI_MODEL` | ❌ | Gemini model name |
+| `SWARMUI_REMOTE_URL` | ❌ | Remote SwarmUI endpoint |
+| `SWARMUI_LOCAL_URL` | ❌ | Local SwarmUI fallback |
+| `COMFYUI_URL` | ❌ | ComfyUI direct API endpoint |
+| `TTS_MODEL` | ❌ | Piper TTS voice model filename |
+| `TWITCH_CLIENTID` | ❌ | Twitch app client ID |
+| `TWITCH_SECRET` | ❌ | Twitch app secret |
+| `OWNER_ID` | ❌ | Discord user ID for admin commands |
+
+See `.env.example` for the full list of available configuration options.
+
+## Features
+
+- **AI Chat** — Multi-tier LLM with automatic failover (Remote → Gemini → Local)
+- **Music Player** — High-fidelity YouTube playback with queue management and cinematic UI
+- **Image Generation** — SwarmUI/ComfyUI integration with model selection
+- **Text-to-Speech** — Local Piper TTS with voice channel support
+- **Twitch Announcements** — Automatic stream notifications with deduplication
+- **Web Search** — Google → DuckDuckGo → Wikipedia fallback chain
+- **URL Summarization** — Automatic link summarization in configured channels
 
 ## Testing
+
 ```bash
 npm test
 ```
-The test suite includes extensive mocks for Discord.js, YouTube, and LLM tiers to allow for fast, reliable local verification.
+
+The test suite includes extensive mocks for Discord.js, YouTube, and LLM tiers for fast, reliable local verification. GitHub Actions CI runs tests on every push.
+
+## Deployment
+
+The bot can be deployed as a macOS Launch Agent. See [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md) for details.
+
+```bash
+# Restart the service
+launchctl kickstart -k gui/$(id -u)/com.user.skynet
+```
+
+## 🤖 Instructions for AI Assistants
+
+1. **Service Management**: Read [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md) before restarting the bot.
+2. **Test-Driven Development**: Run `npm test` after modifying core logic. Maintain 100% pass rate.
+3. **Music Fidelity**: Volume normalization and stable YouTube playback are critical.

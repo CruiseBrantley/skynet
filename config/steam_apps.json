@@ -1,0 +1,10 @@
+[
+    {
+        "name": "Icarus",
+        "key": "icarus",
+        "appId": "2089300",
+        "installDir": "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server",
+        "processName": "IcarusServer-Win64-Shipping.exe",
+        "executable": "IcarusServer.exe -log"
+    }
+]

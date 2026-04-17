@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-PROJECT_DIR="/Users/cruise/git/skynet"
+PROJECT_DIR="$(pwd)"
 YT_DLP="$PROJECT_DIR/tts_engine/piper_venv/bin/yt-dlp"
 COOKIE_FILE="$PROJECT_DIR/youtube_cookies.txt"
 

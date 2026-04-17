@@ -113,7 +113,7 @@ module.exports = {
         const isBot = interaction.user.id === botId;
 
         if (!isMod && !isOwner && !isBot) {
-            return interaction.reply({ content: 'Only server moderators, the bot owner, or Skynet can manage announcements.', ephemeral: true });
+            return interaction.reply({ content: 'Only server moderators or the bot owner can manage announcements.', ephemeral: true });
         }
 
         const subcommand = interaction.options.getSubcommand();

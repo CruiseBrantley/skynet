@@ -66,11 +66,13 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
             geminiMessages = [{ role: 'user', content: payload.prompt }];
         }
 
+        const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview';
+
         try {
             const response = await axios.post(
                 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
                 {
-                    model: 'gemini-3.1-flash-lite-preview',
+                    model: geminiModel,
                     messages: geminiMessages,
                     stream: false
                 },
@@ -101,7 +103,7 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     // Model: gemma4:e4b (keeps in RAM for fast responses)
     if (fallbackLevel >= 2) {
         const localUrl = `http://127.0.0.1:11434${endpoint}`;
-        const localModel = 'gemma4:e4b';
+        const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b';
 
         logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`);
 
@@ -133,10 +135,15 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     }
 
     // Level 0: Primary Remote Workstation
-    const remoteHost = '192.168.50.182';
-    const remotePort = 11434;
+    const remoteHost = process.env.OLLAMA_REMOTE_HOST;
+    const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434;
     const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`;
-    const remoteModel = 'gemma4:26b';
+    const remoteModel = process.env.OLLAMA_REMOTE_MODEL;
+
+    // If no remote host is configured, skip straight to Level 1
+    if (!remoteHost || !remoteModel) {
+        return queryOllama(endpoint, payload, 1);
+    }
 
     // Quick TCP pre-flight check (1s timeout)
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000);

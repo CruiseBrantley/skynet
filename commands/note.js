@@ -5,7 +5,7 @@ const logger = require('../logger');
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('note')
-		.setDescription('Add a new note to the Skynet notes database')
+		.setDescription('Add a new note to the notes database')
         .addStringOption(option => 
             option.setName('text')
                 .setDescription('The text of the note')

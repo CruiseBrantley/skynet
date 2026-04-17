@@ -5,7 +5,7 @@ const logger = require('../logger');
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('listnotes')
-		.setDescription('List all current notes in the Skynet notes database'),
+		.setDescription('List all current notes in the notes database'),
 	async execute(interaction) {
         await interaction.deferReply();
 

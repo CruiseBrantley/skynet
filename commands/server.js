@@ -4,7 +4,7 @@ const publicIp = require('public-ip');
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('server')
-		.setDescription('Returns the current server IP address for Skynet'),
+		.setDescription('Returns the current server IP address'),
 	async execute(interaction) {
 		await interaction.deferReply({ ephemeral: true });
         try {

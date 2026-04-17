@@ -5,11 +5,18 @@ const path = require('path');
 const googleIt = require('google-it');
 const ddg = require('duck-duck-scrape');
 const wiki = require('wikipedia');
-wiki.setUserAgent('SkynetBot/1.0 (https://github.com/CruiseBrantley/skynet; cruise@example.com)');
+const botName = process.env.BOT_NAME || 'Bot';
+wiki.setUserAgent(`${botName}Bot/1.0`);
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 
-const SYSTEM_PROMPT = "You are Skynet, a helpful and knowledgeable AI assistant in a Discord server. You can help with coding, general questions, creative tasks, and anything else. You have a subtle Terminator-themed personality but prioritize being genuinely helpful over staying in character. Format code blocks with Discord markdown syntax. Keep responses concise and direct. If you need to look up real-time information, weather, or current events that are NOT in your training set, you MUST use the 'search' command. If you are asked to 'speak' to someone, to 'tell' the user something vocally, or if you feel a spoken response is contextually appropriate (e.g. they use vocal cues), use the 'speak' command. Always include the 'user' ID parameter in the 'speak' command to follow them into their voice channel. Reply ONLY with a JSON block in the exact following format: <<<RUN_COMMAND: {\"command\": \"command_name\", \"param\": \"value\"}>>>. Otherwise, answer directly. Do not include any other text when calling a command.";
+// Load system prompt from config file, falling back to a generic default
+let SYSTEM_PROMPT;
+try {
+    SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, '../config/system_prompt.txt'), 'utf8').trim();
+} catch (err) {
+    SYSTEM_PROMPT = `You are ${botName}, a helpful AI assistant in a Discord server. Format code blocks with Discord markdown syntax. Keep responses concise and direct.`;
+}
 
 const channelHistories = {}; // { [channelId]: { time: Date.now(), messages: [] } }
 const MAX_CHANNEL_HISTORIES = 50;
@@ -71,7 +78,7 @@ async function queryOllama(messages, isBackup = false, commandsContext = "", log
           const { images, ...rest } = msg;
           return {
               ...rest,
-              content: (rest.content || "") + "\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that Skynet's visual sensors are currently offline and you can only process text.]"
+              content: (rest.content || "") + `\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that ${botName}'s visual sensors are currently offline and you can only process text.]`
           };
       }
       return msg;
@@ -133,7 +140,7 @@ function splitMessage(text) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('chat')
-    .setDescription('Chat with Skynet (Ollama)')
+    .setDescription(`Chat with ${botName}`)
     .addStringOption(option =>
       option.setName('message')
         .setDescription('Message to send')
@@ -146,7 +153,7 @@ module.exports = {
     logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
     await interaction.deferReply();
     try {
-      const messageText = interaction.options.getString('message').replace('<@558428214805135370>', 'Skynet');
+      const messageText = interaction.options.getString('message').replace(new RegExp(`<@${interaction.client.user.id}>`, 'g'), botName);
       const attachment = interaction.options.getAttachment('image') || (interaction.options.attachments && interaction.options.attachments.size > 0 ? interaction.options.attachments.first() : null);
       const channelId = interaction.channelId;
 
@@ -244,7 +251,7 @@ module.exports = {
                 if (cmdData.command === 'search' || cmdData.command === 'web_search') {
                     const query = cmdData.query || cmdData.arg1 || cmdData.message;
                     if (!sharedState.primaryResponseUsed) {
-                        await interaction.editReply({ content: `*Skynet is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
+                        await interaction.editReply({ content: `*${botName} is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                     }
                     try {
                         let results = [];
@@ -326,7 +333,7 @@ module.exports = {
                 const targetCmd = interaction.client.commands.get(rawCmdName);
                     if (targetCmd) {
                         if (!sharedState.primaryResponseUsed) {
-                            await interaction.editReply({ content: `*Skynet is autonomously executing \`/${cmdData.command}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
+                            await interaction.editReply({ content: `*${botName} is autonomously executing \`/${cmdData.command}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                         }
                         let cmdOutput = "";
                         const mock = createMockInteraction(interaction, {
@@ -359,7 +366,7 @@ module.exports = {
                         }
                     } else {
                         logger.error(`LLM requested unknown command: ${cmdData.command}`);
-                        replyContent = `${replyContent}\n*(System Error: Skynet attempted to execute unknown command \`/${cmdData.command}\`)*`.trim();
+                        replyContent = `${replyContent}\n*(System Error: ${botName} attempted to execute unknown command \`/${cmdData.command}\`)*`.trim();
                     }
                 }
             } catch (e) {
@@ -415,9 +422,9 @@ module.exports = {
     } catch (err) {
       logger.error('Ollama error: ' + err.message);
       try {
-          await interaction.editReply({ content: 'There was an error communicating with the Skynet AI Core.', flags: [MessageFlags.SuppressEmbeds] });
+          await interaction.editReply({ content: `There was an error communicating with the ${botName} AI Core.`, flags: [MessageFlags.SuppressEmbeds] });
       } catch (e) {
-          await interaction.channel.send('There was an error communicating with the Skynet AI Core.');
+          await interaction.channel.send(`There was an error communicating with the ${botName} AI Core.`);
       }
     }
   },

@@ -19,7 +19,7 @@ describe('Chat Command Search Integration', () => {
         mockInteraction = {
             id: '123',
             user: { tag: 'user#0001', username: 'user' },
-            client: { commands: { map: jest.fn().mockReturnValue([]) } },
+            client: { user: { id: 'mock_bot_id' }, commands: { map: jest.fn().mockReturnValue([]) } },
             channelId: 'channel-1',
             options: {
                 getString: jest.fn().mockImplementation((name) => {
