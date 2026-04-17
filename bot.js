@@ -9,7 +9,7 @@ if (!buffer.SlowBuffer) {
 
 const dotenv = require('dotenv')
 dotenv.config()
-const { Client, GatewayIntentBits, Collection } = require('discord.js')
+const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js')
 const logger = require('./logger')
 const { setupServer: server } = require('./server/server')
 const loginFirebase = require('./firebase-login')
@@ -43,7 +43,8 @@ function discordBot() {
     if (process.env.NODE_ENV !== 'dev') process.env.NODE_ENV = 'prod'
     logger.info('Current ENV:' + process.env.NODE_ENV)
     const bot = new Client({
-        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates]
+        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages],
+        partials: [Partials.Channel]
     })
 
     bot.commands = new Collection();
@@ -166,10 +167,14 @@ function discordBot() {
     bot.on('messageCreate', async message => {
         if (message.author.bot) return;
 
-        // Check if the bot is directly mentioned (ignore @everyone and @here)
+        // Check if the bot is directly mentioned (ignore @everyone and @here) or if it's a DM
         if (message.mentions.everyone) return;
-        if (message.mentions.has(bot.user)) {
-            logger.info(`Bot mentioned by ${message.author.tag} in ${message.channelId}: "${message.content}"`);
+        
+        const isDM = !message.guild || message.channel.isDMBased?.() || message.channel.type === 1;
+        const isMentioned = message.mentions.has(bot.user);
+
+        if (isMentioned || isDM) {
+            logger.info(`Bot triggered by ${message.author.tag} in ${isDM ? 'DM' : message.channelId}: "${message.content}"`);
             const chatCommand = bot.commands.get('chat');
             if (chatCommand) {
                 // Mock an interaction object to reuse the slash command logic

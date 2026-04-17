@@ -70,7 +70,7 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
 const { queryOllama: executeOllama } = require('../util/ollama');
 
 async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "") {
-  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
+  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
 
   let processedMessages = messages.map((msg, idx) => {
       if (idx === 0 && msg.role === 'system') {
