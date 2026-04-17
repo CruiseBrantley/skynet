@@ -8,6 +8,9 @@ const logger = require('../logger');
 
 const { PROJECT_ROOT, YT_DLP, COOKIE_FILE, FFMPEG, TEMP_DIR } = require('./paths');
 
+// Gentle V-Shaped EQ Filter: +2dB below 120Hz (Warm Bass), +1.5dB above 8000Hz (Smooth Treble/Air)
+const EQ_FILTER = 'bass=g=2:f=120:w=0.5,treble=g=1.5:f=8000:w=0.5';
+
 /**
  * Get yt-dlp cookie args if the cookie file exists.
  */
@@ -90,10 +93,10 @@ async function analyzeLoudness(filePath) {
     if (!fs.existsSync(filePath)) return null;
 
     return new Promise((resolve) => {
-        // Run first-pass analysis
+        // Run first-pass analysis with the EQ pre-applied so measurements are perfectly tuned
         const args = [
             '-i', filePath,
-            '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+            '-af', `${EQ_FILTER},loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json`,
             '-f', 'null',
             '-',
         ];
@@ -157,12 +160,7 @@ async function playVideo(url, { seekSeconds = 0, bitrate = 64000, loudnorm = nul
             });
         }
 
-        // Build loudnorm filter (Dynamic fallback OR Linear dual-pass)
-        let lnFilter = 'loudnorm=I=-16:TP=-1.5:LRA=11';
-        if (loudnorm) {
-            lnFilter = `loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=${loudnorm.input_i}:measured_TP=${loudnorm.input_tp}:measured_LRA=${loudnorm.input_lra}:measured_thresh=${loudnorm.input_thresh}:offset=${loudnorm.target_offset}:linear=true`;
-            logger.info(`Applying Linear (Dual-Pass) Normalization.`);
-        }
+        const audioFilter = `${EQ_FILTER}`;
 
         // Use ffmpeg to stream from the local file (allows for easy seeking and stable transcoding)
         // High-Reliability Mode: Use Raw PCM (s16le) to avoid any container or demuxing issues.
@@ -170,7 +168,7 @@ async function playVideo(url, { seekSeconds = 0, bitrate = 64000, loudnorm = nul
             '-ss', String(seekSeconds),
             '-i', sourcePath,
             '-vn',
-            '-af', lnFilter,
+            '-af', audioFilter,
             '-f', 's16le',
             '-ac', '2',
             '-ar', '48000',

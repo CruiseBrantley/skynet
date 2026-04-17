@@ -129,16 +129,5 @@ describe('playVideo utilities', () => {
             expect(mockProc.stdout.pipe).toHaveBeenCalled();
             expect(createAudioResource).toHaveBeenCalled();
         });
-
-        test('applies loudnorm filters with linear offset if loudnorm is provided', async () => {
-            fs.existsSync.mockImplementation((path) => path.includes('.opus')); // mimic cached file
-            
-            await playVideo('https://youtu.be/dQw4w9WgXcQ', { 
-                loudnorm: { input_i: '-12', input_tp: '-1', input_lra: '8', input_thresh: '-22', target_offset: '1.5' } 
-            });
-
-            const args = spawn.mock.calls[0][1];
-            expect(args).toContainEqual(expect.stringContaining('linear=true'));
-        });
     });
 });

@@ -168,29 +168,21 @@ class MusicManager {
             }
 
             else if (btn.customId === 'music_skip') {
-                const skipped = queue.currentTrack;
                 this.skip(guildId);
-                await btn.reply({
-                    content: `⏭ Skipped **${skipped?.title || 'current track'}**.`,
-                    flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
-                });
-                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
+                await btn.deferUpdate().catch(() => {});
             }
 
             else if (btn.customId === 'music_skip_next') {
                 const skipped = queue.skipNext();
                 if (skipped) {
-                    await btn.reply({
-                        content: `🗑 Removed upcoming track: **${skipped.title}**.`,
-                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
-                    });
+                    await btn.deferUpdate().catch(() => {});
                 } else {
                     await btn.reply({
                         content: `⚠️ No upcoming track to remove.`,
                         flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                     });
+                    setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
                 }
-                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
             else if (btn.customId === 'music_stop') {
@@ -236,17 +228,14 @@ class MusicManager {
             else if (btn.customId === 'music_shuffle') {
                 if (queue.queue.length > 1) {
                     queue.shuffle();
-                    await btn.reply({
-                        content: `🔀 Shuffled **${queue.queue.length}** upcoming tracks.`,
-                        flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
-                    });
+                    await btn.deferUpdate().catch(() => {});
                 } else {
                     await btn.reply({
                         content: `⚠️ Not enough tracks in the queue to shuffle.`,
                         flags: [MessageFlags.SuppressEmbeds, MessageFlags.Ephemeral],
                     });
+                    setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
                 }
-                setTimeout(() => btn.deleteReply().catch(() => {}), 5000);
             }
 
             // Manually trigger a UI update for instant feedback (AIO Abstraction)

@@ -403,14 +403,14 @@ describe('MusicManager handleInteraction', () => {
         mockBtn.customId = 'music_skip';
         await manager.handleInteraction(mockBtn);
         expect(mockQueue.skip).toHaveBeenCalled();
-        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Skipped') }));
+        expect(mockBtn.deferUpdate).toHaveBeenCalled();
     });
 
     test('music_skip_next removes upcoming track', async () => {
         mockBtn.customId = 'music_skip_next';
         await manager.handleInteraction(mockBtn);
         expect(mockQueue.skipNext).toHaveBeenCalled();
-        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Removed upcoming track: **Removed Track**') }));
+        expect(mockBtn.deferUpdate).toHaveBeenCalled();
     });
 
     test('music_stop stops queue and resets activity', async () => {
@@ -434,7 +434,7 @@ describe('MusicManager handleInteraction', () => {
         mockBtn.customId = 'music_shuffle';
         await manager.handleInteraction(mockBtn);
         expect(mockQueue.shuffle).toHaveBeenCalled();
-        expect(mockBtn.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Shuffled') }));
+        expect(mockBtn.deferUpdate).toHaveBeenCalled();
     });
 });
 

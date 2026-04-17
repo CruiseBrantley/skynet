@@ -1,6 +1,8 @@
 const {
     SlashCommandBuilder,
     ComponentType,
+    ActionRowBuilder,
+    ButtonBuilder
 } = require('discord.js');
 const decode = require('unescape');
 const logger = require('../logger');
@@ -153,14 +155,13 @@ async function handleSearch(interaction) {
 
                 await musicManager.enqueue(fakeInteraction, track);
                 btn.client.user.setActivity('YouTube.');
-                await btn.reply({
-                    content: `✅ **${track.title}** added to queue.`,
-                    flags: [4096, 64],
-                });
+                
+                await btn.deferUpdate().catch(() => {});
+                await msg.delete().catch(() => {});
 
                 // If this is now playing (no active UI yet), start the AIO UI
                 const queue = musicManager.getQueue(btn.guildId);
-                if (queue && queue.currentTrack === track && !musicManager.uiStates.has(btn.guildId)) {
+                if (queue && queue.currentTrack && queue.currentTrack.url === track.url && !musicManager.uiStates.has(btn.guildId)) {
                     // Enrich the track info before showing the UI
                     const enriched = await youtube.getVideoInfo(track.url);
                     const displayState = musicUI.buildFullDisplayState(enriched, [], 0, false, queue.autoplay, { volume: queue.volume, bitrate: queue.bitrate }, null);
@@ -174,7 +175,8 @@ async function handleSearch(interaction) {
             }
         });
 
-        collector.on('end', () => {
+        collector.on('end', (_, reason) => {
+            if (reason === 'messageDelete') return;
             const disabledRow = new ActionRowBuilder().addComponents(
                 ...row.components.map(c => ButtonBuilder.from(c).setDisabled(true)),
             );

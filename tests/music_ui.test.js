@@ -113,6 +113,36 @@ describe('MusicUI', () => {
         });
     });
 
+    describe('buildSearchEmbed', () => {
+        test('formats search results cleanly with proper markdown links', () => {
+            const results = [
+                { title: 'Test Song', url: 'https://youtube.com/test1', channel: 'Test Channel' }
+            ];
+            
+            const { embed, row } = musicUI.buildSearchEmbed('test query', results);
+            
+            // Check that the markdown constructed correctly binds the title and URL
+            expect(embed.data.description).toContain('[Test Song](https://youtube.com/test1)');
+            expect(embed.data.description).toContain('Test Channel');
+            expect(embed.data.title).toBe('Results for: test query');
+            
+            // Should contain one selector button
+            expect(row.components).toHaveLength(1);
+        });
+
+        test('applies thumbnail from the first result if available', () => {
+            const results = [
+                { title: 'Song 1', url: 'https://x', thumbnail: 'https://i.ytimg.com/vi/abc/default.jpg' },
+                { title: 'Song 2', url: 'https://y', thumbnail: 'https://i.ytimg.com/vi/xyz/default.jpg' }
+            ];
+            
+            const { embed } = musicUI.buildSearchEmbed('query', results);
+            
+            // It should have upgraded default.jpg to hqdefault.jpg
+            expect(embed.data.thumbnail.url).toBe('https://i.ytimg.com/vi/abc/hqdefault.jpg');
+        });
+    });
+
     describe('buildFullDisplayState', () => {
         test('returns a complete AIO dispatch object', () => {
             const track = { title: 'Song' };

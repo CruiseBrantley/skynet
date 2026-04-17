@@ -182,24 +182,20 @@ function buildSearchEmbed(query, results) {
         .setTitle(`Results for: ${query}`)
         .setDescription(
             results.map((r, i) =>
-                `\`${i + 1}.\` **[${decode(r.title)}](${r.link})**\n${decode(r.channelTitle || '')}`,
+                `\`${i + 1}.\` **[${decode(r.title)}](${r.url})**\n${decode(r.channel || '')}`,
             ).join('\n\n'),
         );
 
-    const styles = [
-        ButtonStyle.Success,
-        ButtonStyle.Primary,
-        ButtonStyle.Secondary,
-        ButtonStyle.Secondary,
-        ButtonStyle.Danger,
-    ];
+    if (results.length > 0 && results[0].thumbnail) {
+        embed.setThumbnail(normalizeThumbnail(results[0].thumbnail));
+    }
 
     const row = new ActionRowBuilder().addComponents(
         ...results.map((_, i) =>
             new ButtonBuilder()
                 .setCustomId(`music_search_${i}`)
                 .setLabel(`${i + 1}`)
-                .setStyle(styles[i] || ButtonStyle.Secondary),
+                .setStyle(ButtonStyle.Secondary),
         ),
     );
 
