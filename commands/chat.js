@@ -191,6 +191,15 @@ module.exports = {
       }
       channelHistories[channelId].messages.push(userMessage);
 
+      // Sliding Window Context Capping: 
+      // Reserve index 0 (System Prompt), then only keep the last 10 chat elements (5 back-and-forth pairs).
+      if (channelHistories[channelId].messages.length > 11) {
+          channelHistories[channelId].messages = [
+              channelHistories[channelId].messages[0], 
+              ...channelHistories[channelId].messages.slice(-10)
+          ];
+      }
+
       // Inject dynamic system context
       const commandsContext = `Available Commands:\n` + (interaction.client.commands ? interaction.client.commands.map(c => {
           let paramStr = '';
@@ -204,7 +213,8 @@ module.exports = {
       try {
           const logPath = path.join(__dirname, '../logs/combined.log');
           if (fs.existsSync(logPath)) {
-              const logLines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(l => l.trim().length > 0).slice(-15);
+              // Cap logs to the last 8 lines, and truncate each line to 200 chars to avoid massive token bloat from giant stack traces
+              const logLines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(l => l.trim().length > 0).slice(-8).map(l => l.substring(0, 200));
               logsContext = `Recent System Logs (Format: JSON):\n` + logLines.join('\n');
           }
       } catch (e) {
@@ -438,6 +448,16 @@ module.exports = {
                     await interaction.channel.send({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
                 }
             }
+        }
+
+        // Post-Turn Cleanup: 
+        // Erase any intermediate "system" messages (like the 18k HTML search payload) from the memory history 
+        // to prevent token runaway in future interactions. The AI's final answered message holds enough context.
+        if (channelHistories[channelId]?.messages) {
+            channelHistories[channelId].messages = channelHistories[channelId].messages.filter((msg, idx) => {
+                // Keep the primary system prompt (idx 0) and any user/assistant messages.
+                return idx === 0 || msg.role !== 'system';
+            });
         }
 
       } else {
