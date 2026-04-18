@@ -443,18 +443,8 @@ class MusicManager {
         state.deleteTimer = setTimeout(async () => {
             // Only act if this state is still the active one
             if (this.uiStates.get(guildId) === state) {
-                // Null out the preserved last track now that the idle window has expired
-                const queue = this.getQueue(guildId);
-                if (queue) {
-                    queue.currentTrack = null;
-                    queue._resetPosition();
-                }
-                try {
-                    if (state.stageMessage) await state.stageMessage.delete().catch(() => {});
-                    if (state.dashboardMessage) await state.dashboardMessage.delete().catch(() => {});
-                } catch (_) { /* ignore */ }
-                this.uiStates.delete(guildId);
-                logger.info(`Idle music message cleaned up for guild ${guildId}.`);
+                logger.info(`Idle timer expired for guild ${guildId}. Cleaning up UI and disconnecting voice.`);
+                this.stop(guildId);
             }
         }, IDLE_DELETE_MS);
     }

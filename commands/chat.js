@@ -155,7 +155,8 @@ module.exports = {
     logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
     await interaction.deferReply();
     try {
-      const messageText = interaction.options.getString('message').replace(new RegExp(`<@${interaction.client.user.id}>`, 'g'), botName);
+      const rawInput = interaction.options.getString('message');
+      const messageText = rawInput.replace(new RegExp(`<@!?${interaction.client.user.id}>`, 'g'), '').trim();
       const attachment = interaction.options.getAttachment('image') || (interaction.options.attachments && interaction.options.attachments.size > 0 ? interaction.options.attachments.first() : null);
       const channelId = interaction.channelId;
 
@@ -321,16 +322,27 @@ module.exports = {
                             
                             // Deep Context Pull: Fetch the raw text of the #1 top ranking link to heavily enrich the RAG payload
                             let topLinkContext = '';
-                            try {
-                                const rawText = await fetchPageText(results[0].link);
-                                if (rawText) {
-                                    // Limit the page text to ~18000 characters to provide massive context without blowing the local Ollama context window size
-                                    topLinkContext = `\n\n[FULL TEXT HOMEPAGE OF TOP RESULT (${results[0].link})]:\n${rawText.substring(0, 18000)}`;
+                            let sourceUrl = '';
+                            
+                            // Iterate through the top 3 results to find a high-fidelity page (not just a cookie wall/404)
+                            for (let i = 0; i < Math.min(results.length, 3); i++) {
+                                try {
+                                    const link = results[i].link;
+                                    logger.info(`Deep Context Pull attempting iteration ${i+1} on: ${link}`);
+                                    const rawText = await fetchPageText(link, 18000); // Request high-limit fetch
+                                    
+                                    if (rawText && rawText.length > 800) {
+                                        topLinkContext = `\n\n[FULL TEXT HOMEPAGE OF TOP RESULT (${link})]:\n${rawText}`;
+                                        sourceUrl = link;
+                                        break; // Found good content
+                                    } else {
+                                        logger.info(`Deep Context Pull for link ${i+1} was too short (${rawText?.length || 0} chars), trying next result...`);
+                                    }
+                                } catch (e) {
+                                    logger.info(`Deep Context Pull failed for link ${i+1}: ${e.message}`);
                                 }
-                            } catch (e) {
-                                logger.info(`Deep Context Pull failed for top link ${results[0].link}, falling back to snippet-only.`);
                             }
-
+                            
                             searchResultContext = `[SYSTEM: WEB SEARCH RESULTS FOR "${query}"]\n${searchResultsStr}${topLinkContext}\n\nUsing these results, answer the user's initial request. If you still lack sufficient context to fully answer or verify the information, you may autonomously issue another RUN_COMMAND to perform an additional search with a different/more specific query. Otherwise, answer directly and comprehensively.`;
                         } else {
                             // Inform the LLM that the search system is failing so it stops recursively attempting to search

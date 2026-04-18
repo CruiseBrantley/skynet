@@ -40,7 +40,7 @@ function shouldSkipUrl(url) {
     return SKIP_PATTERNS.some(pattern => pattern.test(url));
 }
 
-async function fetchPageText(url) {
+async function fetchPageText(url, limit = 6000) {
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
         try {
             const info = await play.video_basic_info(url);
@@ -110,8 +110,8 @@ async function fetchPageText(url) {
             logger.info(`Fetched ${text.length} characters from ${url}`);
         }
 
-        // Limit to first ~6000 chars to avoid massive payloads
-        return text.substring(0, 6000);
+        // Apply dynamic limit
+        return text.substring(0, limit);
     } catch (err) {
         logger.info(`Failed to fetch page ${url}: ${err.message}`);
         return null;

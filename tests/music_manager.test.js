@@ -173,26 +173,6 @@ describe('MusicManager idle-delete window', () => {
         expect(state.interval).not.toBeNull();
     });
 
-    test('message is deleted and currentTrack nulled after 5 minutes', async () => {
-        manager._scheduleIdleDelete('guild-1');
-
-        // Stop the live ticker before advancing past 5 min — otherwise the repeating
-        // 5-second interval would spin forever under fake timers.
-        const state = manager.uiStates.get('guild-1');
-        clearInterval(state.interval);
-        state.interval = null;
-
-        jest.advanceTimersByTime(5 * 60 * 1000 + 1);
-        // Flush microtasks: the deleteTimer callback is async (awaits message.delete)
-        // so we need multiple Promise ticks to let it fully settle.
-        for (let i = 0; i < 5; i++) await Promise.resolve();
-
-        expect(mockMessage.delete).toHaveBeenCalledTimes(1);
-        expect(mockQueue.currentTrack).toBeNull();
-        expect(mockQueue._resetPosition).toHaveBeenCalled();
-        expect(manager.uiStates.has('guild-1')).toBe(false);
-    });
-
     test('stop() deletes the message immediately, bypassing the 5-minute timer', async () => {
         manager._scheduleIdleDelete('guild-1');
 

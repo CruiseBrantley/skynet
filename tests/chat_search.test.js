@@ -111,14 +111,14 @@ describe('Chat Command Search Integration', () => {
         googleIt.mockResolvedValueOnce([
             { title: 'Weather in Fayetteville', snippet: 'It is 70 degrees.', link: 'http://weather.com' }
         ]);
-        summarize.fetchPageText.mockResolvedValueOnce('MASSIVE HTML PAYLOAD OF THE PAGE CONTENT');
+        summarize.fetchPageText.mockResolvedValueOnce('MASSIVE HTML PAYLOAD '.repeat(50));
         ollama.queryOllama.mockResolvedValueOnce({
             message: { role: 'assistant', content: 'The weather is exactly 70 degrees.' }
         });
 
         await chatCmd.execute(mockInteraction);
 
-        expect(summarize.fetchPageText).toHaveBeenCalledWith('http://weather.com');
+        expect(summarize.fetchPageText).toHaveBeenCalledWith('http://weather.com', 18000);
         const secondCallPayload = ollama.queryOllama.mock.calls[1][1];
         const sysMsgContext = secondCallPayload.messages[secondCallPayload.messages.length - 1].content;
         expect(sysMsgContext).toContain('MASSIVE HTML PAYLOAD');
