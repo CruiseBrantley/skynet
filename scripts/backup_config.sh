@@ -22,6 +22,7 @@ FILES=(
     "twitterTopic.json"
     "voteTopic.json"
     "config/"
+    "data/"
 )
 
 # Filter out targets that don't exist currently to avoid tar errors

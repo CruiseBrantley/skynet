@@ -11,6 +11,7 @@ const puppeteerSearch = require('../util/puppeteerSearch');
 const { fetchPageText } = require('../util/summarize');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
+const agentMemory = require('../util/AgentMemory');
 
 // Load system prompt from config file, falling back to a generic default
 let SYSTEM_PROMPT;
@@ -69,8 +70,10 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
 
 const { queryOllama: executeOllama } = require('../util/ollama');
 
-async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "") {
-  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
+async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "", guildId = null) {
+  const memorySummary = agentMemory.getSummary(guildId);
+  const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY:\n${memorySummary}` : '';
+  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
 
   let processedMessages = messages.map((msg, idx) => {
       if (idx === 0 && msg.role === 'system') {
@@ -223,7 +226,7 @@ module.exports = {
       }
 
       let currentIsBackup = false;
-      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext);
+      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
 
       if (responseData && responseData.message) {
         channelHistories[channelId].messages.push(responseData.message); // store assistant reply
@@ -261,7 +264,114 @@ module.exports = {
                 // Remove the command tag from the visible reply to avoid cluttering Discord
                 replyContent = replyContent.replace(commandMatch[0], '').trim();
 
+                // --- MEMORY COMMANDS ---
+                if (['remember', 'recall', 'forget'].includes(cmdData.command)) {
+                    replyContent = replyContent.replace(commandMatch[0], '').trim();
+
+                    if (cmdData.command === 'remember') {
+                        const key = cmdData.key || cmdData.params?.key;
+                        const value = cmdData.value || cmdData.params?.value;
+                        const ttl = parseInt(cmdData.ttl_days ?? cmdData.params?.ttl_days ?? 30);
+                        if (key && value !== undefined) {
+                            agentMemory.set(key, value, ttl, interaction.guildId);
+                            const scope = key.startsWith('user.') || key.startsWith('preference.') || key.startsWith('global.') ? 'globally' : 'for this server';
+                            const memCtx = `[SYSTEM: Stored memory ${scope}: "${key}" = "${value}" (TTL: ${ttl === -1 ? 'permanent' : ttl + ' days'}). Acknowledge naturally without reciting the raw key name.]`;
+                            channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
+                        } else {
+                            channelHistories[channelId].messages.push({ role: 'system', content: '[SYSTEM: remember command was missing key or value parameters.]' });
+                        }
+                    } else if (cmdData.command === 'recall') {
+                        const key = cmdData.key || cmdData.params?.key;
+                        const val = key ? agentMemory.get(key, interaction.guildId) : null;
+                        const memCtx = val
+                            ? `[SYSTEM: Memory recall: "${key}" = "${val}". Use this in your response.]`
+                            : `[SYSTEM: No memory found for key "${key}".]`;
+                        channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
+                    } else if (cmdData.command === 'forget') {
+                        const key = cmdData.key || cmdData.params?.key;
+                        const deleted = key ? agentMemory.delete(key) : false;
+                        const memCtx = deleted
+                            ? `[SYSTEM: Deleted memory key "${key}" successfully.]`
+                            : `[SYSTEM: No memory found for key "${key}" to delete.]`;
+                        channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
+                    }
+
+                    const memFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+                    replyContent = (replyContent + ' ' + (memFollowup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(memFollowup.message);
+                    continue; // back to the top of tool loop
+                }
+
+                // --- SCHEDULER COMMANDS ---
+                if (cmdData.command === 'schedule') {
+                    const { resolveTime } = require('../util/AgentClock');
+                    const agentScheduler = require('../util/AgentScheduler');
+
+                    const message = cmdData.message || cmdData.description || cmdData.params?.message;
+                    const when = cmdData.when || cmdData.params?.when || cmdData.time || cmdData.params?.time;
+                    const target = cmdData.target || cmdData.params?.target || 'dm';
+                    const repeat = cmdData.repeat || cmdData.params?.repeat || null;
+
+                    if (!message || !when) {
+                        channelHistories[channelId].messages.push({ role: 'system', content: '[SYSTEM: schedule command was missing "message" or "when" parameters.]' });
+                    } else {
+                        const scheduledAt = await resolveTime(when);
+                        if (!scheduledAt) {
+                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Could not parse time expression "${when}". Ask the user to clarify with something like "in 30 minutes" or "tonight at 9pm".]` });
+                        } else {
+                            const channelTarget = target === 'dm' ? 'dm' : interaction.channelId;
+                            const task = agentScheduler.add({
+                                description: message,
+                                scheduledAt,
+                                userId: interaction.user.id,
+                                guildId: interaction.guildId,
+                                channelId: channelTarget,
+                                repeat: ['hourly', 'daily', 'weekly'].includes(repeat) ? repeat : null,
+                                createdBy: interaction.user.username
+                            });
+                            const timeStr = new Date(scheduledAt).toLocaleString('en-US', { timeZoneName: 'short' });
+                            const repeatStr = task.repeat ? ` (repeats ${task.repeat})` : '';
+                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Task scheduled. ID: ${task.id}. Will fire at ${timeStr}${repeatStr}. Delivery: ${channelTarget === 'dm' ? 'DM' : 'this channel'}. Confirm to the user naturally and mention the time.]` });
+                        }
+                    }
+
+                    const schedFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+                    replyContent = (replyContent + ' ' + (schedFollowup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(schedFollowup.message);
+                    continue;
+                }
+
+                if (cmdData.command === 'cancel_task') {
+                    const agentScheduler = require('../util/AgentScheduler');
+                    const id = cmdData.id || cmdData.task_id || cmdData.params?.id;
+                    const cancelled = id ? agentScheduler.cancel(id) : false;
+                    const ctx = cancelled
+                        ? `[SYSTEM: Task ${id} has been cancelled successfully.]`
+                        : `[SYSTEM: No task with ID "${id}" was found. It may have already completed or the ID is incorrect.]`;
+                    channelHistories[channelId].messages.push({ role: 'system', content: ctx });
+
+                    const cancelFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+                    replyContent = (replyContent + ' ' + (cancelFollowup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(cancelFollowup.message);
+                    continue;
+                }
+
+                if (cmdData.command === 'list_tasks') {
+                    const agentScheduler = require('../util/AgentScheduler');
+                    const tasks = agentScheduler.getByUser(interaction.user.id);
+                    const ctx = tasks.length === 0
+                        ? '[SYSTEM: No scheduled tasks found for this user.]'
+                        : `[SYSTEM: Scheduled tasks for this user:\n${tasks.map(t => `- ${t.id}: "${t.description.substring(0, 60)}" at ${new Date(t.scheduledAt).toLocaleString()}${t.repeat ? ` (${t.repeat})` : ''}`).join('\n')}. List them clearly to the user.]`;
+                    channelHistories[channelId].messages.push({ role: 'system', content: ctx });
+
+                    const listFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+                    replyContent = (replyContent + ' ' + (listFollowup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(listFollowup.message);
+                    continue;
+                }
+
                 if (cmdData.command === 'search' || cmdData.command === 'web_search') {
+
                     const query = cmdData.query || cmdData.params?.query || cmdData.arg1 || cmdData.message;
                     if (!sharedState.primaryResponseUsed) {
                         await interaction.editReply({ content: `*${botName} is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });

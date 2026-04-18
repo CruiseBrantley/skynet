@@ -84,3 +84,6 @@ config/announcements.json
 
 # Lyrics cache
 .lyrics_cache/
+
+# Agent persistent data (local disk only, not Firebase)
+data/

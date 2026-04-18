@@ -85,6 +85,22 @@ function discordBot() {
         logger.info('Logged in as: ')
         logger.info(bot.user.username + ' - (' + bot.user.id + ')')
         bot.user.setActivity(process.env.BOT_ACTIVITY || 'for you', { type: 'WATCHING' })
+
+        // Start the agent task scheduler tick (60-second interval)
+        // Guard flag prevents duplicate intervals on Discord reconnect events
+        if (!bot._schedulerRunning) {
+            bot._schedulerRunning = true;
+            logger.info('AgentScheduler: Tick started (60s interval).');
+            setInterval(() => agentScheduler.processDueTasks(bot), 60_000);
+        }
+
+        // Start the background agent loop
+        // Interval defaults to 10 minutes; override with AGENT_LOOP_INTERVAL_MS in .env
+        if (!bot._agentLoopStarted) {
+            bot._agentLoopStarted = true;
+            const loopInterval = parseInt(process.env.AGENT_LOOP_INTERVAL_MS) || 10 * 60_000;
+            agentLoop.start(bot, loopInterval);
+        }
     })
 
     bot.on('error', err => {
@@ -99,6 +115,8 @@ function discordBot() {
     linkSummarize(bot)
 
     const musicManager = require('./util/MusicManager');
+    const agentScheduler = require('./util/AgentScheduler');
+    const agentLoop = require('./util/AgentLoop');
     const aloneTimers = new Map();
 
     bot.on('voiceStateUpdate', (oldState, newState) => {

@@ -160,4 +160,38 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     }
 }
 
-module.exports = { queryOllama };
+/**
+ * Queries Ollama using ONLY local Mac or remote PC — never Gemini.
+ * Safe for background agent tasks (schedulers, loops) where API costs must be avoided.
+ * Priority: Remote PC (level 0) → Local Mac (level 2). Gemini (level 1) is explicitly skipped.
+ * @param {string} endpoint
+ * @param {object} payload
+ */
+async function queryLocalOrRemote(endpoint, payload) {
+    const remoteHost = process.env.OLLAMA_REMOTE_HOST;
+    const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434;
+    const remoteModel = process.env.OLLAMA_REMOTE_MODEL;
+    const timeoutMs = 120_000; // 2 min — background tasks get less priority
+
+    if (remoteHost && remoteModel) {
+        const isOnline = await checkPortOpen(remoteHost, remotePort, 1000);
+        if (isOnline) {
+            try {
+                const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`;
+                const response = await axios.post(
+                    remoteUrl,
+                    { ...payload, model: remoteModel, stream: false },
+                    { timeout: timeoutMs }
+                );
+                return response.data;
+            } catch (err) {
+                logger.info(`queryLocalOrRemote: Remote PC failed, falling to local: ${err.message}`);
+            }
+        }
+    }
+
+    // Fall through to local — never calls Gemini (level 2 directly)
+    return queryOllama(endpoint, payload, 2);
+}
+
+module.exports = { queryOllama, queryLocalOrRemote };
