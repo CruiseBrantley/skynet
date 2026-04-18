@@ -420,6 +420,25 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
 
         try {
             await action.execute(bot, channel, params || {}, context);
+            
+            // Centralized Receipt/Cleanup logic
+            if (context && typeof context.editReply === 'function' && !context.replied) {
+                const { MessageFlags } = require('discord.js');
+                const isDifferentChannel = channel.id !== context.channelId;
+                
+                if (isDifferentChannel) {
+                    const actionDisplayName = action.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    const channelContext = ` in ${channel.name ? `#${channel.name}` : channel.toString()}`;
+                    await context.editReply({ 
+                        content: `✅ **Success:** Executed ${actionDisplayName}${channelContext}`, 
+                        flags: [MessageFlags.SuppressEmbeds] 
+                    }).catch(() => {});
+                } else {
+                    // Same channel — silent cleanup of the "thinking" message
+                    await context.deleteReply().catch(() => {});
+                }
+            }
+
             return { success: true };
         } catch (err) {
             logger.error(`ActionExecutor: Action "${name}" failed: ${err.message}`);

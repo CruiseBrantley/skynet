@@ -67,7 +67,8 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
         deferReply: async () => {},
         editReply: capture,
         followUp: capture,
-        toString() { return (this.channel || interaction.channel)?.toString() || "[Unknown Channel]"; }
+        toString() { return (this.channel || interaction.channel)?.toString() || "[Unknown Channel]"; },
+        get replied() { return sharedState.primaryResponseUsed; }
     };
 }
 
@@ -594,11 +595,7 @@ module.exports = {
         if (replyContent.length === 0) {
             // Only delete if the primary slot hasn't been occupied by real content from a tool
             if (!sharedState.primaryResponseUsed) {
-                if (commandExecuted) {
-                    await interaction.editReply({ content: `*${botName} successfully executed the command, but it returned no text output.*`, flags: [MessageFlags.SuppressEmbeds] });
-                } else {
-                    await interaction.deleteReply().catch(() => {});
-                }
+                await interaction.deleteReply().catch(() => {});
             }
         } else {
             const chunks = splitMessage(replyContent);

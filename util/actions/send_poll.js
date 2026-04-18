@@ -49,16 +49,5 @@ module.exports = {
 
         logger.info(`ActionExecutor: Sending poll to ${channel.id}: ${JSON.stringify(payload)}`);
         await channel.send(payload);
-        
-        // Provide feedback to the chat orchestrator if we have an interaction context
-        if (interaction && interaction.editReply) {
-            const isDifferentChannel = channel.id !== interaction.channelId;
-            const channelContext = isDifferentChannel ? ` in ${channel.name ? `#${channel.name}` : channel.toString()}` : "";
-            
-            await interaction.editReply({ 
-                content: `✅ **Success:** Created native poll${channelContext}: "${questionText}"`, 
-                flags: [MessageFlags.SuppressEmbeds] 
-            });
-        }
     }
 };
