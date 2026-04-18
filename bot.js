@@ -223,6 +223,7 @@ function discordBot() {
                 };
 
                 const mockInteraction = {
+                    id: `autonomous-${Date.now()}`,
                     client: bot,
                     user: message.author,
                     member: message.member,

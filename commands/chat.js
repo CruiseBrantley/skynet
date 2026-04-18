@@ -67,7 +67,15 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
         deferReply: async () => {},
         editReply: capture,
         followUp: capture,
-        toString() { return (this.channel || interaction.channel)?.toString() || "[Unknown Channel]"; },
+        toString() { 
+            const ch = (this.channel || interaction.channel);
+            if (ch && typeof ch.toString === 'function') {
+                const s = ch.toString();
+                if (s && s !== '[object Object]') return s;
+                if (ch.name) return `#${ch.name}`;
+            }
+            return "[Unknown Channel]";
+        },
         get replied() { return sharedState.primaryResponseUsed; }
     };
 }

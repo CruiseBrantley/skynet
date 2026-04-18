@@ -424,7 +424,7 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
             // Centralized Receipt/Cleanup logic
             if (context && typeof context.editReply === 'function' && !context.replied) {
                 const { MessageFlags } = require('discord.js');
-                const isDifferentChannel = channel.id !== context.channelId;
+                const isDifferentChannel = channel.id !== context.channelId && channel !== context;
                 
                 if (isDifferentChannel) {
                     const actionDisplayName = action.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());

@@ -237,7 +237,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
     });
 
     test('handles RUN_COMMAND with missing trailing brackets (Robust parsing)', async () => {
@@ -251,7 +251,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
     });
 
     // --- Unknown Command Logging ---
@@ -331,7 +331,7 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
     });
 
     test('retains interaction if tool DOES send text (e.g. /timestamp)', async () => {
