@@ -52,8 +52,7 @@ module.exports = {
         
         // Provide feedback to the chat orchestrator if we have an interaction context
         if (interaction && interaction.editReply) {
-            const channelStr = channel.toString() || `#${channel.name}` || "unspecified channel";
-            await interaction.editReply({ content: `✅ **Success:** Created native poll in ${channelStr}: "${questionText}"`, flags: [MessageFlags.SuppressEmbeds] });
+            await interaction.editReply({ content: `✅ **Success:** Created native poll in ${channel}: "${questionText}"`, flags: [MessageFlags.SuppressEmbeds] });
         }
     }
 };

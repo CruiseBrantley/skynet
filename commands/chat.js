@@ -67,7 +67,7 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
         deferReply: async () => {},
         editReply: capture,
         followUp: capture,
-        toString: () => interaction.channel?.toString() || "[Unknown Channel]"
+        toString() { return (this.channel || interaction.channel)?.toString() || "[Unknown Channel]"; }
     };
 }
 
