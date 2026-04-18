@@ -229,6 +229,7 @@ function discordBot() {
                     guild: message.guild,
                     guildId: message.guildId,
                     channelId: message.channelId,
+                    channel: message.channel,
                     options: {
                         getString: (name) => {
                             if (name === 'message') {
