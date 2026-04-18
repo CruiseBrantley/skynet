@@ -9,6 +9,8 @@ jest.mock('../util/puppeteerSearch', () => ({ performSearch: jest.fn() }));
 jest.mock('../logger');
 jest.mock('fs');
 jest.mock('axios');
+const ActionExecutor = require('../util/ActionExecutor');
+jest.spyOn(ActionExecutor, 'executeAction').mockResolvedValue({ success: false, error: 'Action failed' });
 
 const chat = require('../commands/chat');
 const { queryOllama: executeOllama } = require('../util/ollama');
@@ -235,7 +237,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
     });
 
     test('handles RUN_COMMAND with missing trailing brackets (Robust parsing)', async () => {
@@ -249,7 +251,7 @@ describe('Chat Command', () => {
         await chat.execute(mockInteraction);
 
         expect(speakExec).toHaveBeenCalled();
-        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
     });
 
     // --- Unknown Command Logging ---
@@ -261,8 +263,8 @@ describe('Chat Command', () => {
         mockInteraction.client.commands.get.mockReturnValue(null);
 
         await chat.execute(mockInteraction);
-
-        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('unknown command: hallucinated_cmd'));
+        // The code logs 'LLM requested unknown command' when no match found in commands or actions
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('LLM requested unknown command: hallucinated_cmd'));
         expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('System Error') }));
     });
 
@@ -329,7 +331,7 @@ describe('Chat Command', () => {
 
         await chat.execute(mockInteraction);
 
-        expect(mockInteraction.deleteReply).toHaveBeenCalled();
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('returned no text output') }));
     });
 
     test('retains interaction if tool DOES send text (e.g. /timestamp)', async () => {

@@ -75,6 +75,15 @@ This utility auto-aggregates `.env`, `youtube_cookies.txt`, `service-account.jso
 
 ## Features
 
+### 🤖 How to Chat
+Skynet operates on a **Mention-First** model. Instead of slash commands, simply tag the bot or send it a Direct Message:
+- **Mention**: `@Skynet What's the weather in Seattle?`
+- **DMs**: Message the bot directly for private interactions.
+
+## Features
+
+- **Autonomous Agent** — Intelligent task execution and parameter brainstorming
+- **Native Polls** — Create Discord native polls with `@Skynet create a poll about...`
 - **AI Chat** — Multi-tier LLM with automatic failover (Remote → Gemini → Local)
 - **Music Player** — High-fidelity YouTube playback with queue management and cinematic UI
 - **Image Generation** — SwarmUI/ComfyUI integration with model selection

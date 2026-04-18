@@ -12,6 +12,7 @@ const { fetchPageText } = require('../util/summarize');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 const agentMemory = require('../util/AgentMemory');
+const executor = require('../util/ActionExecutor');
 
 // Load system prompt from config file, falling back to a generic default
 let SYSTEM_PROMPT;
@@ -59,12 +60,14 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
             getString: () => null, getChannel: () => null, getAttachment: () => null,
             getBoolean: () => false, getInteger: () => null,
             getMember: () => null, getUser: () => null,
+            getSubcommand: () => null, getSubcommandGroup: () => null,
             ...optionsOverrides
         },
         reply: capture,
         deferReply: async () => {},
         editReply: capture,
-        followUp: capture
+        followUp: capture,
+        toString: () => interaction.channel?.toString() || "[Unknown Channel]"
     };
 }
 
@@ -154,7 +157,7 @@ module.exports = {
         option.setName('image')
           .setDescription('Optional image to analyze (Vision models only)')
           .setRequired(false)),
-  async execute(interaction) {
+  async execute(interaction, database) {
     logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
     await interaction.deferReply();
     try {
@@ -205,14 +208,20 @@ module.exports = {
       }
 
       // Inject dynamic system context
-      const commandsContext = `Available Commands:\n` + (interaction.client.commands ? interaction.client.commands.map(c => {
+      const commandsContext = `Available Commands & Actions:\n` + (interaction.client.commands ? interaction.client.commands.map(c => {
           let paramStr = '';
           if (c.data && c.data.options && c.data.options.length > 0) {
-              const params = c.data.options.map(o => `"${o.name}": [${o.description}]`).join(', ');
+              const params = c.data.options.map(o => {
+                  if (o.type === 1 || o.type === 2) {
+                      // Subcommand or Subcommand Group
+                      return `subcommand: "${o.name}" [${o.description}]`;
+                  }
+                  return `"${o.name}": [${o.description}]`;
+              }).join(', ');
               paramStr = ` (JSON Params: {${params}})`;
           }
           return `- ${c.data.name}: ${c.data.description}${paramStr}`;
-      }).join('\n') : 'Unknown');
+      }).join('\n') : 'Unknown') + '\n' + executor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n');
       let logsContext = "No recent logs available.";
       try {
           const logPath = path.join(__dirname, '../logs/combined.log');
@@ -296,9 +305,13 @@ module.exports = {
                         channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
                     }
 
-                    const memFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
-                    replyContent = (replyContent + ' ' + (memFollowup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(memFollowup.message);
+                    // Only make a second LLM call if the first response had no natural text
+                    // outside of the tool tag. If it did, that text IS the reply — don't double up.
+                    if (!replyContent) {
+                        const memFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+                        replyContent = (memFollowup.message.content || '').trim();
+                        channelHistories[channelId].messages.push(memFollowup.message);
+                    }
                     continue; // back to the top of tool loop
                 }
 
@@ -372,7 +385,7 @@ module.exports = {
 
                 if (cmdData.command === 'search' || cmdData.command === 'web_search') {
 
-                    const query = cmdData.query || cmdData.params?.query || cmdData.arg1 || cmdData.message;
+                    const query = cmdData.query || cmdData.params?.query || cmdData.param || cmdData.description || cmdData.arg1 || cmdData.message || "";
                     if (!sharedState.primaryResponseUsed) {
                         await interaction.editReply({ content: `*${botName} is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                     }
@@ -488,32 +501,74 @@ module.exports = {
                 }
 
                 const targetCmd = interaction.client.commands.get(rawCmdName);
-                    if (targetCmd) {
+                if (targetCmd || executor.listActions().some(a => a.name === rawCmdName)) {
                         if (!sharedState.primaryResponseUsed) {
                             await interaction.editReply({ content: `*${botName} is autonomously executing \`/${cmdData.command}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                         }
                         let cmdOutput = "";
+                        const { getParam } = require('../util/commandHelper');
                         const mock = createMockInteraction(interaction, {
                             getString: (n) => {
-                                if (cmdData[n] !== undefined) return cmdData[n];
-                                return cmdData.url || cmdData.query || cmdData.arg1 || cmdData.message || null;
+                                const val = getParam(cmdData, n);
+                                return val !== null ? String(val) : null;
                             },
-                            getChannel: (n) => interaction.client.channels.cache.get(cmdData[n]) || null,
-                            getBoolean: (n) => cmdData[n] === undefined ? false : cmdData[n],
-                            getInteger: (n) => cmdData[n] || null,
+                            getSubcommand: () => getParam(cmdData, 'subcommand'),
+                            getSubcommandGroup: () => getParam(cmdData, 'subcommand_group'),
+                            getChannel: (n) => {
+                                const id = (getParam(cmdData, n) || "").toString().replace(/[<#>]/g, '');
+                                return interaction.client.channels.cache.get(id) || interaction.guild.channels.cache.get(id) || null;
+                            },
+                            getBoolean: (n) => {
+                                const val = getParam(cmdData, n);
+                                if (typeof val === 'boolean') return val;
+                                if (val === 'true' || val === '1' || val === 1) return true;
+                                return false;
+                            },
+                            getInteger: (n) => {
+                                const val = getParam(cmdData, n);
+                                return val !== null ? parseInt(val) : null;
+                            },
                             getMember: (n) => {
-                                const id = (cmdData[n] || "").toString().replace(/[<@!>]/g, '');
+                                const id = (getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '');
                                 return interaction.guild.members.cache.get(id) || null;
                             },
                             getUser: (n) => {
-                                const id = (cmdData[n] || "").toString().replace(/[<@!>]/g, '');
+                                const id = (getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '');
                                 return interaction.client.users.cache.get(id) || null;
                             }
                         }, (str) => {
                             cmdOutput += str + " ";
                         }, sharedState);
-                        
-                        await targetCmd.execute(mock);
+
+                        // Try standard command first, then dynamic actions
+                        if (targetCmd) {
+                            await targetCmd.execute(mock, database);
+                        } else {
+                            // Map LLM command name to ActionExecutor name
+                            // Unpack params for the action as well, so it gets a clean object regardless of LLM nesting
+                            const actionParams = {};
+                            const actionDef = executor.listActions().find(a => a.name === rawCmdName);
+                            if (actionDef && actionDef.schema) {
+                                for (const key in actionDef.schema) {
+                                    const val = getParam(cmdData, key);
+                                    if (val !== null) actionParams[key] = val;
+                                }
+                            } else {
+                                // Fallback: just use standard unwrapping for common keys
+                                ['question', 'options', 'choices', 'content', 'message', 'text', 'channel', 'channelId'].forEach(k => {
+                                    const v = getParam(cmdData, k);
+                                    if (v !== null) actionParams[k] = v;
+                                });
+                            }
+
+                            const actionResult = await executor.executeAction(rawCmdName, actionParams, mock);
+                            if (actionResult.success) {
+                                commandExecuted = true;
+                            } else {
+                                throw new Error(actionResult.error || "Action failed");
+                            }
+                        }
+
                         commandExecuted = true;
                         
                         if (cmdData.command === 'speak') {
@@ -539,7 +594,11 @@ module.exports = {
         if (replyContent.length === 0) {
             // Only delete if the primary slot hasn't been occupied by real content from a tool
             if (!sharedState.primaryResponseUsed) {
-                await interaction.deleteReply().catch(() => {});
+                if (commandExecuted) {
+                    await interaction.editReply({ content: `*${botName} successfully executed the command, but it returned no text output.*`, flags: [MessageFlags.SuppressEmbeds] });
+                } else {
+                    await interaction.deleteReply().catch(() => {});
+                }
             }
         } else {
             const chunks = splitMessage(replyContent);

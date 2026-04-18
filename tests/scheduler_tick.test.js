@@ -5,6 +5,9 @@ const path = require('path');
 
 jest.mock('../logger');
 
+const ActionExecutor = require('../util/ActionExecutor');
+const mockActionExecute = jest.spyOn(ActionExecutor, 'execute').mockResolvedValue(true);
+
 describe('AgentScheduler.processDueTasks', () => {
     let bot;
     let mockUser;
@@ -45,9 +48,7 @@ describe('AgentScheduler.processDueTasks', () => {
         });
 
         await AgentScheduler.processDueTasks(bot);
-
-        expect(bot.users.fetch).toHaveBeenCalledWith('user-123');
-        expect(mockUser.send).toHaveBeenCalledWith('Hello DM');
+        expect(mockActionExecute).toHaveBeenCalledWith(bot, expect.objectContaining({ description: 'Hello DM' }));
         expect(AgentScheduler.getAll()).not.toContainEqual(expect.objectContaining({ id: task.id }));
     });
 
@@ -59,9 +60,7 @@ describe('AgentScheduler.processDueTasks', () => {
         });
 
         await AgentScheduler.processDueTasks(bot);
-
-        expect(bot.channels.cache.get).toHaveBeenCalledWith('chan-456');
-        expect(mockChannel.send).toHaveBeenCalledWith('Hello Channel');
+        expect(mockActionExecute).toHaveBeenCalledWith(bot, expect.objectContaining({ description: 'Hello Channel' }));
         expect(AgentScheduler.getAll()).not.toContainEqual(expect.objectContaining({ id: task.id }));
     });
 
@@ -76,8 +75,7 @@ describe('AgentScheduler.processDueTasks', () => {
         });
 
         await AgentScheduler.processDueTasks(bot);
-
-        expect(mockUser.send).toHaveBeenCalled();
+        expect(mockActionExecute).toHaveBeenCalled();
         const rescheduled = AgentScheduler.getAll().find(t => t.id === task.id);
         expect(rescheduled).toBeDefined();
         expect(rescheduled.scheduledAt).toBe(initialTime + 86_400_000);
@@ -93,11 +91,9 @@ describe('AgentScheduler.processDueTasks', () => {
             channelId: 'dm'
         });
 
+        mockActionExecute.mockResolvedValueOnce(false);
         await AgentScheduler.processDueTasks(bot);
-
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Could not deliver task'));
-        // One-shot tasks should still be cleared even if delivery fails to avoid infinite spamming 
-        // if the user deleted their account or blocked the bot.
-        expect(AgentScheduler.getAll()).not.toContainEqual(expect.objectContaining({ id: task.id }));
+        // One-shot tasks should remain if delivery failed (for retry)
+        expect(AgentScheduler.getAll()).toContainEqual(expect.objectContaining({ id: task.id }));
     });
 });

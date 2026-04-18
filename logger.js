@@ -1,17 +1,29 @@
 const winston = require('winston')
 
+const isTest = process.env.NODE_ENV === 'test';
+const level = process.env.LOG_LEVEL || (isTest ? 'error' : 'info');
+
 // Configure logger settings
 const logger = winston.createLogger({
-  level: 'info',
+  level,
   format: winston.format.json(),
   colorize: true,
-  // defaultMeta: { service: 'user-service' },
-  transports: [new winston.transports.File({ filename: './logs/combined.log' })]
-})
-// debug logging under here, remove for prod
+  transports: [
+    new winston.transports.File({ 
+      filename: './logs/combined.log', 
+      silent: isTest,
+      maxsize: 10 * 1024 * 1024, // 10MB per file
+      maxFiles: 5,               // Keep 5 rotated files
+      tailable: true
+    })
+  ]
+});
+
+// Add console transport with appropriate level
 logger.add(
   new winston.transports.Console({
-    format: winston.format.simple()
+    format: winston.format.simple(),
+    silent: isTest && !process.env.LOG_LEVEL // Silent in tests unless level is forced
   })
-)
+);
 module.exports = logger

@@ -144,45 +144,36 @@ class AgentScheduler {
 
     /**
      * Process all due tasks and deliver them via the Discord bot.
+     * Uses ActionExecutor to dynamically classify each task's intent and
+     * route it to the appropriate Discord action (message, poll, embed, thread, etc.).
      * @param {import('discord.js').Client} bot 
      */
     async processDueTasks(bot) {
+        const actionExecutor = require('./ActionExecutor');
         const dueTasks = this.getDue();
+
         for (const task of dueTasks) {
             try {
-                let delivered = false;
-                if (task.channelId === 'dm' && task.userId) {
-                    const user = await bot.users.fetch(task.userId).catch(() => null);
-                    if (user) {
-                        await user.send(task.description);
-                        logger.info(`AgentScheduler: DM sent to ${task.userId}: "${task.description.substring(0, 60)}"`);
-                        delivered = true;
-                    }
-                } else if (task.channelId && task.channelId !== 'dm') {
-                    const channel = bot.channels.cache.get(task.channelId);
-                    if (channel) {
-                        await channel.send(task.description);
-                        logger.info(`AgentScheduler: Message sent to channel ${task.channelId}.`);
-                        delivered = true;
-                    }
-                }
-                
+                const delivered = await actionExecutor.execute(bot, task);
+
                 if (!delivered) {
-                    logger.warn(`AgentScheduler: Could not deliver task ${task.id} — user/channel not found.`);
+                    logger.warn(`AgentScheduler: Task ${task.id} could not be delivered — will retry next tick.`);
+                    continue; // Leave in queue for retry
                 }
 
-                // Advance repeating tasks; clean up one-shots
+                // Advance repeating tasks; remove one-shots
                 if (task.repeat) {
                     this.reschedule(task.id);
                 } else {
                     this.complete(task.id);
                 }
             } catch (err) {
-                logger.error(`AgentScheduler: Failed to execute task ${task.id}: ${err.message}`);
-                // Leave task in queue — it will retry on next tick
+                logger.error(`AgentScheduler: Unexpected error processing task ${task.id}: ${err.message}`);
+                // Leave in queue — retry on the next tick
             }
         }
     }
+
 
     size() {
         return this._tasks.length;

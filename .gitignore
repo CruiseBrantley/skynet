@@ -87,3 +87,4 @@ config/announcements.json
 
 # Agent persistent data (local disk only, not Firebase)
 data/
+data/agent_actions/*.js

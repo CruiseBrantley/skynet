@@ -49,7 +49,7 @@ function discordBot() {
 
     bot.commands = new Collection();
     const commandsPath = path.join(__dirname, 'commands');
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js') && file !== 'chat.js');
 
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
@@ -193,7 +193,8 @@ function discordBot() {
 
         if (isMentioned || isDM) {
             logger.info(`Bot triggered by ${message.author.tag} in ${isDM ? 'DM' : message.channelId}: "${message.content}"`);
-            const chatCommand = bot.commands.get('chat');
+            // Directly load the chat orchestrator (now excluded from public slash commands)
+            const chatCommand = require('./commands/chat.js');
             if (chatCommand) {
                 // Mock an interaction object to reuse the slash command logic
                 let typingInterval;

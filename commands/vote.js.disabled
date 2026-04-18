@@ -206,6 +206,20 @@ module.exports = {
         }
         ref.set([]);
         await interaction.reply('Cleared all vote options.');
+      } else {
+        // Fallback or missing subcommand: list the results
+        const data = await ref.once('value');
+        const options = data.val() || [];
+        if (options.length === 0) {
+          await interaction.reply('There are currently no options to vote for.');
+          return;
+        }
+        let listStr = '**Voting Results:**\n';
+        options.forEach(opt => {
+          const count = (opt.hasVoted && opt.hasVoted.length) || 0;
+          listStr += `- ${opt.title}: ${count} vote${count === 1 ? '' : 's'}\n`;
+        });
+        await interaction.reply(listStr);
       }
     } catch (err) {
       logger.error(`There was a vote error (${subcommand}): `, err);

@@ -105,6 +105,11 @@ class AgentLoop {
               ).join('\n')
             : '  None';
 
+        const actionExecutor = require('./ActionExecutor');
+        const actionList = actionExecutor.listActions()
+            .map(a => `  - ${a.name}: ${a.description}`)
+            .join('\n') || '  None';
+
         const systemPrompt = `You are Skynet's autonomous background daemon agent.
 Current time: ${now}
 
@@ -119,16 +124,35 @@ ${taskList}
 [RECENT AGENT ACTIONS]
 ${recentActions}
 
+[AVAILABLE DISCORD ACTIONS]
+These are the actions the scheduler can execute when tasks fire. You can create new ones.
+${actionList}
+
 Rules:
 - If nothing requires action right now, respond with exactly: NOOP
 - Only act if you have a clear, specific reason derived from the above data.
-- Available commands (local execution only): remember, forget, recall, schedule, cancel_task
+- Available commands: remember, forget, recall, schedule, cancel_task, create_action, delete_action
 - Format: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - DO NOT attempt to search the web, play music, generate images, or send arbitrary messages.
 - DO NOT schedule tasks speculatively — only if there is explicit context to do so.
-- After your tool call, briefly explain WHY (one sentence). Example:
-  <<<RUN_COMMAND: {"command": "remember", "key": "server.last_health_check", "value": "2026-04-18", "ttl_days": 7}>>>
-  Reason: Recording health check timestamp for diagnostics.`;
+
+create_action schema:
+<<<RUN_COMMAND: {"command": "create_action", "name": "snake_case_name", "description": "What it does", "schema": {"param": "type — description"}, "code": "// discord.js code here\\nawait channel.send(params.content);"}>>>
+- Only discord.js APIs allowed. No require('fs'), require('child_process'), process.env, or eval.
+- Built-in actions (send_message, send_poll, send_embed, send_thread) cannot be overwritten.
+
+delete_action schema:
+<<<RUN_COMMAND: {"command": "delete_action", "name": "action_name"}>>>
+- Only custom (AI-generated) actions can be deleted.
+
+modify_action schema (all fields optional except name):
+<<<RUN_COMMAND: {"command": "modify_action", "name": "existing_name", "description": "updated description", "code": "// new code"}>>>
+- Only custom actions can be modified. Omit any field you don't want to change.
+
+After your tool call, briefly explain WHY (one sentence). Example:
+<<<RUN_COMMAND: {"command": "remember", "key": "server.last_health_check", "value": "2026-04-18", "ttl_days": 7}>>>
+Reason: Recording health check timestamp for diagnostics.`;
+
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -184,12 +208,13 @@ Rules:
      * Returns a short description string for the action log, or null if unsupported/failed.
      */
     async _executeCommand(cmdData) {
+        const { getParam } = require('./commandHelper');
         const cmd = (cmdData.command || '').trim();
 
         if (cmd === 'remember') {
-            const key = cmdData.key;
-            const value = cmdData.value;
-            const ttl = parseInt(cmdData.ttl_days ?? 30);
+            const key = getParam(cmdData, 'key');
+            const value = getParam(cmdData, 'value');
+            const ttl = parseInt(getParam(cmdData, 'ttl_days') ?? 30);
             if (!key || value === undefined) return null;
             agentMemory.set(key, String(value), ttl, null); // null guildId = global
             logger.info(`AgentLoop: [remember] ${key} = ${String(value).substring(0, 60)}`);
@@ -197,7 +222,7 @@ Rules:
         }
 
         if (cmd === 'forget') {
-            const key = cmdData.key;
+            const key = getParam(cmdData, 'key');
             if (!key) return null;
             agentMemory.delete(key);
             logger.info(`AgentLoop: [forget] ${key}`);
@@ -205,7 +230,7 @@ Rules:
         }
 
         if (cmd === 'recall') {
-            const key = cmdData.key;
+            const key = getParam(cmdData, 'key');
             if (!key) return null;
             const val = agentMemory.get(key, null);
             logger.info(`AgentLoop: [recall] ${key} = ${val}`);
@@ -215,8 +240,8 @@ Rules:
 
         if (cmd === 'schedule') {
             const { resolveTime } = require('./AgentClock');
-            const message = cmdData.message || cmdData.description;
-            const when = cmdData.when;
+            const message = getParam(cmdData, 'message');
+            const when = getParam(cmdData, 'when');
             if (!message || !when) return null;
             const scheduledAt = await resolveTime(when);
             if (!scheduledAt) {
@@ -226,10 +251,10 @@ Rules:
             const task = agentScheduler.add({
                 description: message,
                 scheduledAt,
-                userId: cmdData.userId || null,
-                guildId: cmdData.guildId || null,
-                channelId: cmdData.channelId || cmdData.target || 'dm',
-                repeat: ['hourly', 'daily', 'weekly'].includes(cmdData.repeat) ? cmdData.repeat : null,
+                userId: getParam(cmdData, 'userId') || null,
+                guildId: getParam(cmdData, 'guildId') || null,
+                channelId: getParam(cmdData, 'channelId') || 'dm',
+                repeat: ['hourly', 'daily', 'weekly'].includes(getParam(cmdData, 'repeat')) ? getParam(cmdData, 'repeat') : null,
                 createdBy: 'agent_loop'
             });
             logger.info(`AgentLoop: [schedule] Task ${task.id} → ${new Date(scheduledAt).toLocaleString()}`);
@@ -237,16 +262,81 @@ Rules:
         }
 
         if (cmd === 'cancel_task') {
-            const id = cmdData.id || cmdData.task_id;
+            const id = getParam(cmdData, 'id');
             if (!id) return null;
             const cancelled = agentScheduler.cancel(id);
             logger.info(`AgentLoop: [cancel_task] ${id} — ${cancelled ? 'succeeded' : 'not found'}`);
             return cancelled ? `cancel_task: ${id}` : null;
         }
 
+        if (cmd === 'modify_action') {
+            const actionExecutor = require('./ActionExecutor');
+            const name = getParam(cmdData, 'name');
+            if (!name) {
+                logger.warn('AgentLoop: [modify_action] Missing required field: name');
+                return null;
+            }
+            const updates = {};
+            const desc = getParam(cmdData, 'description');
+            const schema = getParam(cmdData, 'schema');
+            const code = getParam(cmdData, 'code');
+            
+            if (desc) updates.description = desc;
+            if (schema) updates.schema = schema;
+            if (code) updates.code = code;
+            
+            if (Object.keys(updates).length === 0) {
+                logger.warn('AgentLoop: [modify_action] No updates provided — nothing to change.');
+                return null;
+            }
+            const result = actionExecutor.modifyAction(name, updates);
+            if (result.success) {
+                logger.info(`AgentLoop: [modify_action] Updated action "${name}"`);
+                return `modify_action: "${name}" updated (fields: ${Object.keys(updates).join(', ')})`;
+            } else {
+                logger.warn(`AgentLoop: [modify_action] Failed: ${result.error}`);
+                return null;
+            }
+        }
+
+        if (cmd === 'create_action') {
+            const actionExecutor = require('./ActionExecutor');
+            const name = getParam(cmdData, 'name');
+            const description = getParam(cmdData, 'description');
+            const schema = getParam(cmdData, 'schema') || {};
+            const code = getParam(cmdData, 'code');
+            if (!name || !description || !code) {
+                logger.warn('AgentLoop: [create_action] Missing required fields: name, description, code');
+                return null;
+            }
+            const result = actionExecutor.registerAction(name, description, schema, code);
+            if (result.success) {
+                logger.info(`AgentLoop: [create_action] Registered new action "${name}"`);
+                return `create_action: "${name}" registered successfully`;
+            } else {
+                logger.warn(`AgentLoop: [create_action] Failed to register "${name}": ${result.error}`);
+                return null;
+            }
+        }
+
+        if (cmd === 'delete_action') {
+            const actionExecutor = require('./ActionExecutor');
+            const name = getParam(cmdData, 'name');
+            if (!name) return null;
+            const result = actionExecutor.deleteAction(name);
+            if (result.success) {
+                logger.info(`AgentLoop: [delete_action] Removed action "${name}"`);
+                return `delete_action: "${name}" removed`;
+            } else {
+                logger.warn(`AgentLoop: [delete_action] Failed: ${result.error}`);
+                return null;
+            }
+        }
+
         logger.warn(`AgentLoop: Command "${cmd}" is not supported in background context — ignoring.`);
         return null;
     }
+
 
     /** Expose diagnostics for testing / admin inspection. */
     get status() {
