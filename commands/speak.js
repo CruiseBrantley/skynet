@@ -130,6 +130,7 @@ module.exports = {
 
 
         await interaction.deferReply();
+        await interaction.deleteReply().catch(() => {});
         
         const tempDir = path.join(__dirname, '../temp_audio');
         if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);

@@ -426,7 +426,12 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
                 const { MessageFlags } = require('discord.js');
                 const isDifferentChannel = channel.id !== context.channelId && channel !== context;
                 
-                if (isDifferentChannel) {
+                const silentActions = ['add_reaction', 'remove_reaction'];
+                const isSilent = silentActions.includes(action.name);
+
+                logger.info(`ActionExecutor: Completed "${action.name}". isDifferentChannel=${isDifferentChannel}, isSilent=${isSilent}`);
+
+                if (isDifferentChannel && !isSilent) {
                     const actionDisplayName = action.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     const channelContext = ` in ${channel.name ? `#${channel.name}` : channel.toString()}`;
                     await context.editReply({ 
@@ -434,7 +439,8 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
                         flags: [MessageFlags.SuppressEmbeds] 
                     }).catch(() => {});
                 } else {
-                    // Same channel — silent cleanup of the "thinking" message
+                    // Same channel OR silent action — clean up the "thinking" message
+                    logger.info(`ActionExecutor: Silently cleaning up feedback for "${action.name}"`);
                     await context.deleteReply().catch(() => {});
                 }
             }

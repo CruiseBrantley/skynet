@@ -18,11 +18,11 @@ const executor = require('../util/ActionExecutor');
 let SYSTEM_PROMPT;
 try {
     SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, '../config/system_prompt.txt'), 'utf8').trim();
-} catch (err) {
-    SYSTEM_PROMPT = `You are ${botName}, a helpful AI assistant in a Discord server. Format code blocks with Discord markdown syntax. Keep responses concise and direct.`;
+} catch (e) {
+    SYSTEM_PROMPT = "You are Skynet.";
 }
 
-const channelHistories = {}; // { [channelId]: { time: Date.now(), messages: [] } }
+const channelHistories = {};
 const MAX_CHANNEL_HISTORIES = 50;
 
 // Helper to build a mock interaction for autonomous command execution
@@ -244,7 +244,34 @@ module.exports = {
       }
 
       let currentIsBackup = false;
-      const responseData = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
+
+      // ---------------------------------------------
+      // 🧊 Context Enrichment: Real-time Channel State
+      // Fetch recent messages to see IDs and Reactions so actions like add_reaction or send_thread can target them
+      let channelContext = "Recent Channel Context:\n(No recent history available)";
+      try {
+          const recentMessages = await interaction.channel.messages.fetch({ limit: 20 });
+          channelContext = `Recent Channel Context:\n` + recentMessages.map(m => {
+              const reactions = m.reactions.cache.map(r => `${r.emoji.name} (x${r.count})`).join(', ');
+              return `ID: ${m.id} | Author: ${m.author.username} | Text: "${m.content.substring(0, 100)}${m.content.length > 100 ? '...' : ''}" ${reactions ? `| Reactions: [${reactions}]` : ''}`;
+          }).reverse().join('\n');
+          logger.info(`Context Enrichment: Fetched ${recentMessages.size} messages for context.`);
+      } catch (e) {
+          logger.warn(`Context Enrichment: Failed to fetch channel context: ${e.message}`);
+      }
+
+      // We append this as a TEMPORARY system message for this specific prompt, but ensure it goes BEFORE the user's latest message
+      const historyWithoutLast = channelHistories[channelId].messages.slice(0, -1);
+      const lastUserMessage = channelHistories[channelId].messages[channelHistories[channelId].messages.length - 1];
+
+      const finalPromptMessages = [
+          ...historyWithoutLast,
+          { role: 'system', content: channelContext },
+          lastUserMessage
+      ];
+
+      logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${executor.listActions().length} available.`);
+      const responseData = await queryOllama(finalPromptMessages, currentIsBackup, commandsContext, logsContext, interaction.guildId);
 
       if (responseData && responseData.message) {
         channelHistories[channelId].messages.push(responseData.message); // store assistant reply

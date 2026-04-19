@@ -58,6 +58,7 @@ describe('speak command', () => {
             guildId: 'guild-123',
             deferReply: jest.fn().mockResolvedValue(),
             editReply: jest.fn().mockResolvedValue(),
+            deleteReply: jest.fn().mockResolvedValue(),
             reply: jest.fn().mockResolvedValue(),
             guild: {
                 id: 'guild-123',
@@ -88,6 +89,7 @@ describe('speak command', () => {
         await new Promise(r => setTimeout(r, 10));
 
         expect(mockInteraction.deferReply).toHaveBeenCalled();
+        expect(mockInteraction.deleteReply).toHaveBeenCalled();
         const { exec } = require('child_process');
         expect(exec).toHaveBeenCalled(); // Piper execution and ffmpeg filtering
 

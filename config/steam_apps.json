@@ -6,5 +6,13 @@
         "installDir": "C:\\steamcmd\\steamapps\\common\\Icarus Dedicated Server",
         "processName": "IcarusServer-Win64-Shipping.exe",
         "executable": "IcarusServer.exe -log"
+    },
+    {
+        "name": "Project Zomboid",
+        "key": "zomboid",
+        "appId": "380870",
+        "installDir": "C:\\steamcmd\\steamapps\\common\\Project Zomboid Dedicated Server",
+        "processName": "ProjectZomboid64.exe",
+        "executable": "StartServer64.bat"
     }
 ]

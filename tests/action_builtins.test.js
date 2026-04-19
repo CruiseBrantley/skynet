@@ -268,4 +268,82 @@ describe('Built-in Actions', () => {
                 .rejects.toThrow(/does not support threads/);
         });
     });
+
+    // ─── add_reaction ─────────────────────────────────────────────────────────
+
+    describe('add_reaction', () => {
+        const action = require('../util/actions/add_reaction');
+        
+        test('adds emoji to specified message', async () => {
+            const mockMessage = { react: jest.fn().mockResolvedValue() };
+            const mChannel = { messages: { fetch: jest.fn().mockResolvedValue(mockMessage) } };
+            await action.execute(null, mChannel, { messageId: '123', emoji: '👍' });
+            expect(mChannel.messages.fetch).toHaveBeenCalledWith('123');
+            expect(mockMessage.react).toHaveBeenCalledWith('👍');
+        });
+    });
+
+    // ─── remove_reaction ──────────────────────────────────────────────────────
+
+    describe('remove_reaction', () => {
+        const action = require('../util/actions/remove_reaction');
+        
+        test('removes bot reaction from specified message', async () => {
+            const mockUsersRemove = jest.fn().mockResolvedValue();
+            const mockReaction = { 
+                emoji: { name: '👍' }, 
+                users: { remove: mockUsersRemove } 
+            };
+            const mockMessage = { 
+                reactions: { cache: [mockReaction] } // Array supports .find()
+            };
+            const mChannel = { messages: { fetch: jest.fn().mockResolvedValue(mockMessage) } };
+            const mockBot = { user: { id: 'bot123' } };
+            
+            await action.execute(mockBot, mChannel, { messageId: '123', emoji: '👍' });
+            expect(mockUsersRemove).toHaveBeenCalledWith('bot123');
+        });
+    });
+
+    // ─── summarize_history ────────────────────────────────────────────────────
+
+    describe('summarize_history', () => {
+        let action;
+        let mockOllama;
+        
+        beforeEach(() => {
+            jest.resetModules();
+            jest.mock('discord.js', () => ({
+                EmbedBuilder: jest.fn().mockImplementation(function() {
+                    this.setTitle = jest.fn().mockReturnThis();
+                    this.setDescription = jest.fn().mockReturnThis();
+                    this.setColor = jest.fn().mockReturnThis();
+                    this.setFooter = jest.fn().mockReturnThis();
+                })
+            }));
+            jest.mock('../util/ollama', () => ({
+                queryOllama: jest.fn().mockResolvedValue({ message: { content: 'Summary text' } })
+            }));
+            action = require('../util/actions/summarize_history');
+            mockOllama = require('../util/ollama').queryOllama;
+        });
+
+        test('fetches messages, calls ollama, and replies with embed', async () => {
+            const mockMessages = [
+                { author: { username: 'Alice' }, content: 'Hi' },
+                { author: { username: 'Bob' }, content: 'Hello' }
+            ];
+            // Mock the collection's reverse method
+            mockMessages.reverse = () => mockMessages;
+            
+            const mChannel = { id: 'ch1', messages: { fetch: jest.fn().mockResolvedValue(mockMessages) } };
+            const mContext = { editReply: jest.fn().mockResolvedValue() };
+            
+            await action.execute(null, mChannel, { count: 5 }, mContext);
+            
+            expect(mChannel.messages.fetch).toHaveBeenCalledWith({ limit: 5 });
+            expect(mockOllama).toHaveBeenCalled();
+            expect(mContext.editReply).toHaveBeenCalled();
+        });
+    });
 });

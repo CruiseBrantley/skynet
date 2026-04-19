@@ -256,16 +256,17 @@ function discordBot() {
                     },
                     reply: replyFunc,
                     editReply: editFunc,
-                    followUp: replyFunc,
-                    channel: { send: replyFunc }
+                    followUp: replyFunc
                 };
 
                 try {
                     // Skynet is thinking
                     message.channel.sendTyping();
+                    logger.info(`Mention: Calling chatCommand.execute with mockInteraction...`);
                     await chatCommand.execute(mockInteraction, database);
+                    logger.info(`Mention: chatCommand.execute completed.`);
                 } catch (err) {
-                    console.error('Mention error:', err);
+                    logger.error(`Mention error: ${err.stack || err.message}`);
                     message.channel.send(`There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} AI Core.`);
                 }
             }
