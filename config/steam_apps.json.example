@@ -1,0 +1,20 @@
+[
+    {
+        "name": "Icarus",
+        "key": "icarus",
+        "appId": "2089300",
+        "installDir": "C:\\path\\to\\Icarus",
+        "processName": "IcarusServer-Win64-Shipping.exe",
+        "executable": "IcarusServer.exe -log",
+        "guildId": "YOUR_GUILD_ID"
+    },
+    {
+        "name": "Project Zomboid",
+        "key": "zomboid",
+        "appId": "380870",
+        "installDir": "C:\\path\\to\\Zomboid",
+        "processName": "java.exe",
+        "executable": "StartServer64.bat -servername yourserver",
+        "guildId": "YOUR_GUILD_ID"
+    }
+]

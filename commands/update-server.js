@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -82,7 +82,9 @@ module.exports = {
     data: (() => {
         const builder = new SlashCommandBuilder()
             .setName('update-server')
-            .setDescription('Update and restart a dedicated game server');
+            .setDescription('Update and restart a dedicated game server')
+            .setDMPermission(false)
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
         
         steamApps.forEach(app => {
             builder.addSubcommand(sub => 
@@ -102,6 +104,16 @@ module.exports = {
 
         if (!app) {
             return interaction.editReply(`❌ Error: Application definition for \`${appKey}\` not found.`);
+        }
+
+        // Guild restriction
+        if (app.guildId && interaction.guildId !== app.guildId) {
+            return interaction.editReply(`❌ Error: This server is not authorized to manage the **${app.name}** game server.`);
+        }
+
+        // Admin check (redundant but safe)
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.editReply(`❌ Error: Only administrators can manage game servers.`);
         }
 
         try {
