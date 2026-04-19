@@ -1,7 +1,7 @@
 const { queryOllama } = require('../util/ollama');
 const axios = require('axios');
 const net = require('net');
-const updateServer = require('../commands/update-server');
+
 const generate = require('../commands/generate');
 
 jest.mock('axios');
@@ -104,6 +104,7 @@ describe('Config Error Handling & Branching', () => {
                 deferReply: jest.fn(),
                 editReply: jest.fn(),
                 reply: jest.fn(),
+                deleteReply: jest.fn().mockResolvedValue(),
                 options: {
                     getString: jest.fn().mockReturnValue('hello'),
                     getChannel: jest.fn().mockReturnValue({ id: 'chan123', guild: { id: 'guild123', voiceAdapterCreator: {} } }),

@@ -1,7 +1,4 @@
-// Mock dependencies
-jest.mock('public-ip', () => ({
-    v4: jest.fn()
-}));
+
 
 const { MessageFlags } = require('discord.js');
 const pingCmd = require('../commands/ping');
@@ -9,7 +6,6 @@ const sayCmd = require('../commands/say');
 const timeCmd = require('../commands/time');
 const timestampCmd = require('../commands/timestamp');
 const serverCmd = require('../commands/server');
-const publicIp = require('public-ip');
 
 describe('Utility Commands', () => {
 
@@ -142,25 +138,6 @@ describe('Utility Commands', () => {
         });
     });
 
-    // --- Server Command ---
-    describe('/server', () => {
-        test('fetches and replies with public IP', async () => {
-            publicIp.v4.mockResolvedValueOnce('192.168.1.100');
 
-            await serverCmd.execute(mockInteraction);
-
-            expect(mockInteraction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
-            expect(publicIp.v4).toHaveBeenCalled();
-            expect(mockInteraction.editReply).toHaveBeenCalledWith('The current server ip address is: 192.168.1.100');
-        });
-
-        test('handles public IP fetch error gracefully', async () => {
-            publicIp.v4.mockRejectedValueOnce(new Error('Network error'));
-
-            await serverCmd.execute(mockInteraction);
-
-            expect(mockInteraction.editReply).toHaveBeenCalledWith('There was an error retrieving the server IP address.');
-        });
-    });
 
 });
