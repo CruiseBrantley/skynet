@@ -41,6 +41,10 @@ function shouldSkipUrl(url) {
 }
 
 async function fetchPageText(url, limit = 6000) {
+    if (typeof url === 'string' && url.startsWith('//')) {
+        url = 'https:' + url;
+    }
+
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
         try {
             const info = await play.video_basic_info(url);

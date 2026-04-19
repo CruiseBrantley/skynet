@@ -30,10 +30,13 @@ async function performSearch(query) {
                 const snippetEl = el.querySelector('.result__snippet');
                 const linkEl = el.querySelector('.result__url');
                 
+                let link = linkEl ? linkEl.getAttribute('href') : '';
+                if (link.startsWith('//')) link = 'https:' + link;
+                
                 return {
                     title: titleEl ? titleEl.innerText.trim() : '',
                     snippet: snippetEl ? snippetEl.innerText.trim() : '',
-                    link: linkEl ? linkEl.getAttribute('href') : ''
+                    link: link
                 };
             }).filter(r => r.title && r.snippet); // ensure it's a valid extraction
         });

@@ -67,6 +67,11 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
         deferReply: async () => {},
         editReply: capture,
         followUp: capture,
+        deleteReply: async () => { 
+            sharedState.primaryResponseUsed = false; 
+            sharedState.primaryContent = ""; 
+            return interaction.deleteReply().catch(() => {});
+        },
         toString() { 
             const ch = (this.channel || interaction.channel);
             if (ch && typeof ch.toString === 'function') {

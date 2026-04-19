@@ -115,7 +115,7 @@ describe('server command enhanced tests', () => {
 
             expect(embed.title).toBe('Icarus Server Status');
             expect(embed.fields.find(f => f.name === 'Players').value).toBe('`5 / 16`');
-            expect(embed.fields.find(f => f.name === 'Memory Usage').value).toBe('`550,120 K`');
+            expect(embed.fields.find(f => f.name === 'Memory').value).toBe('`550,120 K`');
         });
     });
 
@@ -126,9 +126,13 @@ describe('server command enhanced tests', () => {
 
             await serverCommand.execute(interaction);
 
-            expect(interaction.editReply).toHaveBeenCalledWith(
-                expect.stringContaining('currently **3** player(s) online')
+            // Check all calls to see if any contain the expected error message
+            const calls = interaction.editReply.mock.calls;
+            const hasError = calls.some(call => 
+                call[0].embeds && 
+                call[0].embeds[0].data.description.includes('currently **3** player(s) online')
             );
+            expect(hasError).toBe(true);
         });
     });
 });

@@ -49,19 +49,19 @@ describe('Built-in Actions', () => {
         test('maps options to poll_media answer format', async () => {
             const poll = await basicPoll({ question: 'Q?', options: ['Alpha', 'Beta', 'Gamma'] });
             expect(poll.answers).toHaveLength(3);
-            expect(poll.answers[0].text).toBe('Alpha');
-            expect(poll.answers[2].text).toBe('Gamma');
+            expect(poll.answers[0].poll_media.text).toBe('Alpha');
+            expect(poll.answers[2].poll_media.text).toBe('Gamma');
         });
 
         test('accepts choices field as alias for options', async () => {
             const poll = await basicPoll({ question: 'Q?', choices: ['A', 'B'] });
-            expect(poll.answers[0].text).toBe('A');
+            expect(poll.answers[0].poll_media.text).toBe('A');
         });
 
         test('defaults to Yes/No when no options provided', async () => {
             const poll = await basicPoll({ question: 'Here?' });
-            expect(poll.answers[0].text).toBe('Yes');
-            expect(poll.answers[1].text).toBe('No');
+            expect(poll.answers[0].poll_media.text).toBe('Yes');
+            expect(poll.answers[1].poll_media.text).toBe('No');
         });
 
         test('uses duration_hours from params', async () => {
@@ -98,7 +98,7 @@ describe('Built-in Actions', () => {
         test('truncates option text to 55 chars', async () => {
             const longOpt = 'A'.repeat(100);
             const poll = await basicPoll({ question: 'Q?', options: [longOpt, 'B'] });
-            expect(poll.answers[0].text).toHaveLength(55);
+            expect(poll.answers[0].poll_media.text).toHaveLength(55);
         });
     });
 

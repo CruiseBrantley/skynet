@@ -154,6 +154,30 @@ function discordBot() {
     });
 
     bot.on('interactionCreate', async interaction => {
+        if (interaction.isAutocomplete()) {
+            const command = interaction.client.commands.get(interaction.commandName);
+            if (!command || !command.autocomplete) return;
+            try {
+                await command.autocomplete(interaction);
+            } catch (error) {
+                logger.error(`Autocomplete error (${interaction.commandName}):`, error);
+            }
+            return;
+        }
+
+        if (interaction.isButton()) {
+            const commandName = interaction.customId.split('_')[0];
+            const command = interaction.client.commands.get(commandName);
+            if (command && command.handleButton) {
+                try {
+                    await command.handleButton(interaction);
+                } catch (error) {
+                    logger.error(`Button error (${interaction.customId}):`, error);
+                }
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         logger.info(`Interaction received: ${interaction.commandName} from ${interaction.user.tag}`);
