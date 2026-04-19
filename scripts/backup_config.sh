@@ -19,8 +19,6 @@ FILES=(
     "service-account.json"
     "youtube_cookies.txt"
     "metadata_cache.json"
-    "twitterTopic.json"
-    "voteTopic.json"
     "config/"
     "data/"
 )
