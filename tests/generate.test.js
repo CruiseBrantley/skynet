@@ -2,7 +2,6 @@ const generate = require('../commands/generate');
 const axios = require('axios');
 const logger = require('../logger');
 const { queryOllama } = require('../util/ollama');
-const { generateWithComfyDirect } = require('../util/comfy');
 const { MessageFlags, AttachmentBuilder } = require('discord.js');
 
 jest.mock('axios');
@@ -12,9 +11,6 @@ jest.mock('../logger', () => ({
 }));
 jest.mock('../util/ollama', () => ({
     queryOllama: jest.fn(),
-}));
-jest.mock('../util/comfy', () => ({
-    generateWithComfyDirect: jest.fn(),
 }));
 
 describe('imagine command', () => {
@@ -26,7 +22,6 @@ describe('imagine command', () => {
         process.env.IMAGE_MODEL_DEFAULT = 'Turbo';
         process.env.IMAGE_MODEL_FLUX = 'Flux';
         process.env.SWARMUI_REMOTE_URL = 'http://remote:7801';
-        process.env.SWARMUI_LOCAL_URL = 'http://local:7801';
         
         mockInteraction = {
             user: { id: 'user1' },
@@ -119,22 +114,6 @@ describe('imagine command', () => {
         }));
     });
 
-    test('handles fallback to comfy direct when local SwarmUI fails and model is Turbo', async () => {
-        process.env.IMAGE_MODEL_DEFAULT = 'Turbo'; // Set model to Turbo to trigger direct comfy fallback
-        
-        // Remote fails
-        axios.post.mockRejectedValueOnce(new Error('Remote offline'));
-        
-        generateWithComfyDirect.mockResolvedValueOnce(Buffer.from('comfy-data'));
-
-        await generate.execute(mockInteraction);
-
-        expect(generateWithComfyDirect).toHaveBeenCalledWith('A cute cat', expect.any(Object));
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
-            content: expect.stringContaining('✅ Local Fallback Image Generated')
-        }));
-    });
-
     test('handles init image via attachment', async () => {
         mockInteraction.options.getAttachment.mockReturnValue({
             contentType: 'image/png',
@@ -185,14 +164,12 @@ describe('imagine command', () => {
         }));
     });
 
-    test('handles all nodes offline properly', async () => {
+    test('handles remote offline properly', async () => {
         axios.post.mockRejectedValueOnce(new Error('Remote offline')); // remote session
-        process.env.IMAGE_MODEL_DEFAULT = 'Flux'; // non-turbo to prevent comfy direct fallback
-        axios.post.mockRejectedValueOnce(new Error('Local offline')); // local session
         
         await generate.execute(mockInteraction);
 
-        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Image Core offline'));
+        expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('currently offline'));
     });
     
     test('handles API returning empty images', async () => {

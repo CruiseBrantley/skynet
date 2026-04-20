@@ -162,7 +162,13 @@ Reason: Recording health check timestamp for diagnostics.`;
         logger.info(`AgentLoop: Querying Ollama for evaluation (depth: ${loopDepth})...`);
         let result;
         try {
-            result = await queryLocalOrRemote('/api/chat', { messages });
+            result = await queryLocalOrRemote('/api/chat', { 
+                messages,
+                options: {
+                    num_ctx: 8192,
+                    temperature: 0.3
+                }
+            });
         } catch (err) {
             logger.error(`AgentLoop: Ollama query failed: ${err.message}`);
             return;

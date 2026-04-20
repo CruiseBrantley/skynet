@@ -107,7 +107,15 @@ async function queryOllama(messages, isBackup = false, commandsContext = "", log
   });
 
   try {
-      const result = await executeOllama('/api/chat', { messages: processedMessages }, isBackup);
+      const result = await executeOllama('/api/chat', { 
+          messages: processedMessages,
+          options: {
+              num_ctx: 8192,
+              temperature: 0.7,
+              top_k: 40,
+              top_p: 0.9
+          }
+      }, isBackup);
       return result;
   } catch (err) {
       if (!isBackup) {
@@ -214,11 +222,11 @@ module.exports = {
       channelHistories[channelId].messages.push(userMessage);
 
       // Sliding Window Context Capping: 
-      // Reserve index 0 (System Prompt), then only keep the last 10 chat elements (5 back-and-forth pairs).
-      if (channelHistories[channelId].messages.length > 11) {
+      // Reserve index 0 (System Prompt), then only keep the last 20 chat elements (10 back-and-forth pairs).
+      if (channelHistories[channelId].messages.length > 21) {
           channelHistories[channelId].messages = [
               channelHistories[channelId].messages[0], 
-              ...channelHistories[channelId].messages.slice(-10)
+              ...channelHistories[channelId].messages.slice(-20)
           ];
       }
 
@@ -256,7 +264,7 @@ module.exports = {
       // Fetch recent messages to see IDs and Reactions so actions like add_reaction or send_thread can target them
       let channelContext = "Recent Channel Context:\n(No recent history available)";
       try {
-          const recentMessages = await interaction.channel.messages.fetch({ limit: 20 });
+          const recentMessages = await interaction.channel.messages.fetch({ limit: 40 });
           channelContext = `Recent Channel Context:\n` + recentMessages.map(m => {
               const reactions = m.reactions.cache.map(r => `${r.emoji.name} (x${r.count})`).join(', ');
               let authorHandle = `@${m.author.username}${m.member?.nickname ? ` (${m.member.nickname})` : ''}`;

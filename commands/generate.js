@@ -137,69 +137,53 @@ module.exports = {
 
             // 1. Get Session ID
             let baseUrl = process.env.SWARMUI_REMOTE_URL;
+            if (!baseUrl) {
+                throw new Error("Image Core Remote URL is not configured.");
+            }
+
             let sessionRes;
-            let useComfyDirect = false;
-
             try {
-                sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 10000 });
+                sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 5000 });
             } catch (err) {
-                baseUrl = process.env.SWARMUI_LOCAL_URL || 'http://127.0.0.1:7801';
-
-                if (customModel && (customModel.includes('Turbo') || customModel.includes('turbo'))) {
-                    useComfyDirect = true;
-                }
-
-                try {
-                    if (!useComfyDirect) {
-                        sessionRes = await axios.post(`${baseUrl}/API/GetNewSession`, {}, { timeout: 5000 });
-                    }
-                } catch (localErr) {
-                    throw new Error("Image Core offline. Both remote and local endpoints are unreachable.");
-                }
+                logger.error(`Remote Image Core unreachable: ${err.message}`);
+                throw new Error("High Fidelity Image Generation is currently offline (Remote Core unreachable).");
             }
 
             let buffer;
             let successMessagePrefix = '';
 
-            if (useComfyDirect) {
-                logger.info(`Using direct ComfyUI API on Mac Mini for GGUF execution.`);
-                const { generateWithComfyDirect } = require('../util/comfy');
-                buffer = await generateWithComfyDirect(prompt, { width, height, steps, cfg: defaultCfg });
-                successMessagePrefix = '✅ Local Fallback Image Generated\n';
-            } else {
-                const sessionId = sessionRes.data.session_id;
+            const sessionId = sessionRes.data.session_id;
 
-                // 2. Generate Image
-                const generatePayload = {
-                    session_id: sessionId,
-                    prompt: prompt,
-                    model: customModel,
-                    images: 1,
-                    width: width,
-                    height: height,
-                    cfg_scale: defaultCfg,
-                    steps: steps
-                };
+            // 2. Generate Image
+            const generatePayload = {
+                session_id: sessionId,
+                prompt: prompt,
+                model: customModel,
+                images: 1,
+                width: width,
+                height: height,
+                cfg_scale: defaultCfg,
+                steps: steps
+            };
 
-                if (base64InitImage) {
-                    generatePayload.initimage = base64InitImage;
-                    generatePayload.initimage_creativity = creativity;
-                }
-
-                const genRes = await axios.post(`${baseUrl}/API/GenerateText2Image`, generatePayload, { timeout: 600000 });
-
-                if (!genRes.data || !genRes.data.images || genRes.data.images.length === 0) {
-                    const errorDetail = genRes.data && genRes.data.error ? genRes.data.error : "Image Core failed to process the generation matrices.";
-                    throw new Error(errorDetail);
-                }
-
-                const imagePath = genRes.data.images[0];
-                const imageUrl = `${baseUrl}/${imagePath}`;
-
-                // 3. Download the result
-                const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 60000 });
-                buffer = Buffer.from(imageResponse.data, 'binary');
+            if (base64InitImage) {
+                generatePayload.initimage = base64InitImage;
+                generatePayload.initimage_creativity = creativity;
             }
+
+            const genRes = await axios.post(`${baseUrl}/API/GenerateText2Image`, generatePayload, { timeout: 600000 });
+
+            if (!genRes.data || !genRes.data.images || genRes.data.images.length === 0) {
+                const errorDetail = genRes.data && genRes.data.error ? genRes.data.error : "Image Core failed to process the generation matrices.";
+                throw new Error(errorDetail);
+            }
+
+            const imagePath = genRes.data.images[0];
+            const imageUrl = `${baseUrl}/${imagePath}`;
+
+            // 3. Download the result
+            const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 60000 });
+            buffer = Buffer.from(imageResponse.data, 'binary');
 
             // 4. Send to Discord
             const attachment = new AttachmentBuilder(buffer, { name: 'skynet_generation.png' });
