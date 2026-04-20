@@ -114,7 +114,9 @@ class GuildQueue {
      * @param {object} track - { url, title, channel, duration, thumbnail }
      */
     add(track, user = null) {
-        if (user) track.requestedBy = user.username || user;
+        if (user) {
+            track.requestedBy = user.displayName || user.username || user;
+        }
         this.queue.push(track);
         if (this.player.state.status === AudioPlayerStatus.Idle && this.queue.length === 1) {
             this._playNext();
@@ -130,7 +132,8 @@ class GuildQueue {
      */
     addBatch(tracks, user = null) {
         if (user) {
-            tracks.forEach(t => t.requestedBy = user.username || user);
+            const name = user.displayName || user.username || user;
+            tracks.forEach(t => t.requestedBy = name);
         }
         this.queue.push(...tracks);
         if (this.player.state.status === AudioPlayerStatus.Idle) {

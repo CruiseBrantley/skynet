@@ -20,7 +20,7 @@ async function resolveMentions(text, guild) {
     while ((match = userRegex.exec(text)) !== null) {
         const userId = match[1];
         const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
-        const displayName = member ? (member.nickname || member.user.username) : "someone";
+        const displayName = member ? member.displayName : "someone";
         result = result.replaceAll(match[0], displayName);
     }
     

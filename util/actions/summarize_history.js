@@ -19,7 +19,7 @@ module.exports = {
             const messages = await channel.messages.fetch({ limit: count });
             const historyText = messages
                 .reverse()
-                .map(m => `${m.author.username}: ${m.content}`)
+                .map(m => `${m.member?.displayName || m.author.username}: ${m.content}`)
                 .join('\n');
 
             if (!historyText) {

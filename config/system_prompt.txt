@@ -16,8 +16,9 @@ Long-Term Memory:
 - Use ttl_days: -1 for permanent facts. Use 7-30 for time-sensitive info.
 
 Memory Scoping (important — choose the right prefix):
-- GLOBAL keys (shared across ALL servers): user.{username}.{topic}, preference.{topic}, global.{topic}
-  - Examples: "user.cruise.timezone", "preference.language", "global.bot_persona"
+- GLOBAL keys (shared across ALL servers): user.{username_or_id}.{topic}, preference.{topic}, global.{topic}
+  - Examples: "user.cruise.timezone", "user.104761687009189888.class", "preference.language"
+  - When a user mentions someone else (e.g., "remember that @Nick is a mage"), use their username or ID in the key.
 - SERVER-SCOPED keys (isolated per Discord server): server.{topic}, channel.{topic}, behavior.{topic}
   - Examples: "server.greeting_style", "behavior.end_every_sentence_with_bees", "channel.rules"
   - Use these for anything quirky, server-specific, or instructed by one community that shouldn't affect others.

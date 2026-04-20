@@ -206,7 +206,8 @@ module.exports = {
 
       channelHistories[channelId].time = Date.now();
       
-      const userMessage = { role: 'user', content: `${interaction.user.username}: ${messageText}` };
+      const userHandle = `@${interaction.user.username}${interaction.member?.nickname ? ` (${interaction.member.nickname})` : ''}`;
+      const userMessage = { role: 'user', content: `${userHandle}: ${messageText}` };
       if (base64Image) {
           userMessage.images = [base64Image];
       }
@@ -258,7 +259,20 @@ module.exports = {
           const recentMessages = await interaction.channel.messages.fetch({ limit: 20 });
           channelContext = `Recent Channel Context:\n` + recentMessages.map(m => {
               const reactions = m.reactions.cache.map(r => `${r.emoji.name} (x${r.count})`).join(', ');
-              return `ID: ${m.id} | Author: ${m.author.username} | Text: "${m.content.substring(0, 100)}${m.content.length > 100 ? '...' : ''}" ${reactions ? `| Reactions: [${reactions}]` : ''}`;
+              let authorHandle = `@${m.author.username}${m.member?.nickname ? ` (${m.member.nickname})` : ''}`;
+              
+              // Resolve mentions in the text for the AI's convenience
+              let enrichedContent = m.content;
+              const mentions = m.content.match(/<@!?(\d+)>/g);
+              if (mentions) {
+                  for (const mention of mentions) {
+                      const id = mention.replace(/[<@!>]/g, '');
+                      const user = interaction.client.users.cache.get(id);
+                      if (user) enrichedContent = enrichedContent.replaceAll(mention, `@${user.username}`);
+                  }
+              }
+
+              return `ID: ${m.id} | Author: ${authorHandle} | Text: "${enrichedContent.substring(0, 100)}${enrichedContent.length > 100 ? '...' : ''}" ${reactions ? `| Reactions: [${reactions}]` : ''}`;
           }).reverse().join('\n');
           logger.info(`Context Enrichment: Fetched ${recentMessages.size} messages for context.`);
       } catch (e) {
@@ -279,6 +293,8 @@ module.exports = {
       const responseData = await queryOllama(finalPromptMessages, currentIsBackup, commandsContext, logsContext, interaction.guildId);
 
       if (responseData && responseData.message) {
+        const rawAIContent = responseData.message.content || "";
+        logger.info(`AI Raw Response: "${rawAIContent.substring(0, 300)}${rawAIContent.length > 300 ? '...' : ''}"`);
         channelHistories[channelId].messages.push(responseData.message); // store assistant reply
 
         // Discord message max length is 2000. Chunk intelligently.
@@ -381,7 +397,7 @@ module.exports = {
                                 guildId: interaction.guildId,
                                 channelId: channelTarget,
                                 repeat: ['hourly', 'daily', 'weekly'].includes(repeat) ? repeat : null,
-                                createdBy: interaction.user.username
+                                createdBy: interaction.member?.displayName || interaction.user.username
                             });
                             const timeStr = new Date(scheduledAt).toLocaleString('en-US', { timeZoneName: 'short' });
                             const repeatStr = task.repeat ? ` (repeats ${task.repeat})` : '';
