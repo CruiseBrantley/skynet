@@ -2,10 +2,12 @@ const admin = require('firebase-admin')
 const serviceAccount = require('./service-account.json')
 
 module.exports = function firebaseLogin () {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://skynet-voting.firebaseio.com'
-  })
+  if (admin.apps.length === 0) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: 'https://skynet-voting.firebaseio.com'
+    })
+  }
 
   return admin.database()
 }

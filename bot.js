@@ -98,7 +98,7 @@ function discordBot() {
         // Interval defaults to 10 minutes; override with AGENT_LOOP_INTERVAL_MS in .env
         if (!bot._agentLoopStarted) {
             bot._agentLoopStarted = true;
-            const loopInterval = parseInt(process.env.AGENT_LOOP_INTERVAL_MS) || 10 * 60_000;
+            const loopInterval = parseInt(process.env.AGENT_LOOP_INTERVAL_MS) || 5 * 60_000;
             agentLoop.start(bot, loopInterval);
         }
     })
@@ -209,21 +209,60 @@ function discordBot() {
     bot.on('messageCreate', async message => {
         if (message.author.bot) return;
 
+        // Skip messages sent more than 5 minutes ago (prevents backlog spam on startup)
+        if (Date.now() - message.createdAt.getTime() > 5 * 60 * 1000) return;
+
         // Check if the bot is directly mentioned (ignore @everyone and @here) or if it's a DM
         if (message.mentions.everyone) return;
         
         const isDM = !message.guild || message.channel.isDMBased?.() || message.channel.type === 1;
         const isMentioned = message.mentions.has(bot.user);
+        const isThread = message.channel.isThread?.() || false;
+        
+        let shouldRespond = isMentioned || isDM;
 
-        if (isMentioned || isDM) {
-            logger.info(`Bot triggered by ${message.author.tag} in ${isDM ? 'DM' : message.channelId}: "${message.content}"`);
-            // Directly load the chat orchestrator (now excluded from public slash commands)
+        if (!shouldRespond && isThread) {
+            // Check if the bot is participating in the thread
+            const threadMembers = await message.channel.members.fetch().catch(() => new Collection());
+            if (threadMembers.has(bot.user.id) || message.channel.ownerId === bot.user.id) {
+                // Perform a "Contextual Relevance Check" before responding
+                // We want to see if it's directed at us or if there's a question we can answer.
+                const recentMessages = await message.channel.messages.fetch({ limit: 5 });
+                const context = recentMessages.reverse().map(m => `${m.author.username}: ${m.content}`).join('\n');
+                const botName = process.env.BOT_NAME || 'Skynet';
+
+                // Heuristic Check: Mentioned by name, or is a question in a thread we are active in
+                const containsName = message.content.toLowerCase().includes(botName.toLowerCase());
+                const isQuestion = message.content.includes('?');
+                const lastWasBot = recentMessages.last()?.author.id === bot.user.id;
+
+                if (containsName || (isQuestion && lastWasBot)) {
+                    shouldRespond = true;
+                } else {
+                    // Fast LLM "Should I Respond?" check
+                    const { queryLocalOrRemote } = require('./util/ollama');
+                    const decision = await queryLocalOrRemote('/api/chat', {
+                        messages: [
+                            { role: 'system', content: `You are ${botName}. Decide if you should respond to the current thread. Respond only with YES or NO.\nLogic: Respond if the user is asking you a question, mentioned your name, or if the conversation is stuck and you can help. Ignore casual banter between others.` },
+                            { role: 'user', content: `[THREAD CONTEXT]\n${context}\n\nShould I respond?` }
+                        ],
+                        options: { temperature: 0, num_predict: 5 }
+                    }).catch(() => ({ message: { content: 'NO' } }));
+
+                    if (decision?.message?.content?.toUpperCase().includes('YES')) {
+                        shouldRespond = true;
+                    }
+                }
+            }
+        }
+
+        if (shouldRespond) {
+            logger.info(`Bot triggered by ${message.author.tag} in ${isThread ? 'Thread' : (isDM ? 'DM' : message.channelId)}: "${message.content}"`);
+            // Directly load the chat orchestrator
             const chatCommand = require('./commands/chat.js');
             if (chatCommand) {
-                // Mock an interaction object to reuse the slash command logic
                 let typingInterval;
                 let responseMessage = null;
-
                 const stopTyping = () => { if (typingInterval) clearInterval(typingInterval); };
 
                 const replyFunc = async (content) => {
@@ -256,15 +295,8 @@ function discordBot() {
                     channelId: message.channelId,
                     channel: message.channel,
                     options: {
-                        getString: (name) => {
-                            if (name === 'message') {
-                                return message.content;
-                            }
-                            return null;
-                        },
-                        getAttachment: (name) => {
-                            return message.attachments.size > 0 ? message.attachments.first() : null;
-                        },
+                        getString: (name) => (name === 'message' ? message.content : null),
+                        getAttachment: (name) => (message.attachments.size > 0 ? message.attachments.first() : null),
                         attachments: message.attachments
                     },
                     deferReply: async () => {
@@ -284,11 +316,8 @@ function discordBot() {
                 };
 
                 try {
-                    // Skynet is thinking
                     message.channel.sendTyping();
-                    logger.info(`Mention: Calling chatCommand.execute with mockInteraction...`);
                     await chatCommand.execute(mockInteraction, database);
-                    logger.info(`Mention: chatCommand.execute completed.`);
                 } catch (err) {
                     logger.error(`Mention error: ${err.stack || err.message}`);
                     message.channel.send(`There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} AI Core.`);

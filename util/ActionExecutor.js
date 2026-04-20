@@ -392,6 +392,7 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
      * @returns {Promise<{ success: boolean, error?: string }>}
      */
     async executeAction(name, params, context) {
+        logger.info(`ActionExecutor: Triggering action "${name}" with params: ${JSON.stringify(params).substring(0, 500)}`);
         let action = this._actions[name];
         if (!action) return { success: false, error: `unknown action: ${name}` };
 
@@ -419,12 +420,12 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
         }
 
         try {
-            await action.execute(bot, channel, params || {}, context);
+            const output = await action.execute(bot, channel, params || {}, context);
             
             // Centralized Receipt/Cleanup logic
             if (context && typeof context.editReply === 'function' && !context.replied) {
                 const { MessageFlags } = require('discord.js');
-                const isDifferentChannel = channel.id !== context.channelId && channel !== context;
+                const isDifferentChannel = (channel && channel.id && context.channelId && channel.id !== context.channelId);
                 
                 const silentActions = ['add_reaction', 'remove_reaction'];
                 const isSilent = silentActions.includes(action.name);
@@ -439,13 +440,12 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
                         flags: [MessageFlags.SuppressEmbeds] 
                     }).catch(() => {});
                 } else {
-                    // Same channel OR silent action — clean up the "thinking" message
-                    logger.info(`ActionExecutor: Silently cleaning up feedback for "${action.name}"`);
-                    await context.deleteReply().catch(() => {});
+                    // Same channel OR silent action — let chat.js manage the visible response
+                    logger.info(`ActionExecutor: Skipping automatic cleanup for "${action.name}" to preserve interaction flow.`);
                 }
             }
 
-            return { success: true };
+            return { success: true, output };
         } catch (err) {
             logger.error(`ActionExecutor: Action "${name}" failed: ${err.message}`);
             return { success: false, error: err.message };

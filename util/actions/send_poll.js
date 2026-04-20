@@ -39,7 +39,7 @@ module.exports = {
             poll: {
                 question: { text: questionText },
                 answers: validOptions.map(opt => ({
-                    poll_media: { text: opt.substring(0, 55) }
+                    text: opt.substring(0, 55)
                 })),
                 duration,
                 allow_multiselect: !!params.allow_multiselect,

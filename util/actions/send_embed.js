@@ -9,7 +9,7 @@ const COLOR_MAP = {
 
 module.exports = {
     name: 'send_embed',
-    description: 'Sends a rich Discord embed with a title, description, color, optional fields, and footer',
+    description: 'Sends a rich Discord embed. CRITICAL: Use parameters directly at the root. Do NOT nest under an "embed" key.',
     schema: {
         title: 'string — embed title',
         description: 'string — main body text of the embed',
@@ -19,7 +19,10 @@ module.exports = {
         thumbnail: 'string — optional thumbnail image URL',
         image: 'string — optional large image URL'
     },
-    execute: async (bot, channel, params) => {
+    execute: async (bot, channel, rawParams) => {
+        // Flatten nested 'embed' key if the AI hallucinated it
+        const params = (rawParams.embed && typeof rawParams.embed === 'object') ? rawParams.embed : rawParams;
+
         const color = typeof params.color === 'string'
             ? (COLOR_MAP[params.color.toLowerCase()] ?? parseInt(params.color.replace('#', ''), 16) ?? 0x5865F2)
             : (params.color ?? 0x5865F2);

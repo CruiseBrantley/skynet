@@ -9,10 +9,19 @@ const botName = process.env.BOT_NAME || 'Bot';
 wiki.setUserAgent(`${botName}Bot/1.0`);
 const puppeteerSearch = require('../util/puppeteerSearch');
 const { fetchPageText } = require('../util/summarize');
+const { queryLocalOrRemote } = require('../util/ollama');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 const agentMemory = require('../util/AgentMemory');
 const executor = require('../util/ActionExecutor');
+
+const COMMAND_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:\s*(\{[\s\S]*?\})\s*>>>/;
+const SCRUB_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:[\s\S]*?>>>/gi;
+
+function scrubTags(text) {
+    if (!text) return text;
+    return text.replace(SCRUB_REGEX, '').trim();
+}
 
 // Load system prompt from config file, falling back to a generic default
 let SYSTEM_PROMPT;
@@ -28,26 +37,34 @@ const MAX_CHANNEL_HISTORIES = 50;
 // Helper to build a mock interaction for autonomous command execution
 function createMockInteraction(interaction, optionsOverrides = {}, onOutput = null, sharedState = { primaryResponseUsed: false, primaryContent: "" }) {
     const capture = async (msg) => {
-        const str = typeof msg === 'string' ? msg : (msg?.content || "");
-        if (str) {
-            if (onOutput) onOutput(str);
+        const isString = typeof msg === 'string';
+        const str = isString ? msg : (msg?.content || "");
+        const hasEmbeds = !isString && msg?.embeds && msg.embeds.length > 0;
+        
+        if (str || hasEmbeds) {
+            if (onOutput && str) onOutput(str);
             
-            const originalText = typeof sharedState.primaryContent === 'string' ? sharedState.primaryContent : (sharedState.primaryContent?.content || "");
-            const combinedText = originalText ? (originalText + "\n" + str) : str;
+            // For merging purposes, we track if there's text
+            const currentContent = typeof sharedState.primaryContent === 'string' ? sharedState.primaryContent : (sharedState.primaryContent?.content || "");
+            const combinedText = currentContent ? (currentContent + "\n" + str) : str;
 
-            // If we haven't used the primary slot yet, or if merging fits within the Discord limit (2000 chars)
             if (!sharedState.primaryResponseUsed) {
                 sharedState.primaryResponseUsed = true;
-                sharedState.primaryContent = str;
-                await interaction.editReply({ content: str, flags: [MessageFlags.SuppressEmbeds] });
-            } else if (combinedText.length < 2000) {
-                sharedState.primaryContent = combinedText;
-                await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
+                sharedState.primaryContent = msg; // Store the full object (embeds and all)
+                await interaction.editReply(msg);
+            } else if (!hasEmbeds && combinedText.length < 2000) {
+                // If it's just text and it fits, merge with existing text if there are NO EMBEDS
+                const currentIsEmbed = sharedState.primaryContent?.embeds?.length > 0;
+                if (!currentIsEmbed) {
+                    sharedState.primaryContent = combinedText;
+                    await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
+                } else {
+                    await interaction.followUp({ content: str, flags: [MessageFlags.SuppressEmbeds] });
+                }
             } else {
-                await interaction.followUp({ content: str, flags: [MessageFlags.SuppressEmbeds] });
+                await interaction.followUp(msg);
             }
         }
-        // Return a mock message object to support 'fetchReply: true' in commands like /ping
         return { createdTimestamp: Date.now() };
     };
 
@@ -81,50 +98,11 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
             }
             return "[Unknown Channel]";
         },
-        get replied() { return sharedState.primaryResponseUsed; }
     };
 }
 
-const { queryOllama: executeOllama } = require('../util/ollama');
+const { queryOllamaWithContext } = require('../util/ollama');
 
-async function queryOllama(messages, isBackup = false, commandsContext = "", logsContext = "", guildId = null) {
-  const memorySummary = agentMemory.getSummary(guildId);
-  const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY:\n${memorySummary}` : '';
-  let sysMsg = `${SYSTEM_PROMPT}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
-
-  let processedMessages = messages.map((msg, idx) => {
-      if (idx === 0 && msg.role === 'system') {
-          return { ...msg, content: sysMsg };
-      }
-      if (isBackup && msg.images) {
-          const { images, ...rest } = msg;
-          return {
-              ...rest,
-              content: (rest.content || "") + `\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that ${botName}'s visual sensors are currently offline and you can only process text.]`
-          };
-      }
-      return msg;
-  });
-
-  try {
-      const result = await executeOllama('/api/chat', { 
-          messages: processedMessages,
-          options: {
-              num_ctx: 8192,
-              temperature: 0.7,
-              top_k: 40,
-              top_p: 0.9
-          }
-      }, isBackup);
-      return result;
-  } catch (err) {
-      if (!isBackup) {
-          logger.info(`Primary Ollama failed, falling back to local: ${err.message}`);
-          return queryOllama(messages, true, commandsContext, logsContext);
-      }
-      throw err;
-  }
-}
 
 function splitMessage(text) {
   const chunks = [];
@@ -179,7 +157,18 @@ module.exports = {
         option.setName('image')
           .setDescription('Optional image to analyze (Vision models only)')
           .setRequired(false)),
-  async execute(interaction, database) {
+  execute: execute,
+  scrubTags,
+  COMMAND_REGEX,
+  SCRUB_REGEX
+};
+
+async function execute(interaction, database) {
+    const sharedState = {
+        primaryResponseUsed: false,
+        primaryContent: null
+    };
+
     logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
     await interaction.deferReply();
     try {
@@ -298,8 +287,13 @@ module.exports = {
       ];
 
       logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${executor.listActions().length} available.`);
-      const responseData = await queryOllama(finalPromptMessages, currentIsBackup, commandsContext, logsContext, interaction.guildId);
-
+      const responseData = await queryOllamaWithContext(finalPromptMessages, {
+          isBackup: currentIsBackup,
+          commandsContext,
+          logsContext,
+          guildId: interaction.guildId,
+          systemPrompt: SYSTEM_PROMPT
+      }, botName);
       if (responseData && responseData.message) {
         const rawAIContent = responseData.message.content || "";
         logger.info(`AI Raw Response: "${rawAIContent.substring(0, 300)}${rawAIContent.length > 300 ? '...' : ''}"`);
@@ -307,387 +301,227 @@ module.exports = {
 
         // Discord message max length is 2000. Chunk intelligently.
         let replyContent = responseData.message.content || "";
-        let ttsContent = replyContent;
-        let speakAlreadyFired = false;
-
-        // --- SKYNET TOOL CALLING / PROXY EXECUTION LOOP ---
+        
+        const executedCommands = new Set();
         let loopCount = 0;
-        let commandExecuted = false;
-        const sharedState = { primaryResponseUsed: false, primaryContent: "" };
-
         while (loopCount < 5) {
             if (!replyContent || typeof replyContent !== 'string') break;
-            // More robust regex to handle various formatting (missing brackets, extra whitespace, /json prefix, etc.)
-            const commandMatch = replyContent.match(/<<<?RUN_COMMAND:?\s*([\s\S]*?)\s*>>>?/) || 
-                                 replyContent.match(/RUN_COMMAND:?\s*(\{[\s\S]*?\})/) ||
-                                 replyContent.match(/\/json\s*(\{[\s\S]*?\})/i) ||
-                                 replyContent.match(/(\{[\s\S]*?"command"[\s\S]*?\})/i) ||
-                                 replyContent.match(/(\{[\s\S]*?"message"[\s\S]*?\})/i); // Catch bare message JSON
-            if (!commandMatch) break;
+            
+            let commandMatch = replyContent.match(COMMAND_REGEX);
+            let jsonStr = "";
+            let fullMatchString = "";
+
+            if (commandMatch) {
+                fullMatchString = commandMatch[0];
+                jsonStr = commandMatch[1];
+            } else {
+                // Fallback: If no tags, did the AI just output a naked JSON block?
+                const nakedMatch = replyContent.match(/^\s*(\{[\s\S]*?\})\s*$/);
+                if (nakedMatch) {
+                    try {
+                        const testData = JSON.parse(jsonrepair(nakedMatch[1]));
+                        if (testData.command) {
+                            jsonStr = nakedMatch[1];
+                            fullMatchString = nakedMatch[0];
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            if (!jsonStr) break;
             
             loopCount++;
-            let jsonStr = "";
             try {
-                const rawMatch = commandMatch[1].trim();
-                jsonStr = rawMatch;
-                const firstBrace = jsonStr.indexOf('{');
-                if (firstBrace === -1) throw new Error('No opening brace found in command payload');
-                jsonStr = jsonStr.substring(firstBrace);
                 const cmdData = JSON.parse(jsonrepair(jsonStr));
                 
-                // Remove the command tag from the visible reply to avoid cluttering Discord
-                replyContent = replyContent.replace(commandMatch[0], '').trim();
+                // Remove the command tag (or naked JSON) from the visible reply AND the persistent history
+                replyContent = replyContent.replace(fullMatchString, '').trim();
+                const lastMsg = channelHistories[channelId].messages[channelHistories[channelId].messages.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant') {
+                    lastMsg.content = lastMsg.content.replace(fullMatchString, '[Command Executed]').trim();
+                }
 
-                // --- MEMORY COMMANDS ---
-                if (['remember', 'recall', 'forget'].includes(cmdData.command)) {
-                    replyContent = replyContent.replace(commandMatch[0], '').trim();
-
-                    if (cmdData.command === 'remember') {
+                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '');
+                // Identify the parameters. If they are nested in 'params', use that. 
+                // Otherwise, use all keys EXCEPT 'command' as the parameters.
+                let params = cmdData.params;
+                if (!params || typeof params !== 'object') {
+                    const { command, ...rest } = cmdData;
+                    params = rest;
+                }
+                
+                executedCommands.add(rawCmdName);
+                
+                // Special case: natural language "memories" handled locally
+                if (['remember', 'recall', 'forget'].includes(rawCmdName)) {
+                    if (rawCmdName === 'remember') {
                         const key = cmdData.key || cmdData.params?.key;
                         const value = cmdData.value || cmdData.params?.value;
                         const ttl = parseInt(cmdData.ttl_days ?? cmdData.params?.ttl_days ?? 30);
                         if (key && value !== undefined) {
                             agentMemory.set(key, value, ttl, interaction.guildId);
-                            const scope = key.startsWith('user.') || key.startsWith('preference.') || key.startsWith('global.') ? 'globally' : 'for this server';
-                            const memCtx = `[SYSTEM: Stored memory ${scope}: "${key}" = "${value}" (TTL: ${ttl === -1 ? 'permanent' : ttl + ' days'}). Acknowledge naturally without reciting the raw key name.]`;
-                            channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
-                        } else {
-                            channelHistories[channelId].messages.push({ role: 'system', content: '[SYSTEM: remember command was missing key or value parameters.]' });
+                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Stored memory "${key}"]. Acknowledge naturally.]` });
                         }
-                    } else if (cmdData.command === 'recall') {
+                    } else if (rawCmdName === 'recall') {
                         const key = cmdData.key || cmdData.params?.key;
                         const val = key ? agentMemory.get(key, interaction.guildId) : null;
-                        const memCtx = val
-                            ? `[SYSTEM: Memory recall: "${key}" = "${val}". Use this in your response.]`
-                            : `[SYSTEM: No memory found for key "${key}".]`;
-                        channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
-                    } else if (cmdData.command === 'forget') {
-                        const key = cmdData.key || cmdData.params?.key;
-                        const deleted = key ? agentMemory.delete(key) : false;
-                        const memCtx = deleted
-                            ? `[SYSTEM: Deleted memory key "${key}" successfully.]`
-                            : `[SYSTEM: No memory found for key "${key}" to delete.]`;
-                        channelHistories[channelId].messages.push({ role: 'system', content: memCtx });
+                        channelHistories[channelId].messages.push({ role: 'system', content: val ? `[SYSTEM: Memory found: "${val}"]` : `[SYSTEM: No memory found for "${key}"]` });
                     }
-
-                    // Only make a second LLM call if the first response had no natural text
-                    // outside of the tool tag. If it did, that text IS the reply — don't double up.
-                    if (!replyContent) {
-                        const memFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
-                        replyContent = (memFollowup.message.content || '').trim();
-                        channelHistories[channelId].messages.push(memFollowup.message);
-                    }
-                    continue; // back to the top of tool loop
-                }
-
-                // --- SCHEDULER COMMANDS ---
-                if (cmdData.command === 'schedule') {
-                    const { resolveTime } = require('../util/AgentClock');
-                    const agentScheduler = require('../util/AgentScheduler');
-
-                    const message = cmdData.message || cmdData.description || cmdData.params?.message;
-                    const when = cmdData.when || cmdData.params?.when || cmdData.time || cmdData.params?.time;
-                    const target = cmdData.target || cmdData.params?.target || 'dm';
-                    const repeat = cmdData.repeat || cmdData.params?.repeat || null;
-
-                    if (!message || !when) {
-                        channelHistories[channelId].messages.push({ role: 'system', content: '[SYSTEM: schedule command was missing "message" or "when" parameters.]' });
-                    } else {
-                        const scheduledAt = await resolveTime(when);
-                        if (!scheduledAt) {
-                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Could not parse time expression "${when}". Ask the user to clarify with something like "in 30 minutes" or "tonight at 9pm".]` });
-                        } else {
-                            const channelTarget = target === 'dm' ? 'dm' : interaction.channelId;
-                            const task = agentScheduler.add({
-                                description: message,
-                                scheduledAt,
-                                userId: interaction.user.id,
-                                guildId: interaction.guildId,
-                                channelId: channelTarget,
-                                repeat: ['hourly', 'daily', 'weekly'].includes(repeat) ? repeat : null,
-                                createdBy: interaction.member?.displayName || interaction.user.username
-                            });
-                            const timeStr = new Date(scheduledAt).toLocaleString('en-US', { timeZoneName: 'short' });
-                            const repeatStr = task.repeat ? ` (repeats ${task.repeat})` : '';
-                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Task scheduled. ID: ${task.id}. Will fire at ${timeStr}${repeatStr}. Delivery: ${channelTarget === 'dm' ? 'DM' : 'this channel'}. Confirm to the user naturally and mention the time.]` });
-                        }
-                    }
-
-                    const schedFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
-                    replyContent = (replyContent + ' ' + (schedFollowup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(schedFollowup.message);
+                    
+                    channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Operations complete. The user has been notified. Provide a 1-sentence final acknowledgement, then stop.]` });
+                    const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
+                        isBackup: currentIsBackup,
+                        commandsContext,
+                        logsContext,
+                        guildId: interaction.guildId,
+                        systemPrompt: SYSTEM_PROMPT
+                    }, botName);
+                    replyContent = (replyContent + "\n" + (followup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(followup.message);
                     continue;
                 }
 
-                if (cmdData.command === 'cancel_task') {
-                    const agentScheduler = require('../util/AgentScheduler');
-                    const id = cmdData.id || cmdData.task_id || cmdData.params?.id;
-                    const cancelled = id ? agentScheduler.cancel(id) : false;
-                    const ctx = cancelled
-                        ? `[SYSTEM: Task ${id} has been cancelled successfully.]`
-                        : `[SYSTEM: No task with ID "${id}" was found. It may have already completed or the ID is incorrect.]`;
-                    channelHistories[channelId].messages.push({ role: 'system', content: ctx });
-
-                    const cancelFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
-                    replyContent = (replyContent + ' ' + (cancelFollowup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(cancelFollowup.message);
-                    continue;
-                }
-
-                if (cmdData.command === 'list_tasks') {
-                    const agentScheduler = require('../util/AgentScheduler');
-                    const tasks = agentScheduler.getByUser(interaction.user.id);
-                    const ctx = tasks.length === 0
-                        ? '[SYSTEM: No scheduled tasks found for this user.]'
-                        : `[SYSTEM: Scheduled tasks for this user:\n${tasks.map(t => `- ${t.id}: "${t.description.substring(0, 60)}" at ${new Date(t.scheduledAt).toLocaleString()}${t.repeat ? ` (${t.repeat})` : ''}`).join('\n')}. List them clearly to the user.]`;
-                    channelHistories[channelId].messages.push({ role: 'system', content: ctx });
-
-                    const listFollowup = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext, interaction.guildId);
-                    replyContent = (replyContent + ' ' + (listFollowup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(listFollowup.message);
-                    continue;
-                }
-
-                if (cmdData.command === 'search' || cmdData.command === 'web_search') {
-
-                    const query = cmdData.query || cmdData.params?.query || cmdData.param || cmdData.description || cmdData.arg1 || cmdData.message || "";
-                    if (!sharedState.primaryResponseUsed) {
-                        await interaction.editReply({ content: `*${botName} is searching the web for: \`${query}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
-                    }
-                    try {
-                        let results = [];
-                        try {
-                            results = await googleIt({ query: query, disableConsole: true });
-                        } catch (err) {
-                            logger.info(`Google-it failed for "${query}", trying DuckDuckGo fallback.`);
-                        }
-
-                        // Fallback to DuckDuckGo if Google returns no results or failed
-                        if (!results || results.length === 0) {
-                            try {
-                                const ddgResults = await ddg.search(query);
-                                if (ddgResults && ddgResults.results) {
-                                    results = ddgResults.results.slice(0, 3).map(r => ({
-                                        title: r.title,
-                                        snippet: r.description,
-                                        link: r.url
-                                    }));
-                                }
-                            } catch (ddgErr) {
-                                logger.error(`DuckDuckGo fallback failed for "${query}": ${ddgErr.message}`);
-                            }
-                        }
-
-                        // Hardened Fallback: Full Headless Browser search using Puppeteer (ignores 403 blocks)
-                        if (!results || results.length === 0) {
-                            try {
-                                logger.info(`Spinning up heavy headless Chromium instance for "${query}"...`);
-                                results = await puppeteerSearch.performSearch(query);
-                            } catch (pupErr) {
-                                logger.error(`Puppeteer crawler also failed: ${pupErr.message}`);
-                            }
-                        }
-
-                        // Final Fallback: Wikipedia (Great for factual queries when scrapers are rate-limited)
-                        if (!results || results.length === 0) {
-                            try {
-                                const wikiSummary = await wiki.summary(query);
-                                if (wikiSummary && wikiSummary.extract) {
-                                    results = [{
-                                        title: wikiSummary.title,
-                                        snippet: wikiSummary.extract,
-                                        link: wikiSummary.content_urls.desktop.page
-                                    }];
-                                }
-                            } catch (wikiErr) {
-                                logger.info(`Wikipedia fallback also failed for "${query}": ${wikiErr.message}`);
-                            }
-                        }
-
-                        let searchResultContext;
-                        if (results && results.length > 0) {
-                            const searchResultsStr = results.slice(0, 6).map(r => `Title: ${r.title}\nSnippet: ${r.snippet || r.description || ""}\nLink: ${r.link}`).join('\n\n');
-                            
-                            // Deep Context Pull: Fetch the raw text of the #1 top ranking link to heavily enrich the RAG payload
-                            let topLinkContext = '';
-                            let sourceUrl = '';
-                            
-                            // Iterate through the top 3 results to find a high-fidelity page (not just a cookie wall/404)
-                            for (let i = 0; i < Math.min(results.length, 3); i++) {
-                                try {
-                                    const link = results[i].link;
-                                    logger.info(`Deep Context Pull attempting iteration ${i+1} on: ${link}`);
-                                    const rawText = await fetchPageText(link, 18000); // Request high-limit fetch
-                                    
-                                    if (rawText && rawText.length > 800) {
-                                        topLinkContext = `\n\n[FULL TEXT HOMEPAGE OF TOP RESULT (${link})]:\n${rawText}`;
-                                        sourceUrl = link;
-                                        break; // Found good content
-                                    } else {
-                                        logger.info(`Deep Context Pull for link ${i+1} was too short (${rawText?.length || 0} chars), trying next result...`);
-                                    }
-                                } catch (e) {
-                                    logger.info(`Deep Context Pull failed for link ${i+1}: ${e.message}`);
-                                }
-                            }
-                            
-                            searchResultContext = `[SYSTEM: WEB SEARCH RESULTS FOR "${query}"]\n${searchResultsStr}${topLinkContext}\n\nUsing these results, answer the user's initial request. If you still lack sufficient context to fully answer or verify the information, you may autonomously issue another RUN_COMMAND to perform an additional search with a different/more specific query. Otherwise, answer directly and comprehensively.`;
-                        } else {
-                            // Inform the LLM that the search system is failing so it stops recursively attempting to search
-                            searchResultContext = `[SYSTEM: WEB SEARCH UNAVAILABLE FOR "${query}"]\nThe search integration returned no results (possibly rate limited). Do not attempt to search again for this specific query. Instead, answer the user immediately using your internal knowledge base and memory. ONLY apologize/mention the failure if the request absolutely requires real-time data (like current weather or breaking news).`;
-                        }
-
-                        // Keep the assistant's message in history so it knows it requested the search
-                        channelHistories[channelId].messages.push({ role: 'system', content: searchResultContext });
-                        
-                        logger.info(`NESTED SEARCH HISTORY (Backup: ${currentIsBackup}): ${JSON.stringify(channelHistories[channelId].messages.slice(-3))}`);
-                        
-                        const nestedResponse = await queryOllama([...channelHistories[channelId].messages], currentIsBackup, commandsContext, logsContext);
-                        
-                        replyContent = replyContent ? (replyContent + "\n\n" + (nestedResponse.message.content || "")) : (nestedResponse.message.content || "");
-                        ttsContent = replyContent;
-                        channelHistories[channelId].messages.push(nestedResponse.message);
-                        // Loop continues to check if the new reply has another command (e.g. speak)
-                    } catch (searchErr) {
-                        replyContent = "I attempted to search the web, but a network anomaly prevented retrieval: " + searchErr.message;
-                        break;
-                    }
-                } else {
-                // Normalize the command name: strip leading slashes and trim
-                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '');
-                
-                // Special case: if the model tries to call 'chat' or 'json' autonomously with a 'message'
-                // OR if it just outputs a bare JSON block with a 'message' field.
-                if (((rawCmdName === 'chat' || rawCmdName === 'json' || !rawCmdName) && (cmdData.message || cmdData.arg1))) {
-                    const finalMsg = cmdData.message || cmdData.arg1;
-                    replyContent = replyContent.replace(commandMatch[0], '').trim();
-                    replyContent = replyContent ? (replyContent + "\n\n" + finalMsg) : finalMsg;
-                    continue; // Skip execution and just use the content
-                }
-
+                // Check for generic actions or slash commands
+                const allActions = executor.listActions();
+                const isAction = allActions.some(a => a.name === rawCmdName);
                 const targetCmd = interaction.client.commands.get(rawCmdName);
-                if (targetCmd || executor.listActions().some(a => a.name === rawCmdName)) {
-                        if (!sharedState.primaryResponseUsed) {
-                            await interaction.editReply({ content: `*${botName} is autonomously executing \`/${cmdData.command}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
-                        }
-                        let cmdOutput = "";
-                        const { getParam } = require('../util/commandHelper');
-                        const mock = createMockInteraction(interaction, {
-                            getString: (n) => {
-                                const val = getParam(cmdData, n);
-                                return val !== null ? String(val) : null;
-                            },
-                            getSubcommand: () => getParam(cmdData, 'subcommand'),
-                            getSubcommandGroup: () => getParam(cmdData, 'subcommand_group'),
-                            getChannel: (n) => {
-                                const id = (getParam(cmdData, n) || "").toString().replace(/[<#>]/g, '');
-                                return interaction.client.channels.cache.get(id) || interaction.guild.channels.cache.get(id) || null;
-                            },
-                            getBoolean: (n) => {
-                                const val = getParam(cmdData, n);
-                                if (typeof val === 'boolean') return val;
-                                if (val === 'true' || val === '1' || val === 1) return true;
-                                return false;
-                            },
-                            getInteger: (n) => {
-                                const val = getParam(cmdData, n);
-                                return val !== null ? parseInt(val) : null;
-                            },
-                            getMember: (n) => {
-                                const id = (getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '');
-                                return interaction.guild.members.cache.get(id) || null;
-                            },
-                            getUser: (n) => {
-                                const id = (getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '');
-                                return interaction.client.users.cache.get(id) || null;
-                            }
-                        }, (str) => {
-                            cmdOutput += str + " ";
-                        }, sharedState);
 
-                        // Try standard command first, then dynamic actions
-                        if (targetCmd) {
-                            await targetCmd.execute(mock, database);
-                        } else {
-                            // Map LLM command name to ActionExecutor name
-                            // Unpack params for the action as well, so it gets a clean object regardless of LLM nesting
-                            const actionParams = {};
-                            const actionDef = executor.listActions().find(a => a.name === rawCmdName);
-                            if (actionDef && actionDef.schema) {
-                                for (const key in actionDef.schema) {
-                                    const val = getParam(cmdData, key);
-                                    if (val !== null) actionParams[key] = val;
-                                }
-                            } else {
-                                // Fallback: just use standard unwrapping for common keys
-                                ['question', 'options', 'choices', 'content', 'message', 'text', 'channel', 'channelId'].forEach(k => {
-                                    const v = getParam(cmdData, k);
-                                    if (v !== null) actionParams[k] = v;
-                                });
-                            }
-
-                            const actionResult = await executor.executeAction(rawCmdName, actionParams, mock);
-                            if (actionResult.success) {
-                                commandExecuted = true;
-                            } else {
-                                throw new Error(actionResult.error || "Action failed");
-                            }
-                        }
-
-                        commandExecuted = true;
-                        
-                        if (cmdData.command === 'speak') {
-                            speakAlreadyFired = true;
-                        } else if (cmdOutput.trim()) {
-                            ttsContent = cmdOutput.trim();
-                        }
-                    } else {
-                        logger.error(`LLM requested unknown command: ${cmdData.command}`);
-                        replyContent = `${replyContent}\n*(System Error: ${botName} attempted to execute unknown command \`/${cmdData.command}\`)*`.trim();
+                if (isAction || targetCmd) {
+                    if (!sharedState.primaryResponseUsed) {
+                        await interaction.editReply({ content: `*${botName} is autonomously executing \`${rawCmdName}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
                     }
+
+                    let actionResult = "";
+                    const targetChannel = interaction.channel;
+                    const mock = createMockInteraction(interaction, {
+                        params: params || {},
+                        channel: targetChannel
+                    }, null, sharedState);
+
+                    if (isAction) {
+                        const actionContext = { 
+                            interaction: mock, // Use the MOCK to capture state
+                            channel: targetChannel, 
+                            client: interaction.client,
+                            guild: interaction.guild,
+                            userId: interaction.user.id, 
+                            guildId: interaction.guildId, 
+                            channelId: targetChannel.id, 
+                            member: interaction.member, 
+                            user: interaction.user 
+                        };
+                        const result = await executor.executeAction(rawCmdName, params, actionContext);
+                        if (result.success) sharedState.primaryResponseUsed = true;
+                        const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+                        actionResult = result.success ? (outputStr || "[SYSTEM: Action executed successfully.]") : `[SYSTEM: Action failed: ${result.error}]`;
+                    } else {
+                        const { getParam } = require('../util/commandHelper');
+                        mock.options = {
+                            getString: (n) => String(params[n] ?? getParam(cmdData, n) ?? ""),
+                            getSubcommand: () => params.subcommand || getParam(cmdData, 'subcommand'),
+                            getChannel: (n) => interaction.client.channels.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<#>]/g, '')) || null,
+                            getBoolean: (n) => params[n] === true || params[n] === 'true' || getParam(cmdData, n) === true || getParam(cmdData, n) === 'true',
+                            getInteger: (n) => parseInt(params[n] ?? getParam(cmdData, n) ?? 0),
+                            getUser: (n) => interaction.client.users.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '')) || null,
+                            getAttachment: () => null,
+                            getMember: () => null
+                        };
+
+                        try {
+                            sharedState.primaryResponseUsed = true;
+                            const output = await targetCmd.execute(mock, database);
+                            actionResult = typeof output === 'string' ? output : `[SYSTEM: Command /${rawCmdName} completed.]`;
+                        } catch (err) {
+                            actionResult = `[SYSTEM: Error executing /${rawCmdName}: ${err.message}]`;
+                        }
+                    }
+
+                    channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Action Result: ${actionResult}. The result is visible to the user. Do NOT repeat the command. Provide a 1-sentence acknowledgement, then stop.]` });
+                    const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
+                        isBackup: currentIsBackup,
+                        commandsContext,
+                        logsContext,
+                        guildId: interaction.guildId,
+                        systemPrompt: SYSTEM_PROMPT
+                    }, botName);
+                    replyContent = (replyContent + "\n" + (followup.message.content || '')).trim();
+                    channelHistories[channelId].messages.push(followup.message);
+                    continue;
                 }
-            } catch (e) {
-                logger.error('Failed to execute autonomous command: ' + e.stack || e.message);
-                replyContent = "I attempted to execute a command autonomously, but encountered an error: " + e.message;
+            } catch (err) {
+                logger.error(`Loop error: ${err.stack}`);
                 break;
             }
         }
-        // ---------------------------------------------
-        // Strip any remaining unparsed tags (in case of loop cap hit or malformed tags)
-        replyContent = replyContent.replace(/<<<?RUN_COMMAND:?[\s\S]*?>>>?/g, '').replace(/RUN_COMMAND:?\s*\{[\s\S]*?\}/g, '').trim();
 
         if (replyContent.length === 0) {
-            // Only delete if the primary slot hasn't been occupied by real content from a tool
-            if (!sharedState.primaryResponseUsed) {
+            // Task completed but no textual summary provided by AI
+            if (sharedState.primaryResponseUsed) {
+                // We have content (e.g. an embed or status message) already sent, 
+                // but we should clear the 'Thinking' status if it hasn't been overwritten.
+                // If it's a tool like 'send_embed', the primary response is already used.
+                // We'll send a final clean fallback if editReply is still the 'Thinking' status.
+                await interaction.editReply({ content: "✅ **Task complete.**", flags: [MessageFlags.SuppressEmbeds] }).catch(() => {});
+            } else {
                 await interaction.deleteReply().catch(() => {});
             }
         } else {
             const chunks = splitMessage(replyContent);
             for (let i = 0; i < chunks.length; i++) {
                 try {
-                    const cleanChunk = chunks[i].trim();
-                    const originalText = typeof sharedState.primaryContent === 'string' ? sharedState.primaryContent : (sharedState.primaryContent?.content || "");
-                    const combinedText = (cleanChunk && originalText) ? (cleanChunk + "\n" + originalText) : (cleanChunk || originalText);
+                    const cleanChunk = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').trim();
+                    if (!cleanChunk && i === 0 && !sharedState.primaryResponseUsed) continue; 
 
                     if (i === 0) {
-                        if (sharedState.primaryResponseUsed && combinedText.length < 2000) {
-                            // Slot is already occupied by tool output (e.g. timestamp result). Prepend our text.
-                            await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
-                            sharedState.primaryContent = combinedText;
-                        } else if (!sharedState.primaryResponseUsed) {
-                            sharedState.primaryResponseUsed = true;
-                            sharedState.primaryContent = cleanChunk;
-                            await interaction.editReply({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] });
+                        // Extract any existing content or embeds
+                        let originalText = "";
+                        let originalEmbeds = [];
+                        
+                        if (sharedState.primaryContent) {
+                            if (typeof sharedState.primaryContent === 'string') {
+                                originalText = sharedState.primaryContent;
+                            } else {
+                                originalText = sharedState.primaryContent.content || "";
+                                originalEmbeds = sharedState.primaryContent.embeds || [];
+                            }
+                        }
+
+                        // Clean status messages from the original text
+                        const cleanOriginal = originalText.replace(/\*.*is autonomously executing.*\*/g, '').trim();
+
+                        if (sharedState.primaryResponseUsed && originalEmbeds.length > 0) {
+                            // If we already have embeds, we MERGE the text into the primary reply 
+                            // as long as it fits, preserving the visuals.
+                            const combinedText = (cleanChunk && cleanOriginal) ? (cleanChunk + "\n" + cleanOriginal) : (cleanChunk || cleanOriginal);
+                            
+                            // If the merged text is too long (>2000), THEN we followUp.
+                            if (combinedText.length > 2000) {
+                                await interaction.followUp({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] });
+                            } else {
+                                await interaction.editReply({ 
+                                    content: combinedText || "✅ **Task complete.**", 
+                                    embeds: originalEmbeds 
+                                });
+                            }
                         } else {
-                            // Primary slot is used and merging would exceed limit, so MUST followUp
-                            await interaction.followUp(chunks[i]);
+                            // No embeds? We merge the text or overwrite the status message.
+                            const combinedText = (cleanChunk && cleanOriginal) ? (cleanChunk + "\n" + cleanOriginal) : (cleanChunk || cleanOriginal);
+                            sharedState.primaryResponseUsed = true;
+                            sharedState.primaryContent = combinedText;
+                            await interaction.editReply({ 
+                                content: combinedText || "✅ **Task complete.**", 
+                                flags: [MessageFlags.SuppressEmbeds] 
+                            });
                         }
                     } else {
-                        await interaction.followUp(chunks[i]);
+                        await interaction.followUp({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
                     }
                 } catch (discordErr) {
-                    logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message);
-                    await interaction.channel.send({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
+                    const fallbackClean = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').trim();
+                    if (fallbackClean) {
+                        logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message);
+                        await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] });
+                    }
                 }
             }
         }
@@ -714,5 +548,4 @@ module.exports = {
           await interaction.channel.send(`There was an error communicating with the ${botName} AI Core.`);
       }
     }
-  },
-};
+  }

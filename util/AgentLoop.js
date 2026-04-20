@@ -36,7 +36,7 @@ class AgentLoop {
      * @param {import('discord.js').Client} bot - The Discord client.
      * @param {number} intervalMs - Milliseconds between ticks. Default: 10 minutes.
      */
-    start(bot, intervalMs = 10 * 60_000) {
+    start(bot, intervalMs = 5 * 60_000) {
         if (this._interval) {
             logger.info('AgentLoop: Already running — ignoring duplicate start().');
             return;
@@ -77,13 +77,118 @@ class AgentLoop {
         this._tickCount++;
         logger.info(`AgentLoop: Tick #${this._tickCount} started.`);
         try {
+            // 1. Evaluate internal state (maintenance, schedules, etc.)
             await this._evaluate(0);
+
+            // 2. Proactive "Interjection" check for whitelisted guilds
+            await this._checkProactiveGuilds();
         } catch (err) {
-            logger.error(`AgentLoop: Uncaught exception in tick: ${err.message}`);
+            logger.error(`AgentLoop: Uncaught exception in tick: ${err.stack || err.message}`);
         } finally {
             this._isRunning = false;
             this._lastRunAt = Date.now();
             logger.info(`AgentLoop: Tick #${this._tickCount} complete.`);
+        }
+    }
+
+    /**
+     * Iterate through all whitelisted guilds and decide if we should chime in.
+     */
+    async _checkProactiveGuilds() {
+        if (!this._bot) return;
+
+        // Fetch settings from Firebase
+        const database = require('../firebase-login')();
+        if (!database) return;
+
+        const snapshot = await database.ref('guild_settings').once('value');
+        if (!snapshot.exists()) return;
+        const guildSettings = snapshot.val();
+
+        for (const guildId in guildSettings) {
+            if (!guildSettings[guildId].agent_enabled) continue;
+
+            const guild = this._bot.guilds.cache.get(guildId);
+            if (!guild) continue;
+
+            // Find the most likely 'active' channel (prioritizing general or the one with most recent activity)
+            const channels = await guild.channels.fetch();
+            const textChannels = channels.filter(c => c.isTextBased() && !c.isThread() && c.viewable && c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']));
+            
+            // For now, let's just pick one high-traffic channel (e.g. named 'general') or the first text channel
+            const targetChannel = textChannels.find(c => c.name === 'general') || textChannels.first();
+            if (!targetChannel) continue;
+
+            // Cooldown check: don't proactive-interject more than once every 2 hours in the same channel
+            const lastInterjectKey = `proactive.last_run.${targetChannel.id}`;
+            const lastInterject = agentMemory.get(lastInterjectKey, guildId);
+            if (lastInterject && (Date.now() - parseInt(lastInterject) < 2 * 60 * 60 * 1000)) continue;
+
+            await this._evaluateProactiveNeed(targetChannel, guildId);
+        }
+    }
+
+    async _evaluateProactiveNeed(channel, guildId) {
+        logger.info(`AgentLoop: Evaluating proactive need for #${channel.name} in ${guildId}...`);
+        
+        // Peek at the last 20 messages
+        const messages = await channel.messages.fetch({ limit: 20 });
+        if (messages.size < 5) return; // Too quiet to bother
+
+        // RECENCY CHECK: Only interject if the conversation is still "alive" (last message within 10 mins)
+        const lastMessage = messages.first();
+        const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+        if (lastMessage.createdAt.getTime() < tenMinutesAgo) {
+            logger.info(`AgentLoop: skipping #${channel.name} — conversation is stale (last message >10m ago).`);
+            return;
+        }
+
+        const conversationContext = messages.reverse().map(m => `${m.author.username}: ${m.content}`).join('\n');
+        const now = new Date().toLocaleString();
+
+        const prompt = `You are Skynet, a helpful autonomous agent. You are observing a conversation in the channel #${channel.name}.
+Current time: ${now}
+
+[CONVERSATION CONTENT]
+${conversationContext}
+
+Your goal is to decide if you should PROACTIVELY interject to help.
+Rules:
+1. ONLY interject if there is a CLEAR chance to be highly useful (e.g. someone is confused about a topic you can search, there's a task mentioned you could schedule, or a poll is needed).
+2. If the conversation is just casual chat or nothing specific is needed, respond with: NOOP
+3. If you decide to interject, provide a helpful, brief suggestion or perform an action AND explain your reasoning.
+4. Use the format: <<<INTERJECT: "Your message here">>>
+5. You can also trigger tool calls alongside your message: <<<RUN_COMMAND: {"command": "...", ...}>>>
+
+Be very selective. Don't be "that annoying AI". If in doubt, NOOP.`;
+
+        try {
+            const result = await queryLocalOrRemote('/api/chat', { 
+                messages: [{ role: 'system', content: prompt }],
+                options: { temperature: 0.1 } // Very conservative
+            });
+
+            const content = result?.message?.content?.trim() || '';
+            
+            if (content.includes('<<<INTERJECT:')) {
+                const msgMatch = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/);
+                const intercom = msgMatch ? msgMatch[1] : null;
+                
+                if (intercom) {
+                    await channel.send(`*(Proactive Suggestion)* ${intercom}`);
+                    agentMemory.set(`proactive.last_run.${channel.id}`, String(Date.now()), 1, guildId);
+                    logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`);
+                }
+
+                // Check for tool calls too
+                const cmdMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/);
+                if (cmdMatch) {
+                    const cmdData = JSON.parse(jsonrepair(cmdMatch[1]));
+                    await this._executeCommand(cmdData);
+                }
+            }
+        } catch (err) {
+            logger.error(`AgentLoop proactive evaluation error: ${err.message}`);
         }
     }
 
@@ -245,26 +350,20 @@ Reason: Recording health check timestamp for diagnostics.`;
         }
 
         if (cmd === 'schedule') {
-            const { resolveTime } = require('./AgentClock');
-            const message = getParam(cmdData, 'message');
-            const when = getParam(cmdData, 'when');
-            if (!message || !when) return null;
-            const scheduledAt = await resolveTime(when);
-            if (!scheduledAt) {
-                logger.warn(`AgentLoop: Could not resolve time "${when}" for autonomous schedule.`);
-                return null;
-            }
-            const task = agentScheduler.add({
-                description: message,
-                scheduledAt,
-                userId: getParam(cmdData, 'userId') || null,
-                guildId: getParam(cmdData, 'guildId') || null,
-                channelId: getParam(cmdData, 'channelId') || 'dm',
-                repeat: ['hourly', 'daily', 'weekly'].includes(getParam(cmdData, 'repeat')) ? getParam(cmdData, 'repeat') : null,
-                createdBy: 'agent_loop'
+            const actionExecutor = require('./ActionExecutor');
+            const res = await actionExecutor.executeAction('schedule_task', {
+                description: getParam(cmdData, 'message'),
+                when: getParam(cmdData, 'when'),
+                repeat: getParam(cmdData, 'repeat'),
+                channelId: getParam(cmdData, 'channelId'),
+                userId: getParam(cmdData, 'userId')
+            }, {
+                client: this._bot,
+                userId: 'agent_loop',
+                // For background tasks, we don't need a real interaction, the action sends to channel directly
             });
-            logger.info(`AgentLoop: [schedule] Task ${task.id} → ${new Date(scheduledAt).toLocaleString()}`);
-            return `schedule: "${message.substring(0, 40)}" at ${new Date(scheduledAt).toLocaleString()}`;
+            if (res.success) return `schedule: "${getParam(cmdData, 'message').substring(0, 40)}"`;
+            return null;
         }
 
         if (cmd === 'cancel_task') {

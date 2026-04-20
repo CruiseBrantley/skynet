@@ -42,12 +42,12 @@ async function checkOllamaOnline(url, endpoint) {
  * @returns {Promise<object>} The normalized response data
  */
 async function queryOllama(endpoint, payload, fallbackLevel = 0) {
+    logger.info(`queryOllama: Entry [Level ${fallbackLevel}] for ${endpoint}`);
     // Handle backwards compatibility for boolean isBackup
-    // If isBackup is true, we skip the primary PC and jump to the first fallback (Local)
     if (fallbackLevel === true) fallbackLevel = 1;
     if (fallbackLevel === false) fallbackLevel = 0;
 
-    const timeoutMs = 300000; // 5 minutes timeout safety
+    const timeoutMs = 60000; // 1 minute timeout for faster failover
 
     // Level 1: Gemini API Tier (The first reliable fail-over)
     if (fallbackLevel === 1) {
@@ -127,7 +127,14 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
                 logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`);
             }
             const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: timeoutMs * 1.5 });
-            return response.data;
+            
+            const data = response.data;
+            if (data && data.message && data.message.content) {
+                return data;
+            } else if (data && data.response) {
+                return { message: { role: 'assistant', content: data.response } };
+            }
+            return data;
         } catch (err) {
             logger.error(`Final local fallback failed: ${err.message}`);
             throw new Error("All fallback tiers (Remote, Gemini, Local) are unreachable.");
@@ -153,9 +160,20 @@ async function queryOllama(endpoint, payload, fallbackLevel = 0) {
     }
     try {
         const response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs });
-        return response.data;
+        
+        // NORMALIZATION LAYER: Ensure we always have a message.content structure
+        const data = response.data;
+        if (data && data.message && data.message.content) {
+            logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`);
+            return data;
+        } else if (data && data.response) {
+            logger.info(`queryOllama: Level 0 Legacy Success from ${remoteHost} (Mapped to Chat)`);
+            return { message: { role: 'assistant', content: data.response } };
+        }
+        
+        throw new Error("Malformed Ollama response: Missing both message.content and response fields.");
     } catch (err) {
-        logger.info(`Primary Ollama failed, falling back to Local: ${err.message}`);
+        logger.info(`Primary Ollama failed or malformed, falling back to Gemini: ${err.message}`);
         return queryOllama(endpoint, payload, 1);
     }
 }
@@ -194,4 +212,62 @@ async function queryLocalOrRemote(endpoint, payload) {
     return queryOllama(endpoint, payload, 2);
 }
 
-module.exports = { queryOllama, queryLocalOrRemote };
+
+/**
+ * Advanced wrapper for queryOllama that handles memory injection, context blocks,
+ * and system prompt management. Used primarily by the chat command.
+ */
+async function queryOllamaWithContext(messages, options, botName = 'Skynet') {
+    const { 
+        isBackup = false, 
+        commandsContext = "", 
+        logsContext = "", 
+        guildId = null,
+        systemPrompt = ""
+    } = options;
+
+    const agentMemory = require('./AgentMemory');
+    const memorySummary = agentMemory.getSummary(guildId);
+    const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY:\n${memorySummary}` : '';
+    let sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`;
+
+    let processedMessages = messages.map((msg, idx) => {
+        if (idx === 0 && msg.role === 'system') {
+            return { ...msg, content: sysMsg };
+        }
+        if (isBackup && msg.images) {
+            const { images, ...rest } = msg;
+            return {
+                ...rest,
+                content: (rest.content || "") + `\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that ${botName}'s visual sensors are currently offline and you can only process text.]`
+            };
+        }
+        return msg;
+    });
+
+    try {
+        const result = await queryOllama('/api/chat', { 
+            messages: processedMessages,
+            options: {
+                num_ctx: 8192,
+                temperature: 0.7,
+                top_k: 40,
+                top_p: 0.9
+            }
+        }, isBackup);
+        return result;
+    } catch (err) {
+        if (!isBackup) {
+            logger.info(`Primary Ollama failed, falling back to backup: ${err.message}`);
+            return queryOllamaWithContext(messages, { ...options, isBackup: true }, botName);
+        }
+        throw err;
+    }
+}
+
+module.exports = {
+    queryOllama,
+    queryOllamaWithContext,
+    checkOllamaOnline,
+    queryLocalOrRemote
+};
