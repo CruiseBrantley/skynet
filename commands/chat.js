@@ -17,6 +17,7 @@ const ActionExecutor = require('../util/ActionExecutor');
 
 const COMMAND_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:\s*(\{[\s\S]*?\})\s*>>>/;
 const SCRUB_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:[\s\S]*?>>>/gi;
+const THOUGHT_SCRUB_REGEX = /^(?:Thinking\.\.\.|Let me check\.\.\.|One moment\.\.\.|Searching\.\.\.|Analyzing\.\.\.|Polishing response\.\.\.|Finalizing\.\.\.)$|^>.*$/gm;
 
 function scrubTags(text) {
     if (!text) return text;
@@ -166,7 +167,8 @@ module.exports = {
 async function execute(interaction, database) {
     const sharedState = {
         primaryResponseUsed: false,
-        primaryContent: null
+        primaryContent: null,
+        highImpactCount: 0
     };
 
     logger.info(`Chat command execution started for user: ${interaction.user.tag}`);
@@ -303,6 +305,7 @@ async function execute(interaction, database) {
         let replyContent = responseData.message.content || "";
         
         const executedCommands = new Set();
+        const executedJson = new Set(); // Prevent exact same JSON from running twice in one turn
         let loopCount = 0;
         while (loopCount < 5) {
             if (!replyContent || typeof replyContent !== 'string') break;
@@ -316,14 +319,14 @@ async function execute(interaction, database) {
                 jsonStr = commandMatch[1];
             } else {
                 // Fallback: If no tags, did the AI just output a naked JSON block?
-                const nakedMatch = replyContent.match(/(\{[\s\S]*?\})/);
-                if (nakedMatch) {
+                const isPotentialJson = replyContent.trim().startsWith('{') && replyContent.trim().endsWith('}');
+                if (isPotentialJson && !replyContent.includes('<<<RUN_COMMAND')) {
                     try {
-                        const candidate = nakedMatch[1];
+                        const candidate = replyContent.trim();
                         const testData = JSON.parse(jsonrepair(candidate));
                         if (testData.command) {
                             jsonStr = candidate;
-                            fullMatchString = nakedMatch[0];
+                            fullMatchString = replyContent;
                             logger.info(`AUTONOMOUS: Detected naked JSON: ${jsonStr.substring(0, 100)}`);
                         }
                     } catch (e) {}
@@ -343,7 +346,39 @@ async function execute(interaction, database) {
                     lastMsg.content = lastMsg.content.replace(fullMatchString, '[Command Executed]').trim();
                 }
 
-                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '');
+                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '').toLowerCase();
+                const allActions = ActionExecutor.listActions();
+                const isAction = allActions.some(a => a.name === rawCmdName);
+                
+                // Smart Budgeting: Prevent spam of major actions within a single user request turn.
+                // Whitelist minor utility commands that can naturally be multi-fired.
+                const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search'];
+                const highImpactCommands = ['send_embed', 'create_poll', 'summarize_history'];
+
+                const normalizedJson = JSON.stringify(cmdData);
+                if (executedJson.has(normalizedJson)) {
+                    logger.warn(`AUTONOMOUS: Blocking identical re-execution of command in this turn.`);
+                    continue;
+                }
+
+                if (executedCommands.has(rawCmdName) && !multiFireWhitelist.includes(rawCmdName)) {
+                    logger.warn(`AUTONOMOUS: Blocking redundant execution of ${rawCmdName} in this turn.`);
+                    continue;
+                }
+
+                if (highImpactCommands.includes(rawCmdName)) {
+                    if (sharedState.highImpactCount >= 1) {
+                        logger.warn(`AUTONOMOUS: High-impact command budget exceeded (${rawCmdName}). Blocking execution.`);
+                        actionResult = "[SYSTEM: Error - Command budget exceeded for this turn. You have already executed a major action. Do NOT attempt to run more high-impact commands during this specific turn.]";
+                        channelHistories[channelId].messages.push({ role: 'system', content: actionResult });
+                        continue;
+                    }
+                    sharedState.highImpactCount++;
+                }
+
+                executedCommands.add(rawCmdName);
+                executedJson.add(normalizedJson);
+
                 // Identify the parameters. If they are nested in 'params', use that. 
                 // Otherwise, use all keys EXCEPT 'command' as the parameters.
                 let params = cmdData.params;
@@ -351,9 +386,7 @@ async function execute(interaction, database) {
                     const { command, ...rest } = cmdData;
                     params = rest;
                 }
-                
-                executedCommands.add(rawCmdName);
-                
+
                 // Special case: natural language "memories" handled locally
                 if (['remember', 'recall', 'forget'].includes(rawCmdName)) {
                     if (rawCmdName === 'remember') {
@@ -371,6 +404,13 @@ async function execute(interaction, database) {
                     }
                     
                     channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Operations complete. The user has been notified. Provide a 1-sentence final acknowledgement, then stop.]` });
+                    
+                    // BATCH DRAIN: If more tags are pending, don't query back yet
+                    if (replyContent.match(COMMAND_REGEX)) {
+                        logger.info(`AUTONOMOUS: More commands detected after memory action, skipping intermediate followup.`);
+                        continue;
+                    }
+                    
                     const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
                         isBackup: currentIsBackup,
                         commandsContext,
@@ -383,9 +423,6 @@ async function execute(interaction, database) {
                     continue;
                 }
 
-                // Check for generic actions or slash commands
-                const allActions = ActionExecutor.listActions();
-                const isAction = allActions.some(a => a.name === rawCmdName);
                 const targetCmd = interaction.client.commands.get(rawCmdName);
 
                 if (isAction || targetCmd) {
@@ -442,6 +479,15 @@ async function execute(interaction, database) {
                     }
 
                     channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Action Result: ${actionResult}. The result is visible to the user. Do NOT repeat the command. Provide a 1-sentence acknowledgement, then stop.]` });
+                    
+                    // BATCH DRAIN: If there are still more commands to run in the CURRENT replyContent,
+                    // we do NOT query back yet. We just continue the loop to process them.
+                    // This prevents the AI from "restating" the command in a followup and causing duplicates.
+                    if (replyContent.match(COMMAND_REGEX)) {
+                        logger.info(`AUTONOMOUS: More commands detected in current buffer, skipping intermediate followup.`);
+                        continue;
+                    }
+
                     const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
                         isBackup: currentIsBackup,
                         commandsContext,
@@ -469,17 +515,12 @@ async function execute(interaction, database) {
                 }
 
                 if (originalEmbeds.length > 0) {
-                    // We have an embed! Just clear the status text and keep the visual.
                     await interaction.editReply({ 
                         content: "", 
                         embeds: originalEmbeds 
                     }).catch(() => {});
                 } else {
-                    // No visuals? Use the standard completion checkmark.
-                    await interaction.editReply({ 
-                        content: "✅ **Task complete.**", 
-                        flags: [MessageFlags.SuppressEmbeds] 
-                    }).catch(() => {});
+                    await interaction.deleteReply().catch(() => {});
                 }
             } else {
                 await interaction.deleteReply().catch(() => {});
@@ -488,7 +529,7 @@ async function execute(interaction, database) {
             const chunks = splitMessage(replyContent);
             for (let i = 0; i < chunks.length; i++) {
                 try {
-                    const cleanChunk = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').trim();
+                    const cleanChunk = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
                     if (!cleanChunk && i === 0 && !sharedState.primaryResponseUsed) continue; 
 
                     if (i === 0) {
@@ -506,7 +547,7 @@ async function execute(interaction, database) {
                         }
 
                         // Clean status messages from the original text
-                        const cleanOriginal = originalText.replace(/\*.*is autonomously executing.*\*/g, '').trim();
+                        const cleanOriginal = originalText.replace(/\*.*is autonomously executing.*\*/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
 
                         if (sharedState.primaryResponseUsed && originalEmbeds.length > 0) {
                             // If we already have embeds, we MERGE the text into the primary reply 
@@ -517,8 +558,9 @@ async function execute(interaction, database) {
                             if (combinedText.length > 2000) {
                                 await interaction.followUp({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] });
                             } else {
+                                // Prefer the combined text, but allow empty content if embeds are present
                                 await interaction.editReply({ 
-                                    content: combinedText || "✅ **Task complete.**", 
+                                    content: combinedText || "", 
                                     embeds: originalEmbeds 
                                 });
                             }
@@ -527,16 +569,22 @@ async function execute(interaction, database) {
                             const combinedText = (cleanChunk && cleanOriginal) ? (cleanChunk + "\n" + cleanOriginal) : (cleanChunk || cleanOriginal);
                             sharedState.primaryResponseUsed = true;
                             sharedState.primaryContent = combinedText;
-                            await interaction.editReply({ 
-                                content: combinedText || "✅ **Task complete.**", 
-                                flags: [MessageFlags.SuppressEmbeds] 
-                              });
+                            
+                            if (combinedText) {
+                                await interaction.editReply({ 
+                                    content: combinedText, 
+                                    flags: [MessageFlags.SuppressEmbeds] 
+                                  });
+                            } else {
+                                // If literally no text and no embeds, we have nothing to show.
+                                await interaction.deleteReply().catch(() => {});
+                            }
                         }
                     } else {
                         await interaction.followUp({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
                     }
                 } catch (discordErr) {
-                    const fallbackClean = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').trim();
+                    const fallbackClean = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
                     if (fallbackClean) {
                         logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message);
                         await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] });
