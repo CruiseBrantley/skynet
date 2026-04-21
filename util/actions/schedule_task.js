@@ -18,6 +18,8 @@ module.exports = {
             throw new Error('Missing "description" or "when" parameters for scheduling.');
         }
 
+        logger.info(`Action: schedule_task - input when="${when}"`);
+
         // 1. Resolve time string to timestamp
         const scheduledAt = await resolveTime(when);
         if (!scheduledAt) {

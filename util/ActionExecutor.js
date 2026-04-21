@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../logger');
-const { queryLocalOrRemote } = require('./ollama');
 const { jsonrepair } = require('jsonrepair');
 
 const BUILTIN_DIR = path.join(__dirname, 'actions');
@@ -109,6 +108,7 @@ Example output:
 {"action":"send_poll","override_channel_id":"580867049006301214","params":{"question":"Who is attending?","options":["Yes","No","Maybe"],"duration_hours":24}}`;
 
         try {
+            const { queryLocalOrRemote } = require('./ollama');
             const result = await queryLocalOrRemote('/api/chat', {
                 messages: [
                     { role: 'system', content: 'You output only valid JSON. No markdown, no explanation.' },

@@ -13,7 +13,7 @@ const { queryLocalOrRemote } = require('../util/ollama');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 const agentMemory = require('../util/AgentMemory');
-const executor = require('../util/ActionExecutor');
+const ActionExecutor = require('../util/ActionExecutor');
 
 const COMMAND_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:\s*(\{[\s\S]*?\})\s*>>>/;
 const SCRUB_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:[\s\S]*?>>>/gi;
@@ -233,7 +233,7 @@ async function execute(interaction, database) {
               paramStr = ` (JSON Params: {${params}})`;
           }
           return `- ${c.data.name}: ${c.data.description}${paramStr}`;
-      }).join('\n') : 'Unknown') + '\n' + executor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n');
+      }).join('\n') : 'Unknown') + '\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n');
       let logsContext = "No recent logs available.";
       try {
           const logPath = path.join(__dirname, '../logs/combined.log');
@@ -286,7 +286,7 @@ async function execute(interaction, database) {
           lastUserMessage
       ];
 
-      logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${executor.listActions().length} available.`);
+      logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available.`);
       const responseData = await queryOllamaWithContext(finalPromptMessages, {
           isBackup: currentIsBackup,
           commandsContext,
@@ -316,13 +316,15 @@ async function execute(interaction, database) {
                 jsonStr = commandMatch[1];
             } else {
                 // Fallback: If no tags, did the AI just output a naked JSON block?
-                const nakedMatch = replyContent.match(/^\s*(\{[\s\S]*?\})\s*$/);
+                const nakedMatch = replyContent.match(/(\{[\s\S]*?\})/);
                 if (nakedMatch) {
                     try {
-                        const testData = JSON.parse(jsonrepair(nakedMatch[1]));
+                        const candidate = nakedMatch[1];
+                        const testData = JSON.parse(jsonrepair(candidate));
                         if (testData.command) {
-                            jsonStr = nakedMatch[1];
+                            jsonStr = candidate;
                             fullMatchString = nakedMatch[0];
+                            logger.info(`AUTONOMOUS: Detected naked JSON: ${jsonStr.substring(0, 100)}`);
                         }
                     } catch (e) {}
                 }
@@ -382,7 +384,7 @@ async function execute(interaction, database) {
                 }
 
                 // Check for generic actions or slash commands
-                const allActions = executor.listActions();
+                const allActions = ActionExecutor.listActions();
                 const isAction = allActions.some(a => a.name === rawCmdName);
                 const targetCmd = interaction.client.commands.get(rawCmdName);
 
@@ -410,7 +412,7 @@ async function execute(interaction, database) {
                             member: interaction.member, 
                             user: interaction.user 
                         };
-                        const result = await executor.executeAction(rawCmdName, params, actionContext);
+                        const result = await ActionExecutor.executeAction(rawCmdName, params, actionContext);
                         if (result.success) sharedState.primaryResponseUsed = true;
                         const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
                         actionResult = result.success ? (outputStr || "[SYSTEM: Action executed successfully.]") : `[SYSTEM: Action failed: ${result.error}]`;
@@ -420,7 +422,10 @@ async function execute(interaction, database) {
                             getString: (n) => String(params[n] ?? getParam(cmdData, n) ?? ""),
                             getSubcommand: () => params.subcommand || getParam(cmdData, 'subcommand'),
                             getChannel: (n) => interaction.client.channels.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<#>]/g, '')) || null,
-                            getBoolean: (n) => params[n] === true || params[n] === 'true' || getParam(cmdData, n) === true || getParam(cmdData, n) === 'true',
+                            getBoolean: (n) => {
+                                const val = params[n] ?? getParam(cmdData, n);
+                                return val === true || val === 'true' || val === 1 || val === '1';
+                            },
                             getInteger: (n) => parseInt(params[n] ?? getParam(cmdData, n) ?? 0),
                             getUser: (n) => interaction.client.users.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '')) || null,
                             getAttachment: () => null,
@@ -455,13 +460,27 @@ async function execute(interaction, database) {
         }
 
         if (replyContent.length === 0) {
-            // Task completed but no textual summary provided by AI
+            // AI didn't provide a final summary string.
             if (sharedState.primaryResponseUsed) {
-                // We have content (e.g. an embed or status message) already sent, 
-                // but we should clear the 'Thinking' status if it hasn't been overwritten.
-                // If it's a tool like 'send_embed', the primary response is already used.
-                // We'll send a final clean fallback if editReply is still the 'Thinking' status.
-                await interaction.editReply({ content: "✅ **Task complete.**", flags: [MessageFlags.SuppressEmbeds] }).catch(() => {});
+                // Determine if we need to preserve existing embeds
+                let originalEmbeds = [];
+                if (sharedState.primaryContent && typeof sharedState.primaryContent !== 'string') {
+                    originalEmbeds = sharedState.primaryContent.embeds || [];
+                }
+
+                if (originalEmbeds.length > 0) {
+                    // We have an embed! Just clear the status text and keep the visual.
+                    await interaction.editReply({ 
+                        content: "", 
+                        embeds: originalEmbeds 
+                    }).catch(() => {});
+                } else {
+                    // No visuals? Use the standard completion checkmark.
+                    await interaction.editReply({ 
+                        content: "✅ **Task complete.**", 
+                        flags: [MessageFlags.SuppressEmbeds] 
+                    }).catch(() => {});
+                }
             } else {
                 await interaction.deleteReply().catch(() => {});
             }

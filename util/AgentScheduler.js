@@ -112,6 +112,27 @@ class AgentScheduler {
     }
 
     /**
+     * Update an existing task.
+     * @param {string} id - The task ID to update.
+     * @param {object} updates - Fields to update.
+     * @returns {object|null} The updated task or null if not found.
+     */
+    update(id, updates) {
+        const task = this._tasks.find(t => t.id === id);
+        if (!task) return null;
+
+        if (updates.description !== undefined) task.description = updates.description;
+        if (updates.scheduledAt !== undefined) task.scheduledAt = updates.scheduledAt;
+        if (updates.channelId !== undefined) task.channelId = updates.channelId;
+        if (updates.repeat !== undefined) task.repeat = updates.repeat;
+        if (updates.guildId !== undefined) task.guildId = updates.guildId;
+
+        this._save();
+        logger.info(`AgentScheduler: Updated task ${id}.`);
+        return task;
+    }
+
+    /**
      * Cancel a task by ID, regardless of whether it's due.
      * @param {string} id
      * @returns {boolean} Whether a task was found and removed.

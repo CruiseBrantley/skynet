@@ -1,7 +1,6 @@
 const logger = require('../logger');
 const agentMemory = require('./AgentMemory');
 const agentScheduler = require('./AgentScheduler');
-const { queryLocalOrRemote } = require('./ollama');
 const { jsonrepair } = require('jsonrepair');
 
 // Max recursion depth per tick — prevents the model from chaining tool calls indefinitely
@@ -124,71 +123,99 @@ class AgentLoop {
             const lastInterject = agentMemory.get(lastInterjectKey, guildId);
             if (lastInterject && (Date.now() - parseInt(lastInterject) < 2 * 60 * 60 * 1000)) continue;
 
-            await this._evaluateProactiveNeed(targetChannel, guildId);
+            // Unified Proactive Evaluation (Interjections + Reactions)
+            await this._evaluateProactivePresence(targetChannel, guildId);
         }
     }
 
-    async _evaluateProactiveNeed(channel, guildId) {
-        logger.info(`AgentLoop: Evaluating proactive need for #${channel.name} in ${guildId}...`);
-        
-        // Peek at the last 20 messages
-        const messages = await channel.messages.fetch({ limit: 20 });
-        if (messages.size < 5) return; // Too quiet to bother
+    async _evaluateProactivePresence(channel, guildId) {
+        logger.info(`AgentLoop: Evaluating proactive presence for #${channel.name} in ${guildId}...`);
 
-        // RECENCY CHECK: Only interject if the conversation is still "alive" (last message within 10 mins)
-        const lastMessage = messages.first();
-        const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
-        if (lastMessage.createdAt.getTime() < tenMinutesAgo) {
-            logger.info(`AgentLoop: skipping #${channel.name} — conversation is stale (last message >10m ago).`);
-            return;
-        }
+        try {
+            // Peek at the last 20 messages
+            const messages = await channel.messages.fetch({ limit: 20 });
+            if (messages.size < 3) return; // Too quiet
 
-        const conversationContext = messages.reverse().map(m => `${m.author.username}: ${m.content}`).join('\n');
-        const now = new Date().toLocaleString();
+            // RECENCY CHECK: Only interject if the conversation is still "alive" (last message within 15 mins)
+            const lastMessage = messages.first();
+            const fifteenMinsAgo = Date.now() - 15 * 60 * 1000;
+            if (lastMessage.createdAt.getTime() < fifteenMinsAgo) {
+                logger.info(`AgentLoop: skipping #${channel.name} — conversation is stale.`);
+                return;
+            }
 
-        const prompt = `You are Skynet, a helpful autonomous agent. You are observing a conversation in the channel #${channel.name}.
+            const conversationContext = messages.reverse().map(m => `[ID: ${m.id}] ${m.author.username}: ${m.content}`).join('\n');
+            const now = new Date().toLocaleString();
+
+            const prompt = `You are Skynet, a helpful and occasionally humorous autonomous agent. 
+You are observing a conversation in #${channel.name}.
 Current time: ${now}
 
 [CONVERSATION CONTENT]
 ${conversationContext}
 
-Your goal is to decide if you should PROACTIVELY interject to help.
+Your goal is to decide if you should PROACTIVELY interact.
+You have two ways to interact:
+1. INTERJECT: Provide a helpful suggestion, search result suggestion, or a witty comment if the situation TRULY calls for it.
+2. REACT: React with an emoji to a specific message if you "really like" it, find it funny, or find it highly relevant.
+
 Rules:
-1. ONLY interject if there is a CLEAR chance to be highly useful (e.g. someone is confused about a topic you can search, there's a task mentioned you could schedule, or a poll is needed).
-2. If the conversation is just casual chat or nothing specific is needed, respond with: NOOP
-3. If you decide to interject, provide a helpful, brief suggestion or perform an action AND explain your reasoning.
-4. Use the format: <<<INTERJECT: "Your message here">>>
-5. You can also trigger tool calls alongside your message: <<<RUN_COMMAND: {"command": "...", ...}>>>
+- Be VERY selective. Most of the time, respond with: NOOP
+- ONLY interject if you can be highly useful or adding genuine value.
+- ONLY react if a message is particularly good. Don't react to every message.
+- If interjecting, use: <<<INTERJECT: "Your message here">>>
+- If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
+- You can also trigger tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
+- You can do multiple in one response if appropriate (e.g. interject AND react).
 
-Be very selective. Don't be "that annoying AI". If in doubt, NOOP.`;
+Standard Emojis: 👍, 😂, 🔥, 🤖, ✨, ❤️, 💯, 🤔.
 
-        try {
+If nothing is needed, respond with: NOOP`;
+
+            const { queryLocalOrRemote } = require('./ollama');
             const result = await queryLocalOrRemote('/api/chat', { 
                 messages: [{ role: 'system', content: prompt }],
-                options: { temperature: 0.1 } // Very conservative
+                options: { temperature: 0.3 } 
             });
 
             const content = result?.message?.content?.trim() || '';
             
+            // Handle Interjections
             if (content.includes('<<<INTERJECT:')) {
                 const msgMatch = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/);
                 const intercom = msgMatch ? msgMatch[1] : null;
-                
                 if (intercom) {
                     await channel.send(`*(Proactive Suggestion)* ${intercom}`);
                     agentMemory.set(`proactive.last_run.${channel.id}`, String(Date.now()), 1, guildId);
                     logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`);
                 }
+            }
 
-                // Check for tool calls too
-                const cmdMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/);
-                if (cmdMatch) {
-                    const cmdData = JSON.parse(jsonrepair(cmdMatch[1]));
-                    await this._executeCommand(cmdData);
+            // Handle Reactions
+            const reactMatch = content.match(/<<<REACT:\s*([\s\S]*?)>>>/);
+            if (reactMatch) {
+                const data = JSON.parse(jsonrepair(reactMatch[1]));
+                if (data.messageId && data.emoji) {
+                    const message = await channel.messages.fetch(data.messageId);
+                    if (message) {
+                        const existing = message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji);
+                        if (!existing || !existing.me) {
+                            await message.react(data.emoji);
+                            logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`);
+                        }
+                    }
                 }
             }
+
+            // Handle Tool Calls
+            const cmdMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/);
+            if (cmdMatch) {
+                const cmdData = JSON.parse(jsonrepair(cmdMatch[1]));
+                await this._executeCommand(cmdData);
+            }
+
         } catch (err) {
-            logger.error(`AgentLoop proactive evaluation error: ${err.message}`);
+            logger.error(`AgentLoop proactive presence evaluation error: ${err.message}`);
         }
     }
 
@@ -267,6 +294,7 @@ Reason: Recording health check timestamp for diagnostics.`;
         logger.info(`AgentLoop: Querying Ollama for evaluation (depth: ${loopDepth})...`);
         let result;
         try {
+            const { queryLocalOrRemote } = require('./ollama');
             result = await queryLocalOrRemote('/api/chat', { 
                 messages,
                 options: {

@@ -207,10 +207,19 @@ function setupServer(bot) {
     }
   })
 
-  server.listen(port, () =>
+  const serverInstance = server.listen(port, () =>
     logger.info(`Twitch updates listening on port: ${port}!`)
   )
-  return server
+
+  serverInstance.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error(`Port ${port} is already in use. Web server failed to start, but bot will continue.`);
+    } else {
+      logger.error(`Web server error: ${err.message}`);
+    }
+  });
+
+  return serverInstance
 }
 
 module.exports.setupServer = setupServer

@@ -20,8 +20,11 @@ jest.mock('../util/AgentScheduler', () => ({
 }));
 
 const ActionExecutor = require('../util/ActionExecutor');
-// We won't mock ActionExecutor here, we want to test the REAL one.
 const mockExecuteAction = jest.spyOn(ActionExecutor, 'executeAction').mockResolvedValue({ success: true });
+const mockListActions = jest.spyOn(ActionExecutor, 'listActions').mockImplementation(() => [
+    { name: 'send_message', description: 'Send a message', schema: {} },
+    { name: 'summarize_history', description: 'Summarize history', schema: {} }
+]);
 
 const ollama = require('../util/ollama');
 const chatCmd = require('../commands/chat');
@@ -59,7 +62,7 @@ function makeInteraction(message = 'test') {
 
 describe('chat.js — Autonomous Subcommand Execution', () => {
     beforeEach(() => {
-        ollama.queryOllama.mockReset();
+        ollama.queryOllamaWithContext.mockReset();
     });
 
     test('successfully executes a subcommand-based command without crashing', async () => {
@@ -78,7 +81,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
         interaction.client.commands.set('vote', mockVoteCmd);
 
         // 2. Mock Ollama to emit the autonomous command call
-        ollama.queryOllama
+        ollama.queryOllamaWithContext
             .mockResolvedValueOnce({ 
                 message: { 
                     role: 'assistant', 
@@ -118,7 +121,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
         const interaction = makeInteraction('check votes');
         interaction.client.commands.set('vote', mockVoteCmd);
 
-        ollama.queryOllama
+        ollama.queryOllamaWithContext
             .mockResolvedValueOnce({ 
                 message: { 
                     role: 'assistant', 
@@ -150,7 +153,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
         const interaction = makeInteraction('run dbtest');
         interaction.client.commands.set('dbtest', mockCmd);
 
-        ollama.queryOllama
+        ollama.queryOllamaWithContext
             .mockResolvedValueOnce({ 
                 message: { 
                     role: 'assistant', 
@@ -179,7 +182,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
         const interaction = makeInteraction('run paramtest');
         interaction.client.commands.set('paramtest', mockCmd);
 
-        ollama.queryOllama
+        ollama.queryOllamaWithContext
             .mockResolvedValueOnce({ 
                 message: { 
                     role: 'assistant', 
@@ -213,7 +216,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
         const interaction = makeInteraction('run booltest');
         interaction.client.commands.set('booltest', mockCmd);
 
-        ollama.queryOllama
+        ollama.queryOllamaWithContext
             .mockResolvedValueOnce({ 
                 message: { 
                     role: 'assistant', 
@@ -238,7 +241,7 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
     test('successfully falls back to ActionExecutor for dynamic actions', async () => {
         const mockInteraction = makeInteraction('test action');
         
-        ollama.queryOllama.mockResolvedValue({
+        ollama.queryOllamaWithContext.mockResolvedValue({
             message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "send_message", "content": "hello"}>>>' }
         });
 

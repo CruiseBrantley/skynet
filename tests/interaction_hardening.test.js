@@ -1,3 +1,14 @@
+const mockExecuteAction = jest.fn().mockResolvedValue({ success: true, output: "Mocked output" });
+const mockListActions = jest.fn().mockReturnValue([
+    { name: 'send_embed', description: 'Send an embed', schema: {} },
+    { name: 'send_message', description: 'Send a message', schema: {} }
+]);
+
+jest.mock('../util/ActionExecutor', () => ({
+    executeAction: (...args) => mockExecuteAction(...args),
+    listActions: () => mockListActions()
+}));
+
 const chat = require('../commands/chat');
 const { queryOllamaWithContext } = require('../util/ollama');
 const executor = require('../util/ActionExecutor');
@@ -40,9 +51,6 @@ describe('Unified Interaction Hardening Suite', () => {
             followUp: jest.fn().mockResolvedValue({}),
             deleteReply: jest.fn().mockResolvedValue({})
         };
-
-        // Spy on executor
-        jest.spyOn(executor, 'executeAction').mockResolvedValue({ success: true, output: "Mocked output" });
     });
 
     test('Case 1: Standard Tagged Command', async () => {

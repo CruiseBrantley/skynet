@@ -33,7 +33,7 @@ Format with Discord markdown. Don't mention message IDs or timestamps.
 Conversation History:
 ${historyText}`;
 
-            const result = await queryOllama([{ role: 'user', content: prompt }], false);
+            const result = await queryOllama('/api/chat', { messages: [{ role: 'user', content: prompt }] }, 2); // Force local for background tasks
             
             if (result && result.message && result.message.content) {
                 const summary = result.message.content.trim();

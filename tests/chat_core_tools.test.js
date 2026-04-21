@@ -1,10 +1,11 @@
 const chat = require('../commands/chat');
-const { queryOllama } = require('../util/ollama');
+const { queryOllama, queryOllamaWithContext } = require('../util/ollama');
 const ActionExecutor = require('../util/ActionExecutor');
 const agentMemory = require('../util/AgentMemory');
 
 jest.mock('../util/ollama', () => ({
-    queryOllama: jest.fn()
+    queryOllama: jest.fn(),
+    queryOllamaWithContext: jest.fn()
 }));
 jest.mock('../util/AgentMemory');
 jest.mock('../util/AgentScheduler');
@@ -66,7 +67,7 @@ describe('chat.js - Unified Action Execution Baseline', () => {
     });
 
     test('remember command updates AgentMemory', async () => {
-        queryOllama.mockResolvedValueOnce({
+        queryOllamaWithContext.mockResolvedValueOnce({
             message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "remember", "key": "test_key", "value": "test_value"}>>>' }
         }).mockResolvedValueOnce({
             message: { role: 'assistant', content: 'I will remember that.' }
@@ -82,7 +83,7 @@ describe('chat.js - Unified Action Execution Baseline', () => {
 
     test('schedule command calls ActionExecutor with correct param order', async () => {
         const cmdPayload = { command: "schedule", params: { message: "test", when: "in 1m" } };
-        queryOllama.mockResolvedValueOnce({
+        queryOllamaWithContext.mockResolvedValueOnce({
             message: { role: 'assistant', content: `<<<RUN_COMMAND: ${JSON.stringify(cmdPayload)}>>>` }
         }).mockResolvedValueOnce({
             message: { role: 'assistant', content: 'Task scheduled summary' }
@@ -95,14 +96,14 @@ describe('chat.js - Unified Action Execution Baseline', () => {
         // Parameters should be the SECOND argument, context should be the THIRD
         expect(ActionExecutor.executeAction).toHaveBeenCalledWith(
             'schedule', 
-            expect.objectContaining(cmdPayload), 
+            expect.objectContaining(cmdPayload.params), 
             expect.objectContaining({ userId: 'user-id' })
         );
     });
 
     test('generic action (like add_reaction) calls ActionExecutor correctly', async () => {
         const cmdPayload = { command: "add_reaction", emoji: "👍", messageId: "123" };
-        queryOllama.mockResolvedValueOnce({
+        queryOllamaWithContext.mockResolvedValueOnce({
             message: { role: 'assistant', content: `<<<RUN_COMMAND: ${JSON.stringify(cmdPayload)}>>>` }
         }).mockResolvedValueOnce({
             message: { role: 'assistant', content: 'Reaction added.' }
@@ -121,7 +122,7 @@ describe('chat.js - Unified Action Execution Baseline', () => {
 
     test('cancel_task command calls ActionExecutor', async () => {
         const cmdPayload = { command: "cancel_task", params: { id: "task-123" } };
-        queryOllama.mockResolvedValueOnce({
+        queryOllamaWithContext.mockResolvedValueOnce({
             message: { role: 'assistant', content: `<<<RUN_COMMAND: ${JSON.stringify(cmdPayload)}>>>` }
         }).mockResolvedValueOnce({
             message: { role: 'assistant', content: 'Task cancelled summary' }
@@ -133,7 +134,7 @@ describe('chat.js - Unified Action Execution Baseline', () => {
 
         expect(ActionExecutor.executeAction).toHaveBeenCalledWith(
             'cancel_task', 
-            expect.objectContaining(cmdPayload), 
+            expect.objectContaining(cmdPayload.params), 
             expect.objectContaining({ userId: 'user-id' })
         );
     });

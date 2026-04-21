@@ -27,7 +27,7 @@ describe('Summarize Detail Levels', () => {
             messages: expect.arrayContaining([
                 expect.objectContaining({
                     role: 'system',
-                    content: expect.stringContaining('extremely brief, one-sentence summary')
+                    content: expect.stringContaining('very brief summary (maximum 2 sentences)')
                 })
             ])
         }));

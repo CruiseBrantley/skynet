@@ -101,4 +101,13 @@ describe('AgentClock — extended coverage', () => {
         const ts = await resolveTime('xyzzy frobozz grue');
         expect(ts).toBeNull();
     });
+
+    test('"Saturday at 5pm" resolves to the next Saturday at 17:00', async () => {
+        const ts = await resolveTime('Saturday at 5pm');
+        expect(ts).not.toBeNull();
+        const d = new Date(ts);
+        expect(d.getDay()).toBe(6); // Saturday
+        expect(d.getHours()).toBe(17);
+        expect(ts).toBeGreaterThan(Date.now());
+    });
 });

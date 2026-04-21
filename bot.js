@@ -38,297 +38,303 @@ if (fs.existsSync(tempMusicDir)) {
     logger.info(`Cleaned up ${files.length} orphaned music files on startup.`);
 }
 
-function discordBot() {
-    // Initialize Discord Bot
-    if (process.env.NODE_ENV !== 'dev') process.env.NODE_ENV = 'prod'
-    logger.info('Current ENV:' + process.env.NODE_ENV)
-    const bot = new Client({
-        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages],
-        partials: [Partials.Channel]
-    })
+// Initialize Discord Bot
+if (process.env.NODE_ENV !== 'dev') process.env.NODE_ENV = 'prod'
+logger.info('Current ENV:' + process.env.NODE_ENV)
 
-    bot.commands = new Collection();
-    const commandsPath = path.join(__dirname, 'commands');
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js') && file !== 'chat.js');
+const bot = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.DirectMessageReactions,
+    ],
+    partials: [Partials.Channel, Partials.Message, Partials.GuildMember]
+})
 
-    for (const file of commandFiles) {
-        const filePath = path.join(commandsPath, file);
-        const command = require(filePath);
-        if ('data' in command && 'execute' in command) {
-            bot.commands.set(command.data.name, command);
-        } else {
-            console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
-        }
+bot.commands = new Collection();
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js') && file !== 'chat.js');
+
+for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+    if ('data' in command && 'execute' in command) {
+        bot.commands.set(command.data.name, command);
+    } else {
+        console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+    }
+}
+
+const database = loginFirebase()
+const setupConfigSync = require('./util/configSync')
+bot.configSync = setupConfigSync(database)
+
+// Guardian setup for singleton detection
+const InstanceGuardian = require('./util/InstanceGuardian');
+const guardian = new InstanceGuardian(database);
+guardian.init();
+
+const musicManager = require('./util/MusicManager');
+const agentScheduler = require('./util/AgentScheduler');
+const agentLoop = require('./util/AgentLoop');
+const botUpdate = require('./events/botUpdate');
+const botDelete = require('./events/botDelete');
+
+const aloneTimers = new Map();
+
+bot.on('ready', () => {
+    logger.info('Connected')
+    logger.info('Logged in as: ')
+    logger.info(bot.user.username + ' - (' + bot.user.id + ')')
+    bot.user.setActivity(process.env.BOT_ACTIVITY || 'for you', { type: 'WATCHING' })
+
+    // Start the agent task scheduler tick (60-second interval)
+    if (!bot._schedulerRunning) {
+        bot._schedulerRunning = true;
+        logger.info('AgentScheduler: Tick started (60s interval).');
+        setInterval(() => agentScheduler.processDueTasks(bot), 60_000);
     }
 
-    const aFunc = async () => {
-        try {
-            await bot.login(process.env.TOKEN)
-            return bot
-        } catch (err) {
-            console.error('Bot Failed Logging in: ', err)
-            process.exit()
-        }
+    // Start the background agent loop
+    if (!bot._agentLoopStarted) {
+        bot._agentLoopStarted = true;
+        const loopInterval = parseInt(process.env.AGENT_LOOP_INTERVAL_MS) || 5 * 60_000;
+        agentLoop.start(bot, loopInterval);
     }
-    aFunc()
-    const database = loginFirebase()
-    const setupConfigSync = require('./util/configSync')
-    bot.configSync = setupConfigSync(database)
-    
-    // Guardian setup for singleton detection
-    const InstanceGuardian = require('./util/InstanceGuardian');
-    const guardian = new InstanceGuardian(database);
-    guardian.init();
 
-    bot.on('ready', () => {
-        logger.info('Connected')
-        logger.info('Logged in as: ')
-        logger.info(bot.user.username + ' - (' + bot.user.id + ')')
-        bot.user.setActivity(process.env.BOT_ACTIVITY || 'for you', { type: 'WATCHING' })
+    // Start the web server
+    try {
+        server(bot, database);
+    } catch (err) {
+        logger.error(`Failed to start web server: ${err.message}`);
+    }
+})
 
-        // Start the agent task scheduler tick (60-second interval)
-        // Guard flag prevents duplicate intervals on Discord reconnect events
-        if (!bot._schedulerRunning) {
-            bot._schedulerRunning = true;
-            logger.info('AgentScheduler: Tick started (60s interval).');
-            setInterval(() => agentScheduler.processDueTasks(bot), 60_000);
-        }
+bot.on('error', (err) => {
+    logger.error('Discord error: ' + err.message);
+});
 
-        // Start the background agent loop
-        // Interval defaults to 10 minutes; override with AGENT_LOOP_INTERVAL_MS in .env
-        if (!bot._agentLoopStarted) {
-            bot._agentLoopStarted = true;
-            const loopInterval = parseInt(process.env.AGENT_LOOP_INTERVAL_MS) || 5 * 60_000;
-            agentLoop.start(bot, loopInterval);
-        }
-    })
+bot.on('voiceStateUpdate', (oldState, newState) => {
+    const botId = bot.user.id;
+    const guildId = newState.guild.id;
+    const queue = musicManager.getQueue(guildId);
 
-    bot.on('error', err => {
-        logger.info('Encountered an error: ', err)
-    })
+    if (!queue || !queue.connection) return;
 
-    const botUpdate = require('./events/botUpdate')
-    const botDelete = require('./events/botDelete')
-    const linkSummarize = require('./events/linkSummarize')
+    const myChannelId = queue.connection.joinConfig.channelId;
+    const channel = newState.guild.channels.cache.get(myChannelId);
 
-    server(bot)
-    linkSummarize(bot)
+    if (!channel) return;
 
-    const musicManager = require('./util/MusicManager');
-    const agentScheduler = require('./util/AgentScheduler');
-    const agentLoop = require('./util/AgentLoop');
-    const aloneTimers = new Map();
+    // Count non-bot members
+    const humanCount = channel.members.filter(m => !m.user.bot).size;
 
-    bot.on('voiceStateUpdate', (oldState, newState) => {
-        const botId = bot.user.id;
-        const guildId = newState.guild.id;
-        const queue = musicManager.getQueue(guildId);
-
-        if (!queue || !queue.connection) return;
-
-        const myChannelId = queue.connection.joinConfig.channelId;
-        const channel = newState.guild.channels.cache.get(myChannelId);
-
-        if (!channel) return;
-
-        // Count non-bot members
-        const humanCount = channel.members.filter(m => !m.user.bot).size;
-
-        if (humanCount === 0) {
-            if (!aloneTimers.has(guildId)) {
-                logger.info(`Bot is alone in guild ${guildId}. Starting 60s auto-disconnect timer.`);
-                const timer = setTimeout(() => {
-                    logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity.`);
-                    musicManager.stop(guildId);
-                    aloneTimers.delete(guildId);
-                }, 60000);
-                aloneTimers.set(guildId, timer);
-            }
-        } else {
-            if (aloneTimers.has(guildId)) {
-                logger.info(`Humans returned to guild ${guildId}. Cancelling auto-disconnect timer.`);
-                clearTimeout(aloneTimers.get(guildId));
+    if (humanCount === 0) {
+        if (!aloneTimers.has(guildId)) {
+            logger.info(`Bot is alone in guild ${guildId}. Starting 60s auto-disconnect timer.`);
+            const timer = setTimeout(() => {
+                logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity.`);
+                musicManager.stop(guildId);
                 aloneTimers.delete(guildId);
-            }
+            }, 60000);
+            aloneTimers.set(guildId, timer);
         }
-    });
-
-    bot.on('interactionCreate', async interaction => {
-        if (interaction.isAutocomplete()) {
-            const command = interaction.client.commands.get(interaction.commandName);
-            if (!command || !command.autocomplete) return;
-            try {
-                await command.autocomplete(interaction);
-            } catch (error) {
-                logger.error(`Autocomplete error (${interaction.commandName}):`, error);
-            }
-            return;
+    } else {
+        if (aloneTimers.has(guildId)) {
+            logger.info(`Humans returned to guild ${guildId}. Cancelling auto-disconnect timer.`);
+            clearTimeout(aloneTimers.get(guildId));
+            aloneTimers.delete(guildId);
         }
+    }
+});
 
-        if (interaction.isButton()) {
-            const commandName = interaction.customId.split('_')[0];
-            const command = interaction.client.commands.get(commandName);
-            if (command && command.handleButton) {
-                try {
-                    await command.handleButton(interaction);
-                } catch (error) {
-                    logger.error(`Button error (${interaction.customId}):`, error);
-                }
-            }
-            return;
-        }
-
-        if (!interaction.isChatInputCommand()) return;
-
-        logger.info(`Interaction received: ${interaction.commandName} from ${interaction.user.tag}`);
-
+bot.on('interactionCreate', async interaction => {
+    if (interaction.isAutocomplete()) {
         const command = interaction.client.commands.get(interaction.commandName);
-
-        if (!command) {
-            logger.error(`No command matching ${interaction.commandName} was found.`);
-            return;
-        }
-
+        if (!command || !command.autocomplete) return;
         try {
-            await command.execute(interaction, database);
-            logger.info(`Command executed successfully: ${interaction.commandName}`);
+            await command.autocomplete(interaction);
         } catch (error) {
-            logger.error(`Command execution error (${interaction.commandName}):`, error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true }).catch(() => { });
-            } else {
-                await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true }).catch(() => { });
-            }
+            logger.error(`Autocomplete error: ${error.message}`);
         }
-    });
+    }
 
-    bot.on('messageUpdate', botUpdate())
+    if (!interaction.isChatInputCommand()) return;
 
-    bot.on('messageDelete', botDelete())
+    const command = interaction.client.commands.get(interaction.commandName);
 
-    bot.on('messageCreate', async message => {
-        if (message.author.bot) return;
+    if (!command) {
+        logger.warn(`No command matching ${interaction.commandName} was found.`);
+        return;
+    }
 
-        // Skip messages sent more than 5 minutes ago (prevents backlog spam on startup)
-        if (Date.now() - message.createdAt.getTime() > 5 * 60 * 1000) return;
+    try {
+        await command.execute(interaction, database);
+    } catch (error) {
+        logger.error(`Slash command error: ${error.stack || error.message}`);
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
+        } else {
+            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+        }
+    }
+});
 
-        // Check if the bot is directly mentioned (ignore @everyone and @here) or if it's a DM
-        if (message.mentions.everyone) return;
-        
-        const isDM = !message.guild || message.channel.isDMBased?.() || message.channel.type === 1;
-        const isMentioned = message.mentions.has(bot.user);
-        const isThread = message.channel.isThread?.() || false;
-        
-        let shouldRespond = isMentioned || isDM;
+bot.on('messageUpdate', botUpdate())
+bot.on('messageDelete', botDelete())
 
-        if (!shouldRespond && isThread) {
-            // Check if the bot is participating in the thread
+bot.on('threadCreate', async thread => {
+    try {
+        // Auto-join if the thread was created from one of our messages
+        const starter = await thread.fetchStarterMessage().catch(() => null);
+        if (starter?.author.id === bot.user.id) {
+            await thread.join();
+            logger.info(`Auto-joined thread: ${thread.name} (Started from our message)`);
+        }
+    } catch (e) {
+        logger.error(`Error auto-joining thread: ${e.message}`);
+    }
+});
+
+bot.on('messageCreate', async message => {
+    if (!message.author.bot) {
+        logger.info(`Message Heartbeat: From ${message.author.tag} in ${message.guild ? 'Guild' : 'DM'}: "${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}"`);
+    }
+
+    if (message.author.bot) return;
+
+    // Skip messages sent more than 10 minutes ago
+    if (Date.now() - message.createdAt.getTime() > 10 * 60 * 1000) return;
+
+    if (message.mentions.everyone) return;
+    
+    const isDM = !message.guild || message.channel.isDMBased?.() || message.channel.type === 1;
+    const isMentioned = message.mentions.has(bot.user);
+    const isThread = message.channel.isThread?.() || false;
+    
+    let shouldRespond = isMentioned || isDM;
+
+    if (!shouldRespond && isThread) {
+        let isOurThread = false;
+        try {
             const threadMembers = await message.channel.members.fetch().catch(() => new Collection());
-            if (threadMembers.has(bot.user.id) || message.channel.ownerId === bot.user.id) {
-                // Perform a "Contextual Relevance Check" before responding
-                // We want to see if it's directed at us or if there's a question we can answer.
-                const recentMessages = await message.channel.messages.fetch({ limit: 5 });
-                const context = recentMessages.reverse().map(m => `${m.author.username}: ${m.content}`).join('\n');
-                const botName = process.env.BOT_NAME || 'Skynet';
+            isOurThread = threadMembers.has(bot.user.id) || message.channel.ownerId === bot.user.id;
+            
+            if (!isOurThread) {
+                // Secondary check: was this thread started from one of our messages?
+                const starter = await message.channel.fetchStarterMessage().catch(() => null);
+                if (starter?.author.id === bot.user.id) {
+                    isOurThread = true;
+                    await message.channel.join().catch(() => {});
+                }
+            }
+        } catch (e) {
+            logger.error(`Error checking thread membership: ${e.message}`);
+        }
 
-                // Heuristic Check: Mentioned by name, or is a question in a thread we are active in
-                const containsName = message.content.toLowerCase().includes(botName.toLowerCase());
-                const isQuestion = message.content.includes('?');
-                const lastWasBot = recentMessages.last()?.author.id === bot.user.id;
+        if (isOurThread) {
+            const recentMessages = await message.channel.messages.fetch({ limit: 5 });
+            const context = recentMessages.reverse().map(m => `${m.author.username}: ${m.content}`).join('\n');
+            const botName = process.env.BOT_NAME || 'Skynet';
 
-                if (containsName || (isQuestion && lastWasBot)) {
+            const containsName = message.content.toLowerCase().includes(botName.toLowerCase());
+            const isQuestion = message.content.includes('?');
+            const lastWasBot = recentMessages.last()?.author.id === bot.user.id;
+
+            if (containsName || (isQuestion && lastWasBot)) {
+                shouldRespond = true;
+            } else {
+                const { queryLocalOrRemote } = require('./util/ollama');
+                const decision = await queryLocalOrRemote('/api/chat', {
+                    messages: [
+                        { role: 'system', content: `You are ${botName}. Decide if you should respond to the current thread. Respond only with YES or NO.` },
+                        { role: 'user', content: `[THREAD CONTEXT]\n${context}\n\nShould I respond?` }
+                    ],
+                    options: { temperature: 0, num_predict: 5 }
+                }).catch(() => ({ message: { content: 'NO' } }));
+
+                if (decision?.message?.content?.toUpperCase().includes('YES')) {
                     shouldRespond = true;
+                }
+            }
+        }
+    }
+
+    if (shouldRespond) {
+        logger.info(`Bot triggered by ${message.author.tag} in ${isThread ? 'Thread' : (isDM ? 'DM' : message.channelId)}: "${message.content}"`);
+        const chatCommand = require('./commands/chat.js');
+        if (chatCommand) {
+            let typingInterval;
+            let responseMessage = null;
+            const stopTyping = () => { if (typingInterval) clearInterval(typingInterval); };
+
+            const replyFunc = async (content) => {
+                stopTyping();
+                const payload = typeof content === 'string' ? { content } : content;
+                const sent = await message.channel.send(payload);
+                if (!responseMessage) responseMessage = sent;
+                return sent;
+            };
+
+            const editFunc = async (content) => {
+                stopTyping();
+                const payload = typeof content === 'string' ? { content } : content;
+                if (responseMessage) {
+                    return await responseMessage.edit(payload);
                 } else {
-                    // Fast LLM "Should I Respond?" check
-                    const { queryLocalOrRemote } = require('./util/ollama');
-                    const decision = await queryLocalOrRemote('/api/chat', {
-                        messages: [
-                            { role: 'system', content: `You are ${botName}. Decide if you should respond to the current thread. Respond only with YES or NO.\nLogic: Respond if the user is asking you a question, mentioned your name, or if the conversation is stuck and you can help. Ignore casual banter between others.` },
-                            { role: 'user', content: `[THREAD CONTEXT]\n${context}\n\nShould I respond?` }
-                        ],
-                        options: { temperature: 0, num_predict: 5 }
-                    }).catch(() => ({ message: { content: 'NO' } }));
-
-                    if (decision?.message?.content?.toUpperCase().includes('YES')) {
-                        shouldRespond = true;
-                    }
-                }
-            }
-        }
-
-        if (shouldRespond) {
-            logger.info(`Bot triggered by ${message.author.tag} in ${isThread ? 'Thread' : (isDM ? 'DM' : message.channelId)}: "${message.content}"`);
-            // Directly load the chat orchestrator
-            const chatCommand = require('./commands/chat.js');
-            if (chatCommand) {
-                let typingInterval;
-                let responseMessage = null;
-                const stopTyping = () => { if (typingInterval) clearInterval(typingInterval); };
-
-                const replyFunc = async (content) => {
-                    stopTyping();
-                    const payload = typeof content === 'string' ? { content } : content;
                     const sent = await message.channel.send(payload);
-                    if (!responseMessage) responseMessage = sent;
+                    responseMessage = sent;
                     return sent;
-                };
-
-                const editFunc = async (content) => {
-                    stopTyping();
-                    const payload = typeof content === 'string' ? { content } : content;
-                    if (responseMessage) {
-                        return await responseMessage.edit(payload);
-                    } else {
-                        const sent = await message.channel.send(payload);
-                        responseMessage = sent;
-                        return sent;
-                    }
-                };
-
-                const mockInteraction = {
-                    id: `autonomous-${Date.now()}`,
-                    client: bot,
-                    user: message.author,
-                    member: message.member,
-                    guild: message.guild,
-                    guildId: message.guildId,
-                    channelId: message.channelId,
-                    channel: message.channel,
-                    options: {
-                        getString: (name) => (name === 'message' ? message.content : null),
-                        getAttachment: (name) => (message.attachments.size > 0 ? message.attachments.first() : null),
-                        attachments: message.attachments
-                    },
-                    deferReply: async () => {
-                        message.channel.sendTyping();
-                        typingInterval = setInterval(() => { message.channel.sendTyping(); }, 9000);
-                    },
-                    deleteReply: async () => {
-                        stopTyping();
-                        if (responseMessage) {
-                            await responseMessage.delete().catch(() => { });
-                            responseMessage = null;
-                        }
-                    },
-                    reply: replyFunc,
-                    editReply: editFunc,
-                    followUp: replyFunc
-                };
-
-                try {
-                    message.channel.sendTyping();
-                    await chatCommand.execute(mockInteraction, database);
-                } catch (err) {
-                    logger.error(`Mention error: ${err.stack || err.message}`);
-                    message.channel.send(`There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} AI Core.`);
                 }
+            };
+
+            const mockInteraction = {
+                id: `autonomous-${Date.now()}`,
+                client: bot,
+                user: message.author,
+                member: message.member,
+                guild: message.guild,
+                guildId: message.guildId,
+                channelId: message.channelId,
+                channel: message.channel,
+                options: {
+                    getString: (name) => (name === 'message' ? message.content : null),
+                    getAttachment: (name) => (message.attachments.size > 0 ? message.attachments.first() : null),
+                    attachments: message.attachments
+                },
+                deferReply: async () => {
+                    message.channel.sendTyping();
+                    typingInterval = setInterval(() => { message.channel.sendTyping(); }, 9000);
+                },
+                deleteReply: async () => {
+                    stopTyping();
+                    if (responseMessage) {
+                        await responseMessage.delete().catch(() => { });
+                        responseMessage = null;
+                    }
+                },
+                reply: replyFunc,
+                editReply: editFunc,
+                followUp: replyFunc
+            };
+
+            try {
+                message.channel.sendTyping();
+                await chatCommand.execute(mockInteraction, database);
+            } catch (err) {
+                logger.error(`Mention error: ${err.stack || err.message}`);
+                message.channel.send(`There was an error communicating with the ${process.env.BOT_NAME || 'Bot'} AI Core.`);
             }
         }
-    });
-}
+    }
+});
 
-if (require.main === module) {
-    discordBot();
-}
+bot.login(process.env.TOKEN).catch(err => {
+    logger.error('Bot Failed Logging in: ' + err.message);
+    process.exit(1);
+});
 
-module.exports = discordBot;
+module.exports = bot;

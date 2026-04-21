@@ -39,13 +39,40 @@ const PATTERNS = [
             return d.getTime() <= Date.now() ? d.getTime() + 86_400_000 : d.getTime();
         }
     },
+    // Days of the week (Monday, Tuesday, next Friday, sat, etc.)
+    {
+        re: /\b(?:(this|next)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b/i,
+        resolve: (m) => {
+            const isNext = m[1] && m[1].toLowerCase() === 'next';
+            const dayStr = m[2].toLowerCase();
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            const shortDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+            
+            let target = days.indexOf(dayStr);
+            if (target === -1) target = shortDays.indexOf(dayStr);
+            
+            const d = new Date();
+            const current = d.getDay();
+            let diff = target - current;
+            
+            if (isNext) {
+                diff += 7;
+            } else if (diff <= 0) {
+                diff += 7;
+            }
+            
+            d.setDate(d.getDate() + diff);
+            d.setHours(9, 0, 0, 0); // Default to 9 AM
+            return d.getTime();
+        }
+    }
 ];
 
 /**
  * Parse a clock time expression like "9pm", "9:30 AM", "21:00".
  * Returns a Unix ms timestamp for the next occurrence of that time, or null.
  */
-function parseClockTime(str) {
+function parseClockTime(str, baseTimestamp = Date.now()) {
     // 12-hour: "9pm", "9:30pm", "9:30 AM"
     const m12 = str.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
     if (m12) {
@@ -54,19 +81,19 @@ function parseClockTime(str) {
         const ampm = m12[3].toLowerCase();
         if (ampm === 'pm' && h < 12) h += 12;
         if (ampm === 'am' && h === 12) h = 0;
-        const d = new Date();
+        const d = new Date(baseTimestamp);
         d.setHours(h, min, 0, 0);
-        // If the time has already passed today, use tomorrow's occurrence
-        if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+        // If the time has already passed relative to the base, use tomorrow/next occurrence
+        if (d.getTime() <= baseTimestamp) d.setDate(d.getDate() + 1);
         return d.getTime();
     }
 
     // 24-hour: "21:00", "09:30"
     const m24 = str.match(/\b(\d{1,2}):(\d{2})\b/);
     if (m24) {
-        const d = new Date();
+        const d = new Date(baseTimestamp);
         d.setHours(parseInt(m24[1]), parseInt(m24[2]), 0, 0);
-        if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+        if (d.getTime() <= baseTimestamp) d.setDate(d.getDate() + 1);
         return d.getTime();
     }
 
@@ -89,10 +116,21 @@ async function resolveTime(naturalLanguage) {
     for (const { re, resolve } of PATTERNS) {
         const m = input.match(re);
         if (m) {
-            // Also check for a clock time within the same expression, e.g. "tonight at 9pm"
-            const clock = parseClockTime(input);
-            if (clock) return clock;
-            return resolve(m);
+            const baseDate = resolve(m);
+            // Check for a clock time within the same expression, e.g. "Saturday at 5pm"
+            const clock = parseClockTime(input, baseDate);
+            if (clock) {
+                // If it was a day-of-week, we want the time on THAT day, 
+                // so we verify if parseClockTime accidentally bumped it to the NEXT day
+                const dClock = new Date(clock);
+                const dBase = new Date(baseDate);
+                if (dClock.getDate() !== dBase.getDate() && input.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i)) {
+                    dClock.setDate(dBase.getDate());
+                    return dClock.getTime();
+                }
+                return clock;
+            }
+            return baseDate;
         }
     }
 
@@ -104,12 +142,17 @@ async function resolveTime(naturalLanguage) {
     logger.info(`AgentClock: Falling back to LLM for time resolution: "${naturalLanguage}"`);
     try {
         const { queryLocalOrRemote } = require('./ollama');
-        const now = new Date().toISOString();
+        const now = new Date();
+        const nowISO = now.toISOString();
+        const dow = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
         const result = await queryLocalOrRemote('/api/chat', {
             messages: [
                 {
                     role: 'system',
-                    content: `You are a precise time parser. Convert the user's time expression to a Unix timestamp in milliseconds.\nCurrent time (ISO 8601): ${now}\nRespond with ONLY valid JSON, nothing else: {"timestamp": 1713400000000}\nThe timestamp must be in the future relative to the current time.`
+                    content: `You are a precise time parser. Convert the user's time expression to a Unix timestamp in milliseconds.
+Current time: ${nowISO} (${dow})
+Respond with ONLY valid JSON: {"timestamp": 1713400000000}
+The timestamp must be in the future relative to the current time.`
                 },
                 {
                     role: 'user',
