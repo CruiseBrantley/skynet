@@ -9,7 +9,7 @@ const botName = process.env.BOT_NAME || 'Bot';
 wiki.setUserAgent(`${botName}Bot/1.0`);
 const puppeteerSearch = require('../util/puppeteerSearch');
 const { fetchPageText } = require('../util/summarize');
-const { queryLocalOrRemote } = require('../util/ollama');
+const { queryLocalOrRemote, queryOllamaWithContext } = require('../util/ollama');
 const { jsonrepair } = require('jsonrepair');
 const logger = require('../logger');
 const agentMemory = require('../util/AgentMemory');
@@ -101,7 +101,7 @@ function createMockInteraction(interaction, optionsOverrides = {}, onOutput = nu
     };
 }
 
-const { queryOllamaWithContext } = require('../util/ollama');
+// Moved to top
 
 
 function splitMessage(text) {
@@ -454,7 +454,7 @@ async function execute(interaction, database) {
                     continue;
                 }
             } catch (err) {
-                logger.error(`Loop error: ${err.stack}`);
+                console.error(`Loop error: ${err.stack}`);
                 break;
             }
         }
@@ -530,7 +530,7 @@ async function execute(interaction, database) {
                             await interaction.editReply({ 
                                 content: combinedText || "✅ **Task complete.**", 
                                 flags: [MessageFlags.SuppressEmbeds] 
-                            });
+                              });
                         }
                     } else {
                         await interaction.followUp({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });

@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 jest.mock('../logger');
+jest.mock('fs');
 
 const ActionExecutor = require('../util/ActionExecutor');
 const mockActionExecute = jest.spyOn(ActionExecutor, 'execute').mockResolvedValue(true);

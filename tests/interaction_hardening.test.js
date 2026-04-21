@@ -5,8 +5,8 @@ const mockListActions = jest.fn().mockReturnValue([
 ]);
 
 jest.mock('../util/ActionExecutor', () => ({
-    executeAction: (...args) => mockExecuteAction(...args),
-    listActions: () => mockListActions()
+    executeAction: mockExecuteAction,
+    listActions: mockListActions
 }));
 
 const chat = require('../commands/chat');

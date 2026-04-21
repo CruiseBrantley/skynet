@@ -1,9 +1,19 @@
+jest.mock('../util/ollama');
+const mockExecuteAction = jest.fn().mockResolvedValue({ success: true });
+jest.mock('../util/ActionExecutor', () => ({
+    executeAction: mockExecuteAction,
+    listActions: jest.fn().mockReturnValue([{ name: 'web_search' }])
+}));
+
+jest.mock('../util/AgentMemory', () => ({
+    getSummary: jest.fn().mockReturnValue(null),
+    set: jest.fn(),
+    get: jest.fn()
+}));
+
 const chat = require('../commands/chat');
 const executor = require('../util/ActionExecutor');
 const { queryOllamaWithContext } = require('../util/ollama');
-
-// Mock Ollama to simulate a query-shifting loop
-jest.mock('../util/ollama');
 
 describe('Chat Loop Safety & Scrubbing', () => {
     let mockInteraction;
@@ -14,10 +24,6 @@ describe('Chat Loop Safety & Scrubbing', () => {
         queryOllamaWithContext.mockResolvedValue({ 
             message: { content: 'Default AI Response' } 
         });
-        
-        // Use spyOn to ensure we can reset the singleton properly
-        jest.spyOn(executor, 'listActions').mockReturnValue([{ name: 'web_search' }]);
-        jest.spyOn(executor, 'executeAction').mockResolvedValue({ success: true });
         
         mockInteraction = {
             guildId: '123',
@@ -43,10 +49,6 @@ describe('Chat Loop Safety & Scrubbing', () => {
         };
     });
 
-    afterEach(() => {
-        jest.restoreAllMocks();
-    });
-
     test('should break the loop when the same tool type is called twice (Query Shifting)', async () => {
         queryOllamaWithContext.mockResolvedValueOnce({ 
             message: { content: '<<<RUN_COMMAND: {"command": "web_search", "query": "weather today"}>>>' } 
@@ -59,7 +61,7 @@ describe('Chat Loop Safety & Scrubbing', () => {
         await chat.execute(mockInteraction, {});
 
         // Should have only triggered executeAction ONCE despite the AI asking twice
-        expect(executor.executeAction).toHaveBeenCalledTimes(1);
+        expect(mockExecuteAction).toHaveBeenCalledTimes(1);
 
         // Final output should be clean
         const lastCall = mockInteraction.editReply.mock.calls[mockInteraction.editReply.mock.calls.length - 1][0];
