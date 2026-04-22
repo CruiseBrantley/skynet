@@ -37,6 +37,7 @@ class GuildQueue {
         this.lastPlayedTrack = null;     // Memory of last track for recommendations
         this.recentTracks = [];          // Rolling history of recent tracks for AI context
         this.history = new Set();        // Remember played video IDs to prevent autoplay loops
+        this.autoplayBuffer = [];        // Pre-fetched recommendations to avoid redundant AI queries
         this._isProcessingNext = false;  // Lock for _playNext race conditions
 
         /** Optional callback fired when a new track starts playing. */

@@ -485,15 +485,34 @@ class MusicManager {
         if (!queue) return;
 
         try {
-            // Get last 5 tracks + current track for superior context
-            const historyContext = queue.getRecentHistory();
-            const recommendation = await youtube.getRecommendation(historyContext, sessionHistory);
+            // Check if we have pre-fetched recommendations in the buffer
+            let recommendation = null;
+            
+            // Cleanup buffer of anything already played manually in the interim
+            queue.autoplayBuffer = queue.autoplayBuffer.filter(r => {
+                const vidId = youtube.extractVideoId(r.url);
+                return vidId && !sessionHistory.has(vidId);
+            });
+
+            if (queue.autoplayBuffer.length > 0) {
+                recommendation = queue.autoplayBuffer.shift();
+                logger.info(`Autoplay: Using buffered recommendation for ${guildId} (${queue.autoplayBuffer.length} remaining) -> ${recommendation.title}`);
+            } else {
+                // Buffer is empty, perform the expensive AI batch query
+                const historyContext = queue.getRecentHistory();
+                const candidates = await youtube.getRecommendation(historyContext, sessionHistory);
+                
+                if (candidates && candidates.length > 0) {
+                    recommendation = candidates.shift(); // Take the first one now
+                    queue.autoplayBuffer = candidates;    // Store the rest for later
+                    logger.info(`Autoplay: Batch query found ${candidates.length + 1} tracks. Playing: ${recommendation.title}`);
+                }
+            }
             
             if (recommendation) {
-                logger.info(`Autoplay: Found recommendation for ${guildId} -> ${recommendation.title}`);
                 queue.add(recommendation, 'Skynet Autoplay');
             } else {
-                logger.warn(`Autoplay: No recommendations found for guild ${guildId}`);
+                logger.warn(`Autoplay: No valid recommendations found for guild ${guildId}`);
                 this.stopUIUpdate(guildId);
             }
         } catch (err) {

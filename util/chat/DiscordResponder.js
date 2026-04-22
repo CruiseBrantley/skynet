@@ -11,6 +11,17 @@ class DiscordResponder {
   async sendFinalResponse({ interaction, replyContent, sharedState }) {
     if (!replyContent || replyContent.length === 0) {
       // AI didn't provide a final summary string.
+      if (sharedState.primaryResponseUsed && !sharedState.visualActionExecuted) {
+        try {
+          const reply = await interaction.fetchReply();
+          await reply.react('✅').catch(() => {});
+        } catch (err) {
+          // If we can't react, fallback to a very subtle empty non-breaking space
+          await interaction.editReply({ content: "\u200B" }).catch(() => {});
+        }
+        return;
+      }
+
       if (sharedState.primaryResponseUsed) {
         // Determine if we need to preserve existing embeds
         let originalEmbeds = [];

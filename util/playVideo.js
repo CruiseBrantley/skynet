@@ -74,6 +74,26 @@ async function downloadVideo(url, allowCookies = true) {
             if (err) {
                 if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
                 if (fs.existsSync(infoPath)) fs.unlinkSync(infoPath);
+
+                // Detect if the failure is due to cookie expiration / bot detection
+                const errMsg = err.message || "";
+                const isAuthError = errMsg.includes('Sign in to confirm') || 
+                                    errMsg.includes('Sign in to view') || 
+                                    errMsg.includes('not a bot');
+
+                if (isAuthError && allowCookies) {
+                    logger.warn(`YouTube bot detection triggered. Attempting automatic cookie re-sync...`);
+                    try {
+                        const { execSync } = require('child_process');
+                        execSync('python3 scripts/sync_youtube_cookies.py');
+                        logger.info('YouTube cookies re-synced successfully. Retrying download...');
+                        // Retry with fresh cookies
+                        return resolve(downloadVideo(url, true));
+                    } catch (syncErr) {
+                        logger.error(`Automatic cookie re-sync failed: ${syncErr.message}`);
+                    }
+                }
+
                 if (allowCookies) {
                     logger.warn(`yt-dlp download failed with cookies (possibly rate-limited). Retrying without cookies...`);
                     return resolve(downloadVideo(url, false));

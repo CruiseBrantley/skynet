@@ -238,12 +238,19 @@ class YouTubeMetadata {
      * Uses an LLM to generate a highly intelligent, genre-aware recommendation.
      */
     async getRecommendation(historyTracks, sessionHistory = new Set()) {
-        if (!historyTracks || historyTracks.length === 0) return null;
+        if (!historyTracks || historyTracks.length === 0) return [];
         
         const currentTrack = historyTracks[historyTracks.length - 1];
         
         // Deep context for deduplication and full history awareness in the LLM
         const pastTracks = historyTracks.slice(0, -1);
+
+        // Pre-calculate deduplication tokens for all tracks in history
+        const noiseWords = new Set(['official', 'video', 'audio', 'lyrics', 'lyric', 'hd', 'hq', 'remastered', 'remix', 'ft', 'feat', 'feature', 'featuring', 'movie', 'soundtrack', 'ost', 'theme', '4k', 'mv', 'music', 'live', 'concert', 'performance', 'version', 'extended', 'edit']);
+        const pastTokenSets = historyTracks.map(t => {
+            const clean = t.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
+            return new Set(clean.split(' ').filter(w => w.length >= 2 && !noiseWords.has(w)));
+        });
         
         try {
             const { queryOllama } = require('./ollama');
@@ -262,81 +269,71 @@ ${historyList || " (No previous history)"}
 They are NOW listening to:
  - ${currentDesc}
 
-Recommend exactly ONE highly similar, great song that fits the exact same mood, genre, and vibe as this sequence.
-CRITICAL INSTRUCTION: The recommendation MUST be firmly within the exact same musical genre and vibe as the current song. To prevent loops, pick a DIFFERENT track than any of those explicitly listed above. It is okay to occasionally suggest a different track by the same artist, but strive for variety.
-Reply with ONLY the song title and artist name in this format: "Artist - Title". Do NOT include any other text, formatting, quotes, or explanations.`;
+Recommend a list of 5 highly similar, great songs that fit the exact same mood, genre, and vibe as this sequence.
+CRITICAL INSTRUCTIONS:
+- The recommendations MUST be firmly within the exact same musical genre and vibe as the current song.
+- Pick DIFFERENT tracks than any of those explicitly listed above.
+- Reply with ONLY the list of 5 songs in this format: "Artist - Title", one per line. Do NOT include numbering, formatting, or explanations.`;
 
-            let aiSuggestion = '';
+            let aiSuggestions = [];
             try {
-                // Temperature scales with queue depth (0.7 -> 1.2) to encourage "wandering" over long sessions
                 const dynamicTemp = Math.min(1.2, 0.7 + (historyTracks.length * 0.02));
                 const result = await queryOllama('/api/generate', { 
                     prompt, 
                     options: { temperature: dynamicTemp, seed } 
                 });
-                aiSuggestion = result.response.trim().replace(/["']/g, '');
-                logger.info(`AI suggested: ${aiSuggestion}`);
+                aiSuggestions = result.response.trim().split('\n').map(s => s.replace(/["']/g, '').trim()).filter(s => s.length > 0);
+                logger.info(`AI suggested ${aiSuggestions.length} candidates.`);
             } catch (llmErr) {
                 logger.warn(`AI recommendation failed, falling back to basic YouTube search: ${llmErr.message}`);
-                aiSuggestion = `related songs to ${currentTrack.title}`;
+                aiSuggestions = [`related songs to ${currentTrack.title}`];
             }
             
-            // Search YouTube for the AI's suggestion
-            const results = await this.search(`${aiSuggestion} official audio`, 5);
+            const finalRecommendations = [];
             
-            // 1. Filter out videos that we have already played in this session
-            const unplayed = results.filter(r => {
-                const vidId = this.extractVideoId(r.url);
-                return vidId && !sessionHistory.has(vidId);
-            });
-
-            // 2. High-Efficiency Semantic Deduplication
-            // Identify and drop useless vocabulary that pollutes string comparisons.
-            const noiseWords = new Set([
-                'official', 'music', 'video', 'lyric', 'lyrics', 'audio', 'hd', '4k', 'live', 
-                'feat', 'ft', 'prod', 'remix', 'remastered', '2022', '2023', '2024', '2025',
-                'hq', 'exclusive', 'new', 'latest', 'full', 'version', 'ver', 'original', 'soundtrack'
-            ]);
-            
-            // Pre-compute O(1) Sets for all 50 tracks in history ONCE per recommendation.
-            const pastTokenSets = historyTracks.map(t => {
-                const clean = t.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
-                const tokens = clean.split(' ').filter(w => w.length > 2 && !noiseWords.has(w));
-                return new Set(tokens);
-            });
- 
-            // Filter out videos that acoustically or semantically match anything in our deep history
-            const distinctUnplayed = unplayed.filter(r => {
-                const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
-                const rTokens = clean.split(' ').filter(w => w.length > 2 && !noiseWords.has(w));
-                if (rTokens.length === 0) return true; // Keep if we scrubbed it to nothing
- 
-                const rSet = new Set(rTokens);
+            // Process each suggestion and aggregate unique results
+            for (const suggestion of aiSuggestions.slice(0, 5)) {
+                const results = await this.search(`${suggestion} official audio`, 3);
                 
-                // Compare this unplayed result against our deep history memory banks
-                return !pastTokenSets.some(pastSet => {
-                    if (pastSet.size === 0) return false;
-                    
-                    let overlap = 0;
-                    for (const word of rSet) {
-                        if (pastSet.has(word)) overlap++;
-                    }
-                    
-                    // A track is a duplicate if it shares:
-                    // 1. At least 2 significant words OR
-                    // 2. More than 50% of the token space of the recommendation
-                    const threshold = Math.max(2, rSet.size * 0.5);
-                    return overlap >= threshold;
+                // 1. Filter out videos that we have already played in this session
+                const unplayed = results.filter(r => {
+                    const vidId = this.extractVideoId(r.url);
+                    return vidId && !sessionHistory.has(vidId);
                 });
-            });
 
-            // Fallback chain: best distinct unplayed -> any unplayed -> first result
-            if (distinctUnplayed.length > 0) return distinctUnplayed[0];
-            if (unplayed.length > 0) return unplayed[0];
-            return results.length > 0 ? results[0] : null;
+                // 2. High-Efficiency Semantic Deduplication against deep history
+                const distinctUnplayed = unplayed.filter(r => {
+                    const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
+                    const rTokens = clean.split(' ').filter(w => w.length >= 2 && !noiseWords.has(w));
+                    if (rTokens.length === 0) return true;
+
+                    const rSet = new Set(rTokens);
+                    return !pastTokenSets.some(pastSet => {
+                        if (pastSet.size === 0) return false;
+                        let overlap = 0;
+                        for (const word of rSet) {
+                            if (pastSet.has(word)) overlap++;
+                        }
+                        const threshold = Math.max(2, rSet.size * 0.5);
+                        return overlap >= threshold;
+                    });
+                });
+
+                if (distinctUnplayed.length > 0) {
+                    // Avoid adding the same video ID twice if multiple AI suggestions lead to the same result
+                    const candidate = distinctUnplayed[0];
+                    const candId = this.extractVideoId(candidate.url);
+                    if (!finalRecommendations.some(ext => this.extractVideoId(ext.url) === candId)) {
+                        finalRecommendations.push(candidate);
+                    }
+                }
+            }
+
+            return finalRecommendations;
         } catch (err) {
-            logger.warn(`Failed to get recommendation for ${lastTrack.title}: ${err.message}`);
-            return null;
+            const trackTitle = currentTrack?.title || 'unknown track';
+            logger.warn(`Failed to get recommendation for ${trackTitle}: ${err.message}`);
+            return [];
         }
     }
 
