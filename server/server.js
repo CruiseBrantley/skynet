@@ -211,15 +211,18 @@ function setupServer(bot) {
     logger.info(`Twitch updates listening on port: ${port}!`)
   )
 
-  serverInstance.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      logger.error(`Port ${port} is already in use. Web server failed to start, but bot will continue.`);
-    } else {
-      logger.error(`Web server error: ${err.message}`);
-    }
-  });
+  if (serverInstance && typeof serverInstance.on === 'function') {
+    serverInstance.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        logger.error(`Port ${port} is already in use. Web server failed to start, but bot will continue.`);
+      } else {
+        logger.error(`Web server error: ${err.message}`);
+      }
+    });
+  }
 
-  return serverInstance
+  // Return the express app for tests/introspection; callers don't use the return today.
+  return server
 }
 
 module.exports.setupServer = setupServer

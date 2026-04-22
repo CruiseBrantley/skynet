@@ -205,6 +205,7 @@ class MusicManager {
             }
 
             else if (btn.customId === 'music_lyrics') {
+                await btn.deferUpdate().catch(() => {});
                 const state = this.uiStates.get(guildId);
                 if (state) {
                     if (state.showLyrics) {
@@ -222,7 +223,6 @@ class MusicManager {
                         }
                     }
                 }
-                await btn.deferUpdate().catch(() => {});
             }
 
             else if (btn.customId === 'music_shuffle') {

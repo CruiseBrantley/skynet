@@ -1,10 +1,3 @@
-const speak = require('../commands/speak');
-const { getVoiceConnection, joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus } = require('@discordjs/voice');
-const logger = require('../logger');
-const fs = require('fs');
-const util = require('util');
-const exec = require('child_process').exec;
-
 jest.mock('@discordjs/voice');
 jest.mock('../logger', () => ({ info: jest.fn(), error: jest.fn() }));
 jest.mock('fs');
@@ -12,8 +5,13 @@ jest.mock('child_process', () => ({
     exec: jest.fn((cmd, cb) => cb(null, { stdout: '', stderr: '' }))
 }));
 jest.mock('../util/MusicManager', () => ({
-    getQueue: jest.fn().mockReturnValue(null), // Default no music playing
+    getQueue: jest.fn().mockReturnValue(null)
 }));
+
+const { getVoiceConnection, joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus } = require('@discordjs/voice');
+const speak = require('../commands/speak');
+const logger = require('../logger');
+const fs = require('fs');
 
 describe('speak command', () => {
     let mockInteraction;
@@ -26,14 +24,11 @@ describe('speak command', () => {
 
         process.env.TTS_MODEL = 'test-model.onnx';
 
+        // Do not auto-emit `stateChange` → idle; real `speak.js` schedules a 2s `setTimeout` on idle
+        // which keeps Jest alive and surfaces as "Jest did not exit".
         mockPlayer = {
             play: jest.fn(),
-            on: jest.fn((event, cb) => {
-                if (event === 'stateChange') {
-                    // simulate going idle immediately to trigger cleanup
-                    setTimeout(() => cb({ status: 'playing' }, { status: 'idle' }), 0);
-                }
-            }),
+            on: jest.fn(),
             pause: jest.fn(),
             unpause: jest.fn(),
         };
@@ -42,9 +37,7 @@ describe('speak command', () => {
             state: { status: VoiceConnectionStatus.Ready },
             subscribe: jest.fn().mockReturnValue({ unsubscribe: jest.fn() }),
             destroy: jest.fn(),
-            on: jest.fn((ev, cb) => {
-                 if (ev === VoiceConnectionStatus.Ready) setTimeout(cb, 0);
-            })
+            on: jest.fn()
         };
 
         createAudioPlayer.mockReturnValue(mockPlayer);
@@ -85,13 +78,12 @@ describe('speak command', () => {
     test('successfully generates TTS and plays via voice connection', async () => {
         await speak.execute(mockInteraction);
 
-        // Allow async resolution
         await new Promise(r => setTimeout(r, 10));
 
         expect(mockInteraction.deferReply).toHaveBeenCalled();
         expect(mockInteraction.deleteReply).toHaveBeenCalled();
         const { exec } = require('child_process');
-        expect(exec).toHaveBeenCalled(); // Piper execution and ffmpeg filtering
+        expect(exec).toHaveBeenCalled();
 
         expect(joinVoiceChannel).toHaveBeenCalledWith({
             channelId: 'channel-123',
@@ -104,10 +96,10 @@ describe('speak command', () => {
 
     test('fails if no voice channel is found', async () => {
         mockInteraction.options.getChannel.mockReturnValue(null);
-        mockInteraction.member.voice.channelId = null; // No fallback channel
-        
+        mockInteraction.member.voice.channelId = null;
+
         await speak.execute(mockInteraction);
-        
+
         expect(mockInteraction.reply).toHaveBeenCalledWith({
             content: "You need to be in a voice channel or to specify a channel.",
             ephemeral: true
@@ -115,7 +107,6 @@ describe('speak command', () => {
     });
 
     test('natural translation of mentions', async () => {
-        // Provide a mock user mention
         mockInteraction.options.getString.mockReturnValue('Hello <@12345>');
         mockInteraction.guild.members.cache.get.mockImplementation((id) => {
             if (id === '12345') return { nickname: 'John', user: { username: 'JohnDoe' } };
@@ -140,7 +131,7 @@ describe('speak command', () => {
         await new Promise(r => setTimeout(r, 10));
 
         expect(musicQueueMock.player.pause).toHaveBeenCalled();
-        expect(musicQueueMock.player.unpause).toHaveBeenCalled(); // Unpauses on error
+        expect(musicQueueMock.player.unpause).toHaveBeenCalled();
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Encountered an error speaking'), expect.any(Error));
     });
 });

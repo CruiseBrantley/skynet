@@ -118,10 +118,10 @@ class AgentLoop {
             const targetChannel = textChannels.find(c => c.name === 'general') || textChannels.first();
             if (!targetChannel) continue;
 
-            // Cooldown check: don't proactive-interject more than once every 2 hours in the same channel
+            // Cooldown check: don't proactive-interject more than once every 5 minutes in the same channel
             const lastInterjectKey = `proactive.last_run.${targetChannel.id}`;
             const lastInterject = agentMemory.get(lastInterjectKey, guildId);
-            if (lastInterject && (Date.now() - parseInt(lastInterject) < 2 * 60 * 60 * 1000)) continue;
+            if (lastInterject && (Date.now() - parseInt(lastInterject) < 5 * 60 * 1000)) continue;
 
             // Unified Proactive Evaluation (Interjections + Reactions)
             await this._evaluateProactivePresence(targetChannel, guildId);
@@ -191,19 +191,24 @@ If nothing is needed, respond with: NOOP`;
                 }
             }
 
-            // Handle Reactions
-            const reactMatch = content.match(/<<<REACT:\s*([\s\S]*?)>>>/);
-            if (reactMatch) {
-                const data = JSON.parse(jsonrepair(reactMatch[1]));
-                if (data.messageId && data.emoji) {
-                    const message = await channel.messages.fetch(data.messageId);
-                    if (message) {
-                        const existing = message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji);
-                        if (!existing || !existing.me) {
-                            await message.react(data.emoji);
-                            logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`);
+            // Handle Reactions (Multiple allowed)
+            const reactMatches = content.matchAll(/<<<REACT:\s*([\s\S]*?)>>>/g);
+            for (const match of reactMatches) {
+                try {
+                    const data = JSON.parse(jsonrepair(match[1]));
+                    if (data.messageId && data.emoji) {
+                        const message = await channel.messages.fetch(data.messageId).catch(() => null);
+                        if (message) {
+                            const existing = message.reactions.cache.get(data.emoji) || 
+                                             message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji);
+                            if (!existing || !existing.me) {
+                                await message.react(data.emoji).catch(() => {});
+                                logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`);
+                            }
                         }
                     }
+                } catch (e) {
+                    logger.warn(`AgentLoop: Failed to parse reaction tag: ${e.message}`);
                 }
             }
 

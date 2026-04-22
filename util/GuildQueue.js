@@ -1,9 +1,14 @@
-const { createAudioPlayer, AudioPlayerStatus, joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const playVideo = require('./playVideo');
 const logger = require('../logger');
 const fs = require('fs');
 const path = require('path');
 const youtube = require('./YouTubeMetadata');
+
+let _voice;
+function getVoice() {
+    if (!_voice) _voice = require('@discordjs/voice');
+    return _voice;
+}
 
 /**
  * Per-guild audio queue. Manages voice connection, playback, and track list.
@@ -15,6 +20,9 @@ class GuildQueue {
         this.adapterCreator = adapterCreator;
         this.queue = [];
         this.currentTrack = null;
+        const { createAudioPlayer, AudioPlayerStatus, VoiceConnectionStatus } = getVoice();
+        this._AudioPlayerStatus = AudioPlayerStatus;
+        this._VoiceConnectionStatus = VoiceConnectionStatus;
         this.player = createAudioPlayer();
         this.connection = null;
         this.currentSubscription = null;
@@ -37,7 +45,7 @@ class GuildQueue {
         /** Optional callback fired when the queue runs out and playback ends. */
         this.onQueueEnd = null;
 
-        this.player.on(AudioPlayerStatus.Idle, () => {
+        this.player.on(this._AudioPlayerStatus.Idle, () => {
             logger.info(`Player idle in guild ${this.guildId}, advancing queue...`);
             this._cleanupCurrentTrackFile();
             if (this.currentTrack) {
@@ -55,7 +63,7 @@ class GuildQueue {
             this._playNext();
         });
 
-        this.player.on(AudioPlayerStatus.Playing, () => {
+        this.player.on(this._AudioPlayerStatus.Playing, () => {
             if (!this._playbackStartedAt) {
                 this._playbackStartedAt = Date.now();
                 logger.info(`Playback started in guild ${this.guildId}`);
@@ -87,6 +95,7 @@ class GuildQueue {
             return;
         }
 
+        const { joinVoiceChannel, entersState } = getVoice();
         this.connection = joinVoiceChannel({
             channelId,
             guildId: this.guildId,
@@ -95,7 +104,7 @@ class GuildQueue {
 
         // Wait for connection to be ready before proceeding
         try {
-            await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
+            await entersState(this.connection, this._VoiceConnectionStatus.Ready, 20_000);
             logger.info(`Voice connection ready in channel ${channel.name} (${channelId})`);
         } catch (err) {
             this.connection.destroy();
@@ -118,7 +127,7 @@ class GuildQueue {
             track.requestedBy = user.displayName || user.username || user;
         }
         this.queue.push(track);
-        if (this.player.state.status === AudioPlayerStatus.Idle && this.queue.length === 1) {
+        if (this.player.state.status === this._AudioPlayerStatus.Idle && this.queue.length === 1) {
             this._playNext();
         } else {
             this._prefetchNext();
@@ -136,7 +145,7 @@ class GuildQueue {
             tracks.forEach(t => t.requestedBy = name);
         }
         this.queue.push(...tracks);
-        if (this.player.state.status === AudioPlayerStatus.Idle) {
+        if (this.player.state.status === this._AudioPlayerStatus.Idle) {
             this._playNext();
         } else {
             this._prefetchNext();
@@ -191,7 +200,7 @@ class GuildQueue {
      */
     pause() {
         const status = this.player.state.status;
-        if (status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering) {
+        if (status === this._AudioPlayerStatus.Playing || status === this._AudioPlayerStatus.Buffering) {
             this._pausedAt = Date.now();
             this.player.pause();
             return true;
@@ -203,7 +212,7 @@ class GuildQueue {
      * Resume playback.
      */
     resume() {
-        if (this.player.state.status === AudioPlayerStatus.Paused) {
+        if (this.player.state.status === this._AudioPlayerStatus.Paused) {
             // Account for time spent paused so the timer doesn't jump forward permanently
             if (this._pausedAt && this._playbackStartedAt) {
                 const pauseDuration = Date.now() - this._pausedAt;
@@ -220,7 +229,7 @@ class GuildQueue {
      * Whether the player is currently paused.
      */
     isPaused() {
-        return this.player.state.status === AudioPlayerStatus.Paused;
+        return this.player.state.status === this._AudioPlayerStatus.Paused;
     }
 
     /**
@@ -247,7 +256,7 @@ class GuildQueue {
      */
     isPlaying() {
         const status = this.player.state.status;
-        return status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering;
+        return status === this._AudioPlayerStatus.Playing || status === this._AudioPlayerStatus.Buffering;
     }
 
     /**

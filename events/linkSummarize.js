@@ -14,11 +14,13 @@ function linkSummarize(bot) {
         if (Date.now() - message.createdAt.getTime() > 5 * 60 * 1000) return;
 
         // Deduplication Check
-        if (processedMessages.has(message.id)) return;
-        processedMessages.add(message.id);
-        if (processedMessages.size > CACHE_SIZE) {
-            const first = processedMessages.values().next().value;
-            processedMessages.delete(first);
+        if (message.id) {
+            if (processedMessages.has(message.id)) return;
+            processedMessages.add(message.id);
+            if (processedMessages.size > CACHE_SIZE) {
+                const first = processedMessages.values().next().value;
+                processedMessages.delete(first);
+            }
         }
 
         // Fetch guild-level settings

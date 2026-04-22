@@ -1,10 +1,3 @@
-const playVideo = require('../util/playVideo');
-const { createAudioResource } = require('@discordjs/voice');
-const { spawn, execFile } = require('child_process');
-const fs = require('fs');
-const play = require('play-dl');
-const logger = require('../logger');
-
 jest.mock('@discordjs/voice', () => ({
     createAudioResource: jest.fn().mockReturnValue('mock-audio-resource'),
     StreamType: { Raw: 'Raw' }
@@ -20,6 +13,13 @@ jest.mock('../logger', () => ({
     error: jest.fn(),
     warn: jest.fn(),
 }));
+
+const playVideo = require('../util/playVideo');
+const { createAudioResource } = require('@discordjs/voice');
+const { spawn, execFile } = require('child_process');
+const fs = require('fs');
+const play = require('play-dl');
+const logger = require('../logger');
 
 describe('playVideo utilities', () => {
     beforeEach(() => {

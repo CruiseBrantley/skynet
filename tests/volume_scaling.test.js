@@ -1,8 +1,3 @@
-const GuildQueue = require('../util/GuildQueue');
-const playVideo = require('../util/playVideo');
-const { AudioPlayerStatus } = require('@discordjs/voice');
-
-// Mock dependencies
 jest.mock('@discordjs/voice', () => ({
     createAudioPlayer: jest.fn(() => ({
         on: jest.fn(),
@@ -32,6 +27,10 @@ jest.mock('../logger', () => ({
     warn: jest.fn()
 }));
 
+const GuildQueue = require('../util/GuildQueue');
+const playVideo = require('../util/playVideo');
+const { AudioPlayerStatus } = require('@discordjs/voice');
+
 describe('Volume Scaling', () => {
     let gq;
 
@@ -52,7 +51,6 @@ describe('Volume Scaling', () => {
         gq.queue = [{ title: 'Track 1', url: 'https://yt/1' }];
         await gq._playNext();
 
-        // 1.0 (internal/user volume) * 0.25 (scaling factor) = 0.25
         expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.25);
     });
 
@@ -65,7 +63,6 @@ describe('Volume Scaling', () => {
 
         await gq.seek(30);
 
-        // 1.0 (internal/user volume) * 0.25 (scaling factor) = 0.25
         expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.25);
     });
 });

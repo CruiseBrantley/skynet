@@ -292,29 +292,40 @@ Reply with ONLY the song title and artist name in this format: "Artist - Title".
 
             // 2. High-Efficiency Semantic Deduplication
             // Identify and drop useless vocabulary that pollutes string comparisons.
-            const noiseWords = new Set(['official', 'music', 'video', 'lyric', 'lyrics', 'audio', 'hd', '4k', 'live', 'feat', 'ft']);
+            const noiseWords = new Set([
+                'official', 'music', 'video', 'lyric', 'lyrics', 'audio', 'hd', '4k', 'live', 
+                'feat', 'ft', 'prod', 'remix', 'remastered', '2022', '2023', '2024', '2025',
+                'hq', 'exclusive', 'new', 'latest', 'full', 'version', 'ver', 'original', 'soundtrack'
+            ]);
             
             // Pre-compute O(1) Sets for all 50 tracks in history ONCE per recommendation.
             const pastTokenSets = historyTracks.map(t => {
-                const clean = t.title.toLowerCase().replace(/[^\w\s]/gi, ' ');
-                const validTokens = clean.split(/\s+/).filter(w => w.length > 2 && !noiseWords.has(w));
-                return new Set(validTokens);
+                const clean = t.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
+                const tokens = clean.split(' ').filter(w => w.length > 2 && !noiseWords.has(w));
+                return new Set(tokens);
             });
-
+ 
             // Filter out videos that acoustically or semantically match anything in our deep history
             const distinctUnplayed = unplayed.filter(r => {
-                const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ');
-                const rTokens = new Set(clean.split(/\s+/).filter(w => w.length > 2 && !noiseWords.has(w)));
+                const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ');
+                const rTokens = clean.split(' ').filter(w => w.length > 2 && !noiseWords.has(w));
+                if (rTokens.length === 0) return true; // Keep if we scrubbed it to nothing
+ 
+                const rSet = new Set(rTokens);
                 
                 // Compare this unplayed result against our deep history memory banks
                 return !pastTokenSets.some(pastSet => {
+                    if (pastSet.size === 0) return false;
+                    
                     let overlap = 0;
-                    for (const word of rTokens) {
+                    for (const word of rSet) {
                         if (pastSet.has(word)) overlap++;
                     }
-                    // A track is a duplicate if it shares 3+ significant words (Artist + Song Name overlap), 
-                    // or 60% of the token space of shorter titles.
-                    const threshold = Math.max(2, Math.min(pastSet.size, rTokens.size) * 0.6);
+                    
+                    // A track is a duplicate if it shares:
+                    // 1. At least 2 significant words OR
+                    // 2. More than 50% of the token space of the recommendation
+                    const threshold = Math.max(2, rSet.size * 0.5);
                     return overlap >= threshold;
                 });
             });

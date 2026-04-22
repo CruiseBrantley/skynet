@@ -6,7 +6,10 @@ const level = process.env.LOG_LEVEL || (isTest ? 'error' : 'info');
 // Configure logger settings
 const logger = winston.createLogger({
   level,
-  format: winston.format.json(),
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
   colorize: true,
   transports: [
     new winston.transports.File({ 
@@ -22,7 +25,12 @@ const logger = winston.createLogger({
 // Add console transport with appropriate level
 logger.add(
   new winston.transports.Console({
-    format: winston.format.simple(),
+    format: winston.format.combine(
+      winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      winston.format.printf(({ timestamp, level, message }) => {
+        return `${timestamp} [${level}]: ${message}`;
+      })
+    ),
     silent: isTest && !process.env.LOG_LEVEL // Silent in tests unless level is forced
   })
 );

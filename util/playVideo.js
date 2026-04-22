@@ -1,4 +1,3 @@
-const { createAudioResource, StreamType } = require('@discordjs/voice');
 const { spawn, execFile } = require('child_process');
 const { PassThrough } = require('stream');
 const path = require('path');
@@ -7,6 +6,12 @@ const play = require('play-dl');
 const logger = require('../logger');
 
 const { PROJECT_ROOT, YT_DLP, COOKIE_FILE, FFMPEG, TEMP_DIR } = require('./paths');
+
+let _voice;
+function getVoice() {
+    if (!_voice) _voice = require('@discordjs/voice');
+    return _voice;
+}
 
 // Gentle V-Shaped EQ Filter: +2dB below 120Hz (Warm Bass), +1.5dB above 8000Hz (Smooth Treble/Air)
 const EQ_FILTER = 'bass=g=2:f=120:w=0.5,treble=g=1.5:f=8000:w=0.5';
@@ -147,6 +152,7 @@ async function playVideo(url, { seekSeconds = 0, bitrate = 64000, loudnorm = nul
     logger.info(`Creating AudioResource for: ${url}${seekSeconds ? ` (seek: ${seekSeconds}s)` : ''} at ${Math.round(bitrate / 1000)}kbps`);
 
     try {
+        const { createAudioResource, StreamType } = getVoice();
         let sourcePath;
         if (url.includes('youtube.com') || url.includes('youtu.be')) {
             sourcePath = await downloadVideo(url);

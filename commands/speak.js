@@ -1,10 +1,15 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getVoiceConnection, joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const logger = require('../logger');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const fs = require('fs');
 const path = require('path');
+
+let _voice;
+function getVoice() {
+    if (!_voice) _voice = require('@discordjs/voice');
+    return _voice;
+}
 
 /**
  * Resolves Discord mentions (Users, Roles, Channels) to their display names.
@@ -20,7 +25,12 @@ async function resolveMentions(text, guild) {
     while ((match = userRegex.exec(text)) !== null) {
         const userId = match[1];
         const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
-        const displayName = member ? member.displayName : "someone";
+        const displayName =
+            member?.displayName ||
+            member?.nickname ||
+            member?.user?.globalName ||
+            member?.user?.username ||
+            "someone";
         result = result.replaceAll(match[0], displayName);
     }
     
@@ -150,6 +160,15 @@ module.exports = {
         }
 
         try {
+            const {
+                getVoiceConnection,
+                joinVoiceChannel,
+                createAudioPlayer,
+                createAudioResource,
+                StreamType,
+                VoiceConnectionStatus
+            } = getVoice();
+
             // Step 1: Generate high quality local TTS with Piper
             const piperPath = path.join(__dirname, '../tts_engine/piper_venv/bin/piper');
             const ttsModel = process.env.TTS_MODEL;

@@ -1,5 +1,36 @@
-const { AudioPlayerStatus } = require('@discordjs/voice');
-const GuildQueue = require('../util/GuildQueue');
+jest.mock('@discordjs/voice', () => {
+    const AudioPlayerStatus = {
+        Idle: 'idle',
+        Playing: 'playing',
+        Paused: 'paused',
+        Buffering: 'buffering'
+    };
+    const VoiceConnectionStatus = {
+        Ready: 'ready',
+        Destroyed: 'destroyed'
+    };
+    const makePlayer = () => {
+        const handlers = {};
+        return {
+            on: jest.fn((ev, cb) => { handlers[ev] = cb; }),
+            emit: jest.fn((ev, ...args) => {
+                if (handlers[ev]) handlers[ev](...args);
+            }),
+            state: { status: AudioPlayerStatus.Idle },
+            pause: jest.fn(),
+            unpause: jest.fn(),
+            stop: jest.fn(),
+            play: jest.fn()
+        };
+    };
+    return {
+        createAudioPlayer: jest.fn(() => makePlayer()),
+        joinVoiceChannel: jest.fn(),
+        entersState: jest.fn().mockResolvedValue(undefined),
+        AudioPlayerStatus,
+        VoiceConnectionStatus
+    };
+});
 
 jest.mock('../util/playVideo', () => {
     const fn = jest.fn().mockResolvedValue({ volume: { setVolume: jest.fn() } });
@@ -21,6 +52,9 @@ jest.mock('../logger', () => ({
     error: jest.fn(),
     warn: jest.fn(),
 }));
+
+const { AudioPlayerStatus } = require('@discordjs/voice');
+const GuildQueue = require('../util/GuildQueue');
 
 describe('GuildQueue', () => {
     let queue;

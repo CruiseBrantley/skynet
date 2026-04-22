@@ -2,27 +2,18 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const googleIt = require('google-it');
-const ddg = require('duck-duck-scrape');
-const wiki = require('wikipedia');
 const botName = process.env.BOT_NAME || 'Bot';
-wiki.setUserAgent(`${botName}Bot/1.0`);
-const puppeteerSearch = require('../util/puppeteerSearch');
-const { fetchPageText } = require('../util/summarize');
-const { queryLocalOrRemote, queryOllamaWithContext } = require('../util/ollama');
-const { jsonrepair } = require('jsonrepair');
+const { queryOllamaWithContext } = require('../util/ollama');
 const logger = require('../logger');
 const agentMemory = require('../util/AgentMemory');
 const ActionExecutor = require('../util/ActionExecutor');
 
-const COMMAND_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:\s*(\{[\s\S]*?\})\s*>>>/;
-const SCRUB_REGEX = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:[\s\S]*?>>>/gi;
-const THOUGHT_SCRUB_REGEX = /^(?:Thinking\.\.\.|Let me check\.\.\.|One moment\.\.\.|Searching\.\.\.|Analyzing\.\.\.|Polishing response\.\.\.|Finalizing\.\.\.)$|^>.*$/gm;
-
-function scrubTags(text) {
-    if (!text) return text;
-    return text.replace(SCRUB_REGEX, '').trim();
-}
+const { COMMAND_REGEX, SCRUB_REGEX } = require('../util/chat/constants');
+const { scrubTags } = require('../util/chat/scrubTags');
+const AutonomousCommandProcessor = require('../util/chat/AutonomousCommandProcessor');
+const DiscordResponder = require('../util/chat/DiscordResponder');
+const mentionResolver = require('../util/MentionResolver');
+const { getParam } = require('../util/commandHelper');
 
 // Load system prompt from config file, falling back to a generic default
 let SYSTEM_PROMPT;
@@ -34,117 +25,6 @@ try {
 
 const channelHistories = {};
 const MAX_CHANNEL_HISTORIES = 50;
-
-// Helper to build a mock interaction for autonomous command execution
-function createMockInteraction(interaction, optionsOverrides = {}, onOutput = null, sharedState = { primaryResponseUsed: false, primaryContent: "" }) {
-    const capture = async (msg) => {
-        const isString = typeof msg === 'string';
-        const str = isString ? msg : (msg?.content || "");
-        const hasEmbeds = !isString && msg?.embeds && msg.embeds.length > 0;
-        
-        if (str || hasEmbeds) {
-            if (onOutput && str) onOutput(str);
-            
-            // For merging purposes, we track if there's text
-            const currentContent = typeof sharedState.primaryContent === 'string' ? sharedState.primaryContent : (sharedState.primaryContent?.content || "");
-            const combinedText = currentContent ? (currentContent + "\n" + str) : str;
-
-            if (!sharedState.primaryResponseUsed) {
-                sharedState.primaryResponseUsed = true;
-                sharedState.primaryContent = msg; // Store the full object (embeds and all)
-                await interaction.editReply(msg);
-            } else if (!hasEmbeds && combinedText.length < 2000) {
-                // If it's just text and it fits, merge with existing text if there are NO EMBEDS
-                const currentIsEmbed = sharedState.primaryContent?.embeds?.length > 0;
-                if (!currentIsEmbed) {
-                    sharedState.primaryContent = combinedText;
-                    await interaction.editReply({ content: combinedText, flags: [MessageFlags.SuppressEmbeds] });
-                } else {
-                    await interaction.followUp({ content: str, flags: [MessageFlags.SuppressEmbeds] });
-                }
-            } else {
-                await interaction.followUp(msg);
-            }
-        }
-        return { createdTimestamp: Date.now() };
-    };
-
-    return {
-        id: interaction.id, client: interaction.client, user: interaction.user,
-        member: interaction.member, channelId: interaction.channelId,
-        channel: interaction.channel, guild: interaction.guild, guildId: interaction.guildId,
-        createdTimestamp: interaction.createdTimestamp || Date.now(),
-        options: {
-            getString: () => null, getChannel: () => null, getAttachment: () => null,
-            getBoolean: () => false, getInteger: () => null,
-            getMember: () => null, getUser: () => null,
-            getSubcommand: () => null, getSubcommandGroup: () => null,
-            ...optionsOverrides
-        },
-        reply: capture,
-        deferReply: async () => {},
-        editReply: capture,
-        followUp: capture,
-        deleteReply: async () => { 
-            sharedState.primaryResponseUsed = false; 
-            sharedState.primaryContent = ""; 
-            return interaction.deleteReply().catch(() => {});
-        },
-        toString() { 
-            const ch = (this.channel || interaction.channel);
-            if (ch && typeof ch.toString === 'function') {
-                const s = ch.toString();
-                if (s && s !== '[object Object]') return s;
-                if (ch.name) return `#${ch.name}`;
-            }
-            return "[Unknown Channel]";
-        },
-    };
-}
-
-// Moved to top
-
-
-function splitMessage(text) {
-  const chunks = [];
-  let currentChunk = '';
-  let inCodeBlock = false;
-  let codeBlockLang = '';
-
-  const lines = text.split('\n');
-  for (const line of lines) {
-      if (line.startsWith('```')) {
-          inCodeBlock = !inCodeBlock;
-          if (inCodeBlock) {
-              codeBlockLang = line.replace(/```/g, '').trim();
-          } else {
-              codeBlockLang = '';
-          }
-      }
-
-      // If adding this line exceeds the Discord limit (leaving room for code block closing wrappers)
-      if (currentChunk.length + line.length > 1900) {
-          if (inCodeBlock) {
-              currentChunk += '\n```';
-          }
-          chunks.push(currentChunk);
-          currentChunk = (inCodeBlock ? '```' + codeBlockLang + '\n' : '') + line + '\n';
-      } else {
-          currentChunk += line + '\n';
-      }
-  }
-  if (currentChunk.trim().length > 0) {
-      if (inCodeBlock) {
-          currentChunk += '\n```';
-      }
-      chunks.push(currentChunk);
-  }
-  // Fallback for extreme single-line edge cases without breaking code blocks
-  if (chunks.length === 0) {
-      chunks.push(text.substring(0, 1990));
-  }
-  return chunks;
-}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -250,6 +130,9 @@ async function execute(interaction, database) {
 
       let currentIsBackup = false;
 
+      mentionResolver.record(interaction.user.username, interaction.user.id);
+      if (interaction.member?.nickname) mentionResolver.record(interaction.member.nickname, interaction.user.id);
+
       // ---------------------------------------------
       // 🧊 Context Enrichment: Real-time Channel State
       // Fetch recent messages to see IDs and Reactions so actions like add_reaction or send_thread can target them
@@ -257,6 +140,9 @@ async function execute(interaction, database) {
       try {
           const recentMessages = await interaction.channel.messages.fetch({ limit: 40 });
           channelContext = `Recent Channel Context:\n` + recentMessages.map(m => {
+              mentionResolver.record(m.author.username, m.author.id);
+              if (m.member?.nickname) mentionResolver.record(m.member.nickname, m.author.id);
+
               const reactions = m.reactions.cache.map(r => `${r.emoji.name} (x${r.count})`).join(', ');
               let authorHandle = `@${m.author.username}${m.member?.nickname ? ` (${m.member.nickname})` : ''}`;
               
@@ -267,7 +153,10 @@ async function execute(interaction, database) {
                   for (const mention of mentions) {
                       const id = mention.replace(/[<@!>]/g, '');
                       const user = interaction.client.users.cache.get(id);
-                      if (user) enrichedContent = enrichedContent.replaceAll(mention, `@${user.username}`);
+                      if (user) {
+                        enrichedContent = enrichedContent.replaceAll(mention, `@${user.username}`);
+                        mentionResolver.record(user.username, id);
+                      }
                   }
               }
 
@@ -289,13 +178,14 @@ async function execute(interaction, database) {
       ];
 
       logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available.`);
-      const responseData = await queryOllamaWithContext(finalPromptMessages, {
+      const ollamaContext = {
           isBackup: currentIsBackup,
           commandsContext,
           logsContext,
           guildId: interaction.guildId,
           systemPrompt: SYSTEM_PROMPT
-      }, botName);
+      };
+      const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName);
       if (responseData && responseData.message) {
         const rawAIContent = responseData.message.content || "";
         logger.info(`AI Raw Response: "${rawAIContent.substring(0, 300)}${rawAIContent.length > 300 ? '...' : ''}"`);
@@ -303,295 +193,28 @@ async function execute(interaction, database) {
 
         // Discord message max length is 2000. Chunk intelligently.
         let replyContent = responseData.message.content || "";
-        
-        const executedCommands = new Set();
-        const executedJson = new Set(); // Prevent exact same JSON from running twice in one turn
-        let loopCount = 0;
-        while (loopCount < 5) {
-            if (!replyContent || typeof replyContent !== 'string') break;
-            
-            let commandMatch = replyContent.match(COMMAND_REGEX);
-            let jsonStr = "";
-            let fullMatchString = "";
 
-            if (commandMatch) {
-                fullMatchString = commandMatch[0];
-                jsonStr = commandMatch[1];
-            } else {
-                // Fallback: If no tags, did the AI just output a naked JSON block?
-                const isPotentialJson = replyContent.trim().startsWith('{') && replyContent.trim().endsWith('}');
-                if (isPotentialJson && !replyContent.includes('<<<RUN_COMMAND')) {
-                    try {
-                        const candidate = replyContent.trim();
-                        const testData = JSON.parse(jsonrepair(candidate));
-                        if (testData.command) {
-                            jsonStr = candidate;
-                            fullMatchString = replyContent;
-                            logger.info(`AUTONOMOUS: Detected naked JSON: ${jsonStr.substring(0, 100)}`);
-                        }
-                    } catch (e) {}
-                }
-            }
+        // Resolve @mentions back to <@ID> using the persistent resolver
+        replyContent = mentionResolver.resolve(replyContent);
 
-            if (!jsonStr) break;
-            
-            loopCount++;
-            try {
-                const cmdData = JSON.parse(jsonrepair(jsonStr));
-                
-                // Remove the command tag (or naked JSON) from the visible reply AND the persistent history
-                replyContent = replyContent.replace(fullMatchString, '').trim();
-                const lastMsg = channelHistories[channelId].messages[channelHistories[channelId].messages.length - 1];
-                if (lastMsg && lastMsg.role === 'assistant') {
-                    lastMsg.content = lastMsg.content.replace(fullMatchString, '[Command Executed]').trim();
-                }
+        const processor = new AutonomousCommandProcessor({
+          botName,
+          ActionExecutor,
+          agentMemory,
+          queryOllamaWithContext,
+          getParam
+        });
+        replyContent = await processor.process({
+          interaction,
+          database,
+          channelHistory: channelHistories[channelId],
+          replyContent,
+          sharedState,
+          ollamaContext
+        });
 
-                const rawCmdName = (cmdData.command || "").trim().replace(/^\/+/, '').toLowerCase();
-                const allActions = ActionExecutor.listActions();
-                const isAction = allActions.some(a => a.name === rawCmdName);
-                
-                // Smart Budgeting: Prevent spam of major actions within a single user request turn.
-                // Whitelist minor utility commands that can naturally be multi-fired.
-                const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search'];
-                const highImpactCommands = ['send_embed', 'create_poll', 'summarize_history'];
-
-                const normalizedJson = JSON.stringify(cmdData);
-                if (executedJson.has(normalizedJson)) {
-                    logger.warn(`AUTONOMOUS: Blocking identical re-execution of command in this turn.`);
-                    continue;
-                }
-
-                if (executedCommands.has(rawCmdName) && !multiFireWhitelist.includes(rawCmdName)) {
-                    logger.warn(`AUTONOMOUS: Blocking redundant execution of ${rawCmdName} in this turn.`);
-                    continue;
-                }
-
-                if (highImpactCommands.includes(rawCmdName)) {
-                    if (sharedState.highImpactCount >= 1) {
-                        logger.warn(`AUTONOMOUS: High-impact command budget exceeded (${rawCmdName}). Blocking execution.`);
-                        actionResult = "[SYSTEM: Error - Command budget exceeded for this turn. You have already executed a major action. Do NOT attempt to run more high-impact commands during this specific turn.]";
-                        channelHistories[channelId].messages.push({ role: 'system', content: actionResult });
-                        continue;
-                    }
-                    sharedState.highImpactCount++;
-                }
-
-                executedCommands.add(rawCmdName);
-                executedJson.add(normalizedJson);
-
-                // Identify the parameters. If they are nested in 'params', use that. 
-                // Otherwise, use all keys EXCEPT 'command' as the parameters.
-                let params = cmdData.params;
-                if (!params || typeof params !== 'object') {
-                    const { command, ...rest } = cmdData;
-                    params = rest;
-                }
-
-                // Special case: natural language "memories" handled locally
-                if (['remember', 'recall', 'forget'].includes(rawCmdName)) {
-                    if (rawCmdName === 'remember') {
-                        const key = cmdData.key || cmdData.params?.key;
-                        const value = cmdData.value || cmdData.params?.value;
-                        const ttl = parseInt(cmdData.ttl_days ?? cmdData.params?.ttl_days ?? 30);
-                        if (key && value !== undefined) {
-                            agentMemory.set(key, value, ttl, interaction.guildId);
-                            channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Stored memory "${key}"]. Acknowledge naturally.]` });
-                        }
-                    } else if (rawCmdName === 'recall') {
-                        const key = cmdData.key || cmdData.params?.key;
-                        const val = key ? agentMemory.get(key, interaction.guildId) : null;
-                        channelHistories[channelId].messages.push({ role: 'system', content: val ? `[SYSTEM: Memory found: "${val}"]` : `[SYSTEM: No memory found for "${key}"]` });
-                    }
-                    
-                    channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Operations complete. The user has been notified. Provide a 1-sentence final acknowledgement, then stop.]` });
-                    
-                    // BATCH DRAIN: If more tags are pending, don't query back yet
-                    if (replyContent.match(COMMAND_REGEX)) {
-                        logger.info(`AUTONOMOUS: More commands detected after memory action, skipping intermediate followup.`);
-                        continue;
-                    }
-                    
-                    const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
-                        isBackup: currentIsBackup,
-                        commandsContext,
-                        logsContext,
-                        guildId: interaction.guildId,
-                        systemPrompt: SYSTEM_PROMPT
-                    }, botName);
-                    replyContent = (replyContent + "\n" + (followup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(followup.message);
-                    continue;
-                }
-
-                const targetCmd = interaction.client.commands.get(rawCmdName);
-
-                if (isAction || targetCmd) {
-                    if (!sharedState.primaryResponseUsed) {
-                        await interaction.editReply({ content: `*${botName} is autonomously executing \`${rawCmdName}\`...*`, flags: [MessageFlags.SuppressEmbeds] });
-                    }
-
-                    let actionResult = "";
-                    const targetChannel = interaction.channel;
-                    const mock = createMockInteraction(interaction, {
-                        params: params || {},
-                        channel: targetChannel
-                    }, null, sharedState);
-
-                    if (isAction) {
-                        const actionContext = { 
-                            interaction: mock, // Use the MOCK to capture state
-                            channel: targetChannel, 
-                            client: interaction.client,
-                            guild: interaction.guild,
-                            userId: interaction.user.id, 
-                            guildId: interaction.guildId, 
-                            channelId: targetChannel.id, 
-                            member: interaction.member, 
-                            user: interaction.user 
-                        };
-                        const result = await ActionExecutor.executeAction(rawCmdName, params, actionContext);
-                        if (result.success) sharedState.primaryResponseUsed = true;
-                        const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
-                        actionResult = result.success ? (outputStr || "[SYSTEM: Action executed successfully.]") : `[SYSTEM: Action failed: ${result.error}]`;
-                    } else {
-                        const { getParam } = require('../util/commandHelper');
-                        mock.options = {
-                            getString: (n) => String(params[n] ?? getParam(cmdData, n) ?? ""),
-                            getSubcommand: () => params.subcommand || getParam(cmdData, 'subcommand'),
-                            getChannel: (n) => interaction.client.channels.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<#>]/g, '')) || null,
-                            getBoolean: (n) => {
-                                const val = params[n] ?? getParam(cmdData, n);
-                                return val === true || val === 'true' || val === 1 || val === '1';
-                            },
-                            getInteger: (n) => parseInt(params[n] ?? getParam(cmdData, n) ?? 0),
-                            getUser: (n) => interaction.client.users.cache.get((params[n] || getParam(cmdData, n) || "").toString().replace(/[<@!>]/g, '')) || null,
-                            getAttachment: () => null,
-                            getMember: () => null
-                        };
-
-                        try {
-                            sharedState.primaryResponseUsed = true;
-                            const output = await targetCmd.execute(mock, database);
-                            actionResult = typeof output === 'string' ? output : `[SYSTEM: Command /${rawCmdName} completed.]`;
-                        } catch (err) {
-                            actionResult = `[SYSTEM: Error executing /${rawCmdName}: ${err.message}]`;
-                        }
-                    }
-
-                    channelHistories[channelId].messages.push({ role: 'system', content: `[SYSTEM: Action Result: ${actionResult}. The result is visible to the user. Do NOT repeat the command. Provide a 1-sentence acknowledgement, then stop.]` });
-                    
-                    // BATCH DRAIN: If there are still more commands to run in the CURRENT replyContent,
-                    // we do NOT query back yet. We just continue the loop to process them.
-                    // This prevents the AI from "restating" the command in a followup and causing duplicates.
-                    if (replyContent.match(COMMAND_REGEX)) {
-                        logger.info(`AUTONOMOUS: More commands detected in current buffer, skipping intermediate followup.`);
-                        continue;
-                    }
-
-                    const followup = await queryOllamaWithContext([...channelHistories[channelId].messages], {
-                        isBackup: currentIsBackup,
-                        commandsContext,
-                        logsContext,
-                        guildId: interaction.guildId,
-                        systemPrompt: SYSTEM_PROMPT
-                    }, botName);
-                    replyContent = (replyContent + "\n" + (followup.message.content || '')).trim();
-                    channelHistories[channelId].messages.push(followup.message);
-                    continue;
-                }
-            } catch (err) {
-                console.error(`Loop error: ${err.stack}`);
-                break;
-            }
-        }
-
-        if (replyContent.length === 0) {
-            // AI didn't provide a final summary string.
-            if (sharedState.primaryResponseUsed) {
-                // Determine if we need to preserve existing embeds
-                let originalEmbeds = [];
-                if (sharedState.primaryContent && typeof sharedState.primaryContent !== 'string') {
-                    originalEmbeds = sharedState.primaryContent.embeds || [];
-                }
-
-                if (originalEmbeds.length > 0) {
-                    await interaction.editReply({ 
-                        content: "", 
-                        embeds: originalEmbeds 
-                    }).catch(() => {});
-                } else {
-                    await interaction.deleteReply().catch(() => {});
-                }
-            } else {
-                await interaction.deleteReply().catch(() => {});
-            }
-        } else {
-            const chunks = splitMessage(replyContent);
-            for (let i = 0; i < chunks.length; i++) {
-                try {
-                    const cleanChunk = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
-                    if (!cleanChunk && i === 0 && !sharedState.primaryResponseUsed) continue; 
-
-                    if (i === 0) {
-                        // Extract any existing content or embeds
-                        let originalText = "";
-                        let originalEmbeds = [];
-                        
-                        if (sharedState.primaryContent) {
-                            if (typeof sharedState.primaryContent === 'string') {
-                                originalText = sharedState.primaryContent;
-                            } else {
-                                originalText = sharedState.primaryContent.content || "";
-                                originalEmbeds = sharedState.primaryContent.embeds || [];
-                            }
-                        }
-
-                        // Clean status messages from the original text
-                        const cleanOriginal = originalText.replace(/\*.*is autonomously executing.*\*/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
-
-                        if (sharedState.primaryResponseUsed && originalEmbeds.length > 0) {
-                            // If we already have embeds, we MERGE the text into the primary reply 
-                            // as long as it fits, preserving the visuals.
-                            const combinedText = (cleanChunk && cleanOriginal) ? (cleanChunk + "\n" + cleanOriginal) : (cleanChunk || cleanOriginal);
-                            
-                            // If the merged text is too long (>2000), THEN we followUp.
-                            if (combinedText.length > 2000) {
-                                await interaction.followUp({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] });
-                            } else {
-                                // Prefer the combined text, but allow empty content if embeds are present
-                                await interaction.editReply({ 
-                                    content: combinedText || "", 
-                                    embeds: originalEmbeds 
-                                });
-                            }
-                        } else {
-                            // No embeds? We merge the text or overwrite the status message.
-                            const combinedText = (cleanChunk && cleanOriginal) ? (cleanChunk + "\n" + cleanOriginal) : (cleanChunk || cleanOriginal);
-                            sharedState.primaryResponseUsed = true;
-                            sharedState.primaryContent = combinedText;
-                            
-                            if (combinedText) {
-                                await interaction.editReply({ 
-                                    content: combinedText, 
-                                    flags: [MessageFlags.SuppressEmbeds] 
-                                  });
-                            } else {
-                                // If literally no text and no embeds, we have nothing to show.
-                                await interaction.deleteReply().catch(() => {});
-                            }
-                        }
-                    } else {
-                        await interaction.followUp({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] });
-                    }
-                } catch (discordErr) {
-                    const fallbackClean = chunks[i].replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '').replace(THOUGHT_SCRUB_REGEX, '').trim();
-                    if (fallbackClean) {
-                        logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message);
-                        await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] });
-                    }
-                }
-            }
-        }
+        const responder = new DiscordResponder({ botName });
+        await responder.sendFinalResponse({ interaction, replyContent, sharedState });
 
         // Post-Turn Cleanup: 
         // Erase any intermediate "system" messages (like the 18k HTML search payload) from the memory history 

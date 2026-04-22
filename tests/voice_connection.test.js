@@ -1,8 +1,3 @@
-const GuildQueue = require('../util/GuildQueue');
-const { VoiceConnectionStatus, entersState } = require('@discordjs/voice');
-const logger = require('../logger');
-
-// Mock dependencies
 jest.mock('@discordjs/voice', () => ({
     createAudioPlayer: jest.fn(() => ({ on: jest.fn(), state: { status: 'idle' } })),
     joinVoiceChannel: jest.fn(() => ({
@@ -25,6 +20,9 @@ jest.mock('../util/playVideo', () => ({
     extractVideoId: jest.fn()
 }));
 
+const GuildQueue = require('../util/GuildQueue');
+const { VoiceConnectionStatus, entersState } = require('@discordjs/voice');
+
 describe('GuildQueue Voice Connection', () => {
     let gq;
 
@@ -34,7 +32,7 @@ describe('GuildQueue Voice Connection', () => {
     });
 
     test('join() should succeed when connection becomes Ready', async () => {
-        entersState.mockResolvedValueOnce(); // Simulates reaching the Ready state
+        entersState.mockResolvedValueOnce();
 
         const mockChannel = { id: '123', name: 'Test Channel', bitrate: 64000 };
         await gq.join(mockChannel);
@@ -48,9 +46,9 @@ describe('GuildQueue Voice Connection', () => {
         entersState.mockRejectedValueOnce(timeoutErr);
 
         const mockChannel = { id: '123', name: 'Test Channel', bitrate: 64000 };
-        
+
         await expect(gq.join(mockChannel)).rejects.toThrow('Failed to join voice channel Test Channel within 20 seconds');
-        
+
         expect(gq.connection).toBeNull();
     });
 });
