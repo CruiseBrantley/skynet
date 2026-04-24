@@ -111,6 +111,7 @@ const agentScheduler = require('./util/AgentScheduler');
 const agentLoop = require('./util/AgentLoop');
 const botUpdate = require('./events/botUpdate');
 const botDelete = require('./events/botDelete');
+const { fetchAndFormatContext } = require('./util/chat/contextHelper');
 
 const aloneTimers = new Map();
 
@@ -299,13 +300,13 @@ bot.on('messageCreate', async (message) => {
       }
 
       if (isOurThread) {
-        const recentMessages = await message.channel.messages.fetch({
-          limit: 5,
-        });
-        const context = recentMessages
-          .reverse()
-          .map((m) => `${m.author.username}: ${m.content}`)
-          .join('\n');
+        const botId = bot.user.id;
+        const history = await fetchAndFormatContext(message.channel, botId, 20, message.id);
+        const context = history.map(m => m.content).join('\n');
+        
+        // Save history to the interaction so chat.js doesn't have to re-fetch
+        const preFetchedHistory = history;
+        
         const botName = process.env.BOT_NAME || 'Skynet';
 
         const containsName = message.content
@@ -354,7 +355,8 @@ bot.on('messageCreate', async (message) => {
         const replyFunc = async (content) => {
           stopTyping();
           const payload = typeof content === 'string' ? { content } : content;
-          const sent = await message.channel.send(payload);
+          // Use reply for autonomous messages to maintain the thread
+          const sent = await message.reply(payload);
           if (!responseMessage) responseMessage = sent;
           return sent;
         };
@@ -365,7 +367,8 @@ bot.on('messageCreate', async (message) => {
           if (responseMessage) {
             return await responseMessage.edit(payload);
           } else {
-            const sent = await message.channel.send(payload);
+            // Use reply for autonomous messages to maintain the thread
+            const sent = await message.reply(payload);
             responseMessage = sent;
             return sent;
           }
@@ -373,6 +376,7 @@ bot.on('messageCreate', async (message) => {
 
         const mockInteraction = {
           id: `autonomous-${Date.now()}`,
+          triggeringMessageId: message.id,
           client: bot,
           user: message.author,
           member: message.member,
@@ -402,6 +406,7 @@ bot.on('messageCreate', async (message) => {
           reply: replyFunc,
           editReply: editFunc,
           followUp: replyFunc,
+          recentMessages: typeof preFetchedHistory !== 'undefined' ? preFetchedHistory : null
         };
 
         try {

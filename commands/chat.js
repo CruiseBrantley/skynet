@@ -10,6 +10,7 @@ const ActionExecutor = require('../util/ActionExecutor');
 
 const { COMMAND_REGEX, SCRUB_REGEX } = require('../util/chat/constants');
 const { scrubTags } = require('../util/chat/scrubTags');
+const { fetchAndFormatContext } = require('../util/chat/contextHelper');
 const AutonomousCommandProcessor = require('../util/chat/AutonomousCommandProcessor');
 const DiscordResponder = require('../util/chat/DiscordResponder');
 const mentionResolver = require('../util/MentionResolver');
@@ -75,6 +76,15 @@ async function execute(interaction, database) {
           time: Date.now(),
           messages: [{ role: 'system', content: SYSTEM_PROMPT }]
         };
+
+        // Populate initial context with last 20 messages for better situational awareness
+        try {
+            const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id);
+            channelHistories[channelId].messages.push(...history);
+            logger.info(`Populated ${history.length} historical messages for channel context.`);
+        } catch (err) {
+            logger.warn(`Failed to fetch historical context for channel ${channelId}: ${err.message}`);
+        }
         // Prune oldest histories if we exceed the cap
         const historyKeys = Object.keys(channelHistories);
         if (historyKeys.length > MAX_CHANNEL_HISTORIES) {

@@ -35,6 +35,10 @@ describe('InstanceGuardian', () => {
         guardian = new InstanceGuardian(mockDb);
     });
 
+    afterEach(() => {
+        if (guardian) guardian.stop();
+    });
+
     test('should initialize and register heartbeat', async () => {
         mockInstancesRef.once.mockResolvedValue({ exists: () => false });
         mockInstancesRef.set.mockResolvedValue();

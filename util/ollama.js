@@ -8,8 +8,15 @@ const logger = require('../logger');
 function checkPortOpen(host, port, timeout = 1000) {
     return new Promise((resolve) => {
         const socket = new net.Socket();
-        const onError = () => {
+        socket.unref(); // Don't keep the process alive for this check
+        
+        const cleanup = () => {
+            socket.removeAllListeners();
             socket.destroy();
+        };
+
+        const onError = () => {
+            cleanup();
             resolve(false);
         };
 
@@ -18,7 +25,7 @@ function checkPortOpen(host, port, timeout = 1000) {
         socket.once('timeout', onError);
 
         socket.connect(port, host, () => {
-            socket.end();
+            cleanup();
             resolve(true);
         });
     });

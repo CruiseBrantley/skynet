@@ -54,14 +54,20 @@
 		"jest": "^30.3.0"
 	},
 	"scripts": {
-		"test": "jest",
+		"test": "node --no-experimental-webstorage node_modules/.bin/jest",
 		"dev-env": "cross-env NODE_ENV=dev node bot.js",
 		"prod-env": "cross-env NODE_ENV=prod node bot.js",
 		"start": "cross-env NODE_ENV=prod node bot.js",
 		"run": "node bot.js"
 	},
 	"jest": {
-		"testURL": "http://localhost"
+		"testEnvironment": "node",
+		"testEnvironmentOptions": {
+			"url": "http://localhost"
+		},
+		"setupFilesAfterEnv": [
+			"./tests/setup.js"
+		]
 	},
 	"standard": {
 		"env": [

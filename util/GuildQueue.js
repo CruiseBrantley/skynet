@@ -128,6 +128,10 @@ class GuildQueue {
             track.requestedBy = user.displayName || user.username || user;
         }
         this.queue.push(track);
+        // Clear autoplay buffer if manual addition (changes musical context)
+        if (user !== 'Skynet Autoplay') {
+            this.autoplayBuffer = [];
+        }
         if (this.player.state.status === this._AudioPlayerStatus.Idle && this.queue.length === 1) {
             this._playNext();
         } else {
@@ -146,6 +150,10 @@ class GuildQueue {
             tracks.forEach(t => t.requestedBy = name);
         }
         this.queue.push(...tracks);
+        // Clear autoplay buffer if manual addition (changes musical context)
+        if (user !== 'Skynet Autoplay') {
+            this.autoplayBuffer = [];
+        }
         if (this.player.state.status === this._AudioPlayerStatus.Idle) {
             this._playNext();
         } else {
@@ -482,6 +490,23 @@ class GuildQueue {
             // Avoid tight retry loop
             setTimeout(() => this._playNext(), 1000);
         }
+    }
+
+    /**
+     * Cleanly shuts down the queue, stopping the player and destroying the connection.
+     * Essential for testing and graceful bot shutdown.
+     */
+    destroy() {
+        if (this.player) {
+            this.player.stop();
+            this.player.removeAllListeners();
+        }
+        if (this.connection) {
+            this.connection.destroy();
+            this.connection = null;
+        }
+        this._cleanupCurrentTrackFile();
+        logger.info(`GuildQueue ${this.guildId} destroyed.`);
     }
 }
 

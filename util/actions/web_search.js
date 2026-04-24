@@ -7,7 +7,7 @@ const logger = require('../../logger');
 
 module.exports = {
     name: 'web_search',
-    description: 'Searches the web for real-time information or specific facts.',
+    description: 'Searches the web for real-time information, specific facts, domain reputation, news corroboration, or fact-checking.',
     schema: {
         query: 'The search query to perform.'
     },

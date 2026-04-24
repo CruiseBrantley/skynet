@@ -2,6 +2,7 @@ const logger = require('../logger');
 const agentMemory = require('./AgentMemory');
 const agentScheduler = require('./AgentScheduler');
 const { jsonrepair } = require('jsonrepair');
+const { fetchAndFormatContext } = require('./chat/contextHelper');
 
 // Max recursion depth per tick — prevents the model from chaining tool calls indefinitely
 const MAX_LOOP_DEPTH = 5;
@@ -33,7 +34,7 @@ class AgentLoop {
     /**
      * Start the loop. Safe to call multiple times — won't create duplicate intervals.
      * @param {import('discord.js').Client} bot - The Discord client.
-     * @param {number} intervalMs - Milliseconds between ticks. Default: 10 minutes.
+     * @param {number} intervalMs - Milliseconds between ticks. Default: 5 minutes.
      */
     start(bot, intervalMs = 5 * 60_000) {
         if (this._interval) {
@@ -45,6 +46,7 @@ class AgentLoop {
 
         // First tick fires after one full interval — let the bot finish initializing first.
         this._interval = setInterval(() => { this._tick(); }, intervalMs);
+        if (this._interval.unref) this._interval.unref();
     }
 
     /**
@@ -113,7 +115,7 @@ class AgentLoop {
             // Find the most likely 'active' channel (prioritizing general or the one with most recent activity)
             const channels = await guild.channels.fetch();
             const textChannels = channels.filter(c => c.isTextBased() && !c.isThread() && c.viewable && c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']));
-            
+
             // For now, let's just pick one high-traffic channel (e.g. named 'general') or the first text channel
             const targetChannel = textChannels.find(c => c.name === 'general') || textChannels.first();
             if (!targetChannel) continue;
@@ -144,7 +146,11 @@ class AgentLoop {
                 return;
             }
 
-            const conversationContext = messages.reverse().map(m => `[ID: ${m.id}] ${m.author.username}: ${m.content}`).join('\n');
+            const botId = this._bot?.user?.id;
+            const { formatMessagesForContext } = require('./chat/contextHelper');
+            const history = formatMessagesForContext(messages, botId);
+
+            const conversationContext = history.map(m => m.content).join('\n');
             const now = new Date().toLocaleString();
 
             const prompt = `You are Skynet, a helpful and occasionally humorous autonomous agent. 
@@ -173,13 +179,13 @@ Standard Emojis: 👍, 😂, 🔥, 🤖, ✨, ❤️, 💯, 🤔.
 If nothing is needed, respond with: NOOP`;
 
             const { queryLocalOrRemote } = require('./ollama');
-            const result = await queryLocalOrRemote('/api/chat', { 
+            const result = await queryLocalOrRemote('/api/chat', {
                 messages: [{ role: 'system', content: prompt }],
-                options: { temperature: 0.3 } 
+                options: { temperature: 0.3 }
             });
 
             const content = result?.message?.content?.trim() || '';
-            
+
             // Handle Interjections
             if (content.includes('<<<INTERJECT:')) {
                 const msgMatch = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/);
@@ -199,10 +205,10 @@ If nothing is needed, respond with: NOOP`;
                     if (data.messageId && data.emoji) {
                         const message = await channel.messages.fetch(data.messageId).catch(() => null);
                         if (message) {
-                            const existing = message.reactions.cache.get(data.emoji) || 
-                                             message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji);
+                            const existing = message.reactions.cache.get(data.emoji) ||
+                                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji);
                             if (!existing || !existing.me) {
-                                await message.react(data.emoji).catch(() => {});
+                                await message.react(data.emoji).catch(() => { });
                                 logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`);
                             }
                         }
@@ -239,7 +245,7 @@ If nothing is needed, respond with: NOOP`;
         const taskList = tasks.length > 0
             ? tasks.map(t =>
                 `  - [${t.id}] "${t.description.substring(0, 80)}" → ${new Date(t.scheduledAt).toLocaleString()}${t.repeat ? ` (repeats ${t.repeat})` : ''} | target: ${t.channelId}`
-              ).join('\n')
+            ).join('\n')
             : '  None';
 
         const actionExecutor = require('./ActionExecutor');
@@ -300,7 +306,7 @@ Reason: Recording health check timestamp for diagnostics.`;
         let result;
         try {
             const { queryLocalOrRemote } = require('./ollama');
-            result = await queryLocalOrRemote('/api/chat', { 
+            result = await queryLocalOrRemote('/api/chat', {
                 messages,
                 options: {
                     num_ctx: 8192,
@@ -418,11 +424,11 @@ Reason: Recording health check timestamp for diagnostics.`;
             const desc = getParam(cmdData, 'description');
             const schema = getParam(cmdData, 'schema');
             const code = getParam(cmdData, 'code');
-            
+
             if (desc) updates.description = desc;
             if (schema) updates.schema = schema;
             if (code) updates.code = code;
-            
+
             if (Object.keys(updates).length === 0) {
                 logger.warn('AgentLoop: [modify_action] No updates provided — nothing to change.');
                 return null;

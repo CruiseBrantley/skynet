@@ -22,10 +22,12 @@ describe('Ollama Fallback Hierarchy', () => {
 
         mockSocket = {
             setTimeout: jest.fn(),
+            unref: jest.fn(),
             once: jest.fn(),
             connect: jest.fn((p, h, cb) => { if(cb) setImmediate(cb); }),
             end: jest.fn(),
-            destroy: jest.fn()
+            destroy: jest.fn(),
+            removeAllListeners: jest.fn()
         };
         net.Socket.mockImplementation(() => mockSocket);
     });
@@ -94,10 +96,12 @@ describe('queryLocalOrRemote — Gemini-free routing', () => {
 
         mockSocket = {
             setTimeout: jest.fn(),
+            unref: jest.fn(),
             once: jest.fn(),
             connect: jest.fn((p, h, cb) => { if (cb) setImmediate(cb); }),
             end: jest.fn(),
-            destroy: jest.fn()
+            destroy: jest.fn(),
+            removeAllListeners: jest.fn()
         };
         net.Socket.mockImplementation(() => mockSocket);
     });

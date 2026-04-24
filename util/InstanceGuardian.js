@@ -34,6 +34,7 @@ class InstanceGuardian {
         // 2. Start heartbeat
         this.updateHeartbeat();
         this.heartbeatInterval = setInterval(() => this.updateHeartbeat(), this.HEARTBEAT_MS);
+        if (this.heartbeatInterval.unref) this.heartbeatInterval.unref();
 
         // 3. Cleanup on exit
         process.on('SIGINT', () => this.cleanup());
@@ -87,11 +88,21 @@ class InstanceGuardian {
     }
 
     /**
+     * Stop the heartbeat interval.
+     */
+    stop() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    }
+
+    /**
      * Removes the instance record from Firebase on shutdown.
      */
     async cleanup() {
         logger.info('Guardian shutting down, cleaning up instance record...');
-        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+        this.stop();
         try {
             await this.instancesRef.child(this.instanceId).remove();
             process.exit(0);
