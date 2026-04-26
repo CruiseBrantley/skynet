@@ -161,18 +161,21 @@ Current time: ${now}
 ${conversationContext}
 
 Your goal is to decide if you should PROACTIVELY interact.
-You have two ways to interact:
+You have three ways to interact:
 1. INTERJECT: Provide a helpful suggestion, search result suggestion, or a witty comment if the situation TRULY calls for it.
 2. REACT: React with an emoji to a specific message if you "really like" it, find it funny, or find it highly relevant.
+3. REMEMBER: If you see a piece of information, a preference, or an important fact in the conversation that should be kept for later, use the 'remember' command.
 
 Rules:
 - Be VERY selective. Most of the time, respond with: NOOP
 - ONLY interject if you can be highly useful or adding genuine value.
 - ONLY react if a message is particularly good. Don't react to every message.
+- ONLY remember if the information is genuinely useful for future context.
 - If interjecting, use: <<<INTERJECT: "Your message here">>>
 - If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
-- You can also trigger tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
-- You can do multiple in one response if appropriate (e.g. interject AND react).
+- To remember: <<<RUN_COMMAND: {"command": "remember", "key": "...", "value": "...", "ttl_days": -1}>>>
+- You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
+- You can do multiple in one response if appropriate (e.g. remember AND react).
 
 Standard Emojis: 👍, 😂, 🔥, 🤖, ✨, ❤️, 💯, 🤔.
 
@@ -222,7 +225,7 @@ If nothing is needed, respond with: NOOP`;
             const cmdMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/);
             if (cmdMatch) {
                 const cmdData = JSON.parse(jsonrepair(cmdMatch[1]));
-                await this._executeCommand(cmdData);
+                await this._executeCommand(cmdData, guildId);
             }
 
         } catch (err) {
@@ -357,7 +360,7 @@ Reason: Recording health check timestamp for diagnostics.`;
      * Execute a single background-safe command.
      * Returns a short description string for the action log, or null if unsupported/failed.
      */
-    async _executeCommand(cmdData) {
+    async _executeCommand(cmdData, guildId = null) {
         const { getParam } = require('./commandHelper');
         const cmd = (cmdData.command || '').trim();
 
@@ -366,7 +369,7 @@ Reason: Recording health check timestamp for diagnostics.`;
             const value = getParam(cmdData, 'value');
             const ttl = parseInt(getParam(cmdData, 'ttl_days') ?? 30);
             if (!key || value === undefined) return null;
-            agentMemory.set(key, String(value), ttl, null); // null guildId = global
+            agentMemory.set(key, String(value), ttl, guildId); 
             logger.info(`AgentLoop: [remember] ${key} = ${String(value).substring(0, 60)}`);
             return `remember: "${key}" = "${String(value).substring(0, 40)}"`;
         }

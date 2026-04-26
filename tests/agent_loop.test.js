@@ -30,4 +30,14 @@ describe('AgentLoop Cooldown and Multi-Reaction', () => {
     const match = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/);
     expect(match[1]).toBe('First');
   });
+
+  test('_executeCommand passes guildId to agentMemory', async () => {
+    const setSpy = jest.spyOn(agentMemory, 'set').mockImplementation(() => {});
+    const cmdData = { command: 'remember', key: 'server.fact', value: 'skynet lives', ttl_days: 7 };
+    
+    await agentLoop._executeCommand(cmdData, 'guild123');
+    
+    expect(setSpy).toHaveBeenCalledWith('server.fact', 'skynet lives', 7, 'guild123');
+    setSpy.mockRestore();
+  });
 });
