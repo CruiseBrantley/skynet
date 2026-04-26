@@ -111,6 +111,27 @@ launchctl kickstart -k gui/$(id -u)/com.user.skynet
 
 ## 🤖 Instructions for AI Assistants
 
-1. **Service Management**: Read [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md) before restarting the bot.
-2. **Test-Driven Development**: Run `npm test` after modifying core logic. Maintain 100% pass rate.
-3. **Music Fidelity**: Volume normalization and stable YouTube playback are critical.
+> **IMPORTANT — Read this section before touching the running bot.**
+
+### Service Management
+This bot runs as a macOS Launch Agent managed by `launchctl`. **Do not use `kill`, `pkill`, or `node bot.js` directly** — these bypass the service manager and can leave orphaned processes or prevent auto-restart.
+
+Always use these commands:
+
+```bash
+# Restart (apply code/env changes)
+launchctl kickstart -k gui/$(id -u)/com.user.skynet
+
+# Stop
+launchctl bootout gui/$(id -u)/com.user.skynet
+
+# Start
+launchctl bootstrap gui/$(id -u)/com.user.skynet ~/Library/LaunchAgents/com.user.skynet.plist
+```
+
+Full details: [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md)
+
+### Development Rules
+1. **Tests**: Run `npm test` after modifying any core logic. Maintain 100% pass rate — the pre-commit hook enforces this automatically.
+2. **Linting**: Run `npm run lint` or rely on the pre-commit hook (StandardJS). Tests and scripts directories are excluded from linting.
+3. **Music Fidelity**: Volume normalization and stable YouTube playback are critical — do not change audio pipeline logic without verifying the relevant test suite.
