@@ -111,21 +111,22 @@ class AgentLoop {
       const guild = this._bot.guilds.cache.get(guildId)
       if (!guild) continue
 
-      // Find the most likely 'active' channel (prioritizing general or the one with most recent activity)
       const channels = await guild.channels.fetch()
-      const textChannels = channels.filter(c => c.isTextBased() && !c.isThread() && c.viewable && c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']))
+      const textChannels = channels.filter(c =>
+        c.isTextBased() && !c.isThread() && c.viewable &&
+        c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
+        c.lastMessageId
+      )
 
-      // For now, let's just pick one high-traffic channel (e.g. named 'general') or the first text channel
-      const targetChannel = textChannels.find(c => c.name === 'general') || textChannels.first()
-      if (!targetChannel) continue
+      // Pick the 3 channels with the most recent activity.
+      // Discord snowflake IDs are time-ordered, so a simple string comparison gives us recency.
+      const topChannels = [...textChannels.values()]
+        .sort((a, b) => (a.lastMessageId > b.lastMessageId ? -1 : 1))
+        .slice(0, 3)
 
-      // Cooldown check: don't proactive-interject more than once every 5 minutes in the same channel
-      const lastInterjectKey = `proactive.last_run.${targetChannel.id}`
-      const lastInterject = agentMemory.get(lastInterjectKey, guildId)
-      if (lastInterject && (Date.now() - parseInt(lastInterject) < 5 * 60 * 1000)) continue
-
-      // Unified Proactive Evaluation (Interjections + Reactions)
-      await this._evaluateProactivePresence(targetChannel, guildId)
+      for (const channel of topChannels) {
+        await this._evaluateProactivePresence(channel, guildId)
+      }
     }
   }
 
@@ -137,11 +138,21 @@ class AgentLoop {
       const messages = await channel.messages.fetch({ limit: 20 })
       if (messages.size < 3) return // Too quiet
 
-      // RECENCY CHECK: Only interject if the conversation is still "alive" (last message within 15 mins)
+      // RECENCY CHECK: Only evaluate if the conversation is still "alive" (last message within 15 mins)
       const lastMessage = messages.first()
       const fifteenMinsAgo = Date.now() - 15 * 60 * 1000
       if (lastMessage.createdAt.getTime() < fifteenMinsAgo) {
         logger.info(`AgentLoop: skipping #${channel.name} — conversation is stale.`)
+        return
+      }
+
+      // MESSAGE ID TRACKING: Skip if we've already evaluated this exact conversation snapshot.
+      // This prevents redundant Ollama calls and re-evaluating messages we've already seen.
+      // A new message (including one that references an older one) will always produce a new ID.
+      const lastMsgKey = `proactive.last_msg.${channel.id}`
+      const lastSeenMsgId = agentMemory.get(lastMsgKey, guildId)
+      if (lastSeenMsgId && lastSeenMsgId === lastMessage.id) {
+        logger.info(`AgentLoop: skipping #${channel.name} — no new messages since last evaluation.`)
         return
       }
 
@@ -152,7 +163,7 @@ class AgentLoop {
       const conversationContext = history.map(m => m.content).join('\n')
       const now = new Date().toLocaleString()
 
-      const prompt = `You are Skynet, a helpful and occasionally humorous autonomous agent. 
+      const prompt = `You are Skynet, a helpful and occasionally humorous autonomous agent.
 You are observing a conversation in #${channel.name}.
 Current time: ${now}
 
@@ -176,7 +187,7 @@ Rules:
 - You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - You can do multiple in one response if appropriate (e.g. remember AND react).
 
-Standard Emojis: 👍, 😂, 🔥, 🤖, ✨, ❤️, 💯, 🤔.
+Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔.
 
 If nothing is needed, respond with: NOOP`
 
@@ -188,18 +199,21 @@ If nothing is needed, respond with: NOOP`
 
       const content = result?.message?.content?.trim() || ''
 
+      // Always record the newest message ID we've evaluated, regardless of outcome.
+      // This is the primary gate — reactions and interjections both benefit from it.
+      agentMemory.set(lastMsgKey, lastMessage.id, 15 / (60 * 24), guildId) // expires in 15 minutes — matches the recency window
+
       // Handle Interjections
       if (content.includes('<<<INTERJECT:')) {
         const msgMatch = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/)
         const intercom = msgMatch ? msgMatch[1] : null
         if (intercom) {
           await channel.send(`*(Proactive Suggestion)* ${intercom}`)
-          agentMemory.set(`proactive.last_run.${channel.id}`, String(Date.now()), 1, guildId)
           logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`)
         }
       }
 
-      // Handle Reactions (Multiple allowed)
+      // Handle Reactions (Multiple allowed, no separate cooldown — message ID tracking prevents repeats)
       const reactMatches = content.matchAll(/<<<REACT:\s*([\s\S]*?)>>>/g)
       for (const match of reactMatches) {
         try {
@@ -208,9 +222,9 @@ If nothing is needed, respond with: NOOP`
             const message = await channel.messages.fetch(data.messageId).catch(() => null)
             if (message) {
               const existing = message.reactions.cache.get(data.emoji) ||
-                                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
+                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
               if (!existing || !existing.me) {
-                await message.react(data.emoji).catch(() => { })
+                await message.react(data.emoji).catch(() => {})
                 logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`)
               }
             }
@@ -364,7 +378,7 @@ Reason: Recording health check timestamp for diagnostics.`
     if (cmd === 'remember') {
       const key = getParam(cmdData, 'key')
       const value = getParam(cmdData, 'value')
-      const ttl = parseInt(getParam(cmdData, 'ttl_days') ?? 30)
+      const ttl = parseFloat(getParam(cmdData, 'ttl_days') ?? 30)
       if (!key || value === undefined) return null
       agentMemory.set(key, String(value), ttl, guildId)
       logger.info(`AgentLoop: [remember] ${key} = ${String(value).substring(0, 60)}`)

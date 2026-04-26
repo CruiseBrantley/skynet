@@ -118,7 +118,13 @@ class AgentMemory {
     this._pruneOldest()
     this._save()
     const scopeLabel = entryGuildId ? `guild:${entryGuildId}` : 'global'
-    logger.info(`AgentMemory: Stored "${key}" [${scopeLabel}] (TTL: ${ttlDays === -1 ? 'permanent' : ttlDays + ' days'})`)
+    const ttlLabel = ttlDays === -1
+      ? 'permanent'
+      : ttlDays < 1
+        ? `${Math.round(ttlDays * 24 * 60)}m`
+        : `${+ttlDays.toFixed(4)} days`
+    logger.info(`AgentMemory: Stored "${key}" [${scopeLabel}] (TTL: ${ttlLabel})`)
+
     return true
   }
 

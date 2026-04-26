@@ -3,6 +3,11 @@ const logger = require('../logger')
 
 jest.mock('../util/ollama')
 jest.mock('../logger')
+jest.mock('../util/AgentMemory', () => ({
+  get: jest.fn().mockReturnValue(null), // skip gate always allows evaluation
+  set: jest.fn(),
+  getSummary: jest.fn().mockReturnValue(null)
+}))
 
 describe('AgentLoop - Proactive Presence', () => {
   let mockChannel

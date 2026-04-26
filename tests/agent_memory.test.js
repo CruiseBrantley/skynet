@@ -218,4 +218,68 @@ describe('AgentMemory', () => {
     const newMem = new AgentMemory()
     expect(newMem.get('persistent.key')).toBe('saved')
   })
+
+  // --- Fractional TTL Tests ---
+  test('fractional-day TTL (15 minutes) expires correctly', () => {
+    const fifteenMinutes = 15 / (60 * 24) // ~0.01042 days
+    mem._data['proactive.last_msg.chan123'] = {
+      value: '1234567890',
+      updatedAt: Date.now() - 16 * 60 * 1000, // 16 minutes ago
+      ttlDays: fifteenMinutes
+    }
+    // Should be expired (16 mins > 15 mins)
+    expect(mem.get('proactive.last_msg.chan123')).toBeNull()
+  })
+
+  test('fractional-day TTL is not expired before its window', () => {
+    const fifteenMinutes = 15 / (60 * 24)
+    mem._data['proactive.last_msg.chan456'] = {
+      value: '9876543210',
+      updatedAt: Date.now() - 5 * 60 * 1000, // 5 minutes ago
+      ttlDays: fifteenMinutes
+    }
+    // Should still be alive (5 mins < 15 mins)
+    expect(mem.get('proactive.last_msg.chan456')).toBe('9876543210')
+  })
+
+  // --- TTL label logic tests (tested in isolation, not via the logger) ---
+  test('TTL label: sub-day value displays in minutes', () => {
+    const ttlDays = 15 / (60 * 24)
+    const label = ttlDays === -1
+      ? 'permanent'
+      : ttlDays < 1
+        ? `${Math.round(ttlDays * 24 * 60)}m`
+        : `${+ttlDays.toFixed(4)} days`
+    expect(label).toBe('15m')
+  })
+
+  test('TTL label: integer days show without trailing zeros', () => {
+    const ttlDays = 7
+    const label = ttlDays === -1
+      ? 'permanent'
+      : ttlDays < 1
+        ? `${Math.round(ttlDays * 24 * 60)}m`
+        : `${+ttlDays.toFixed(4)} days`
+    expect(label).toBe('7 days')
+  })
+
+  test('TTL label: fractional days >= 1 show trimmed decimal', () => {
+    const ttlDays = 28.5 / 24 // 1.1875 days
+    const label = ttlDays === -1
+      ? 'permanent'
+      : ttlDays < 1
+        ? `${Math.round(ttlDays * 24 * 60)}m`
+        : `${+ttlDays.toFixed(4)} days`
+    expect(label).toBe('1.1875 days')
+  })
+
+  test('TTL label: permanent (-1) shows correct string', () => {
+    const ttlDays = -1
+    const label = ttlDays === -1
+      ? 'permanent'
+      : ttlDays < 1
+        ? `${Math.round(ttlDays * 24 * 60)}m`
+        : `${+ttlDays.toFixed(4)} days`
+    expect(label).toBe('permanent')
+  })
 })

@@ -1,5 +1,13 @@
 const youtube = require('../util/YouTubeMetadata')
 
+// Mock ollama at module level — jest.mock() inside test bodies is ignored by Jest.
+// getRecommendation calls queryOllama internally; rejecting it forces the fallback
+// to basic YouTube search, which is what the filtering tests are actually testing.
+jest.mock('../util/ollama', () => ({
+  queryOllama: jest.fn().mockRejectedValue(new Error('llm offline')),
+  queryLocalOrRemote: jest.fn().mockRejectedValue(new Error('llm offline'))
+}))
+
 describe('YouTubeMetadata', () => {
   describe('extractVideoId', () => {
     test('extracts from standard URL', () => {
@@ -130,15 +138,6 @@ describe('YouTubeMetadata', () => {
     })
 
     test('filters out items in history', async () => {
-      // Mock ollama to fail so it falls back to basic search
-      jest.mock(
-        '../util/ollama',
-        () => ({
-          queryOllama: jest.fn().mockRejectedValue(new Error('llm offline'))
-        }),
-        { virtual: true }
-      )
-
       const history = new Set(['11111111111'])
       const lastTrack = {
         title: 'Some Base Track',
