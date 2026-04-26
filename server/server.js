@@ -15,20 +15,20 @@ server.use(express.json())
 
 let streamID
 let oauthToken
-const processedMessageIds = new Set();
-const MESSAGE_ID_CACHE_SIZE = 1000;
+const processedMessageIds = new Set()
+const MESSAGE_ID_CACHE_SIZE = 1000
 
-async function twitchSubscribe(id, url, twitchToken) {
+async function twitchSubscribe (id, url, twitchToken) {
   const data = {
-    version: "1",
-    type: "stream.online",
-    "condition": {
-      "broadcaster_user_id": id
+    version: '1',
+    type: 'stream.online',
+    condition: {
+      broadcaster_user_id: id
     },
     transport: {
-      method: "webhook",
+      method: 'webhook',
       callback: await url,
-      secret: "abcdefghij0123456789"
+      secret: 'abcdefghij0123456789'
     }
   }
   return axios
@@ -49,7 +49,7 @@ async function twitchSubscribe(id, url, twitchToken) {
     })
 }
 
-async function deleteSubscription(subscriptionId) {
+async function deleteSubscription (subscriptionId) {
   return axios
     .delete(`https://api.twitch.tv/helix/eventsub/subscriptions?id=${subscriptionId}`, {
       headers: {
@@ -65,7 +65,7 @@ async function deleteSubscription(subscriptionId) {
     })
 }
 
-async function getSubscriptions(oauthParam) {
+async function getSubscriptions (oauthParam) {
   return axios
     .get('https://api.twitch.tv/helix/eventsub/subscriptions', {
       headers: {
@@ -83,7 +83,7 @@ async function getSubscriptions(oauthParam) {
     })
 }
 
-async function subscribeAll() {
+async function subscribeAll () {
   try {
     const url = await getURL()
     oauthToken = await oauth()
@@ -101,7 +101,7 @@ async function subscribeAll() {
     const configData = fs.readFileSync(configPath, 'utf8')
     const config = JSON.parse(configData)
     const uniqueStreamers = new Set()
-    
+
     config.groups.forEach(group => {
       group.streamers.forEach(id => uniqueStreamers.add(id))
     })
@@ -115,7 +115,7 @@ async function subscribeAll() {
   }
 }
 
-async function getGameInfo(id) {
+async function getGameInfo (id) {
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/games?id=${id}`, {
       headers: {
@@ -134,7 +134,7 @@ async function getGameInfo(id) {
   }
 }
 
-async function getChannelInfo(id) {
+async function getChannelInfo (id) {
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/channels?broadcaster_id=${id}`, {
       headers: {
@@ -151,7 +151,7 @@ async function getChannelInfo(id) {
   }
 }
 
-function setupServer(bot) {
+function setupServer (bot) {
   subscribeAll()
 
   server.get('/', async (req, res) => {
@@ -163,23 +163,23 @@ function setupServer(bot) {
   })
 
   server.post('/', async (req, res) => {
-    const messageId = req.headers['twitch-eventsub-message-id'];
-    
+    const messageId = req.headers['twitch-eventsub-message-id']
+
     // 1. Strict Webhook Deduplication (Twitch Retries)
     if (messageId) {
       if (processedMessageIds.has(messageId)) {
-        logger.info(`Webhook Deduplicated: ${messageId}`);
-        return res.status(200).send('Deduplicated');
+        logger.info(`Webhook Deduplicated: ${messageId}`)
+        return res.status(200).send('Deduplicated')
       }
-      processedMessageIds.add(messageId);
+      processedMessageIds.add(messageId)
       // Prune cache if it gets too large
       if (processedMessageIds.size > MESSAGE_ID_CACHE_SIZE) {
-        const firstValue = processedMessageIds.values().next().value;
-        processedMessageIds.delete(firstValue);
+        const firstValue = processedMessageIds.values().next().value
+        processedMessageIds.delete(firstValue)
       }
     }
 
-    logger.info('Post Received.');
+    logger.info('Post Received.')
     const { body } = req
 
     if (body.challenge) {
@@ -195,7 +195,7 @@ function setupServer(bot) {
     ) {
       const response = await getChannelInfo(body.event.broadcaster_user_id)
       if (!response) {
-        return res.status(500).send('Failed to get channel info');
+        return res.status(500).send('Failed to get channel info')
       }
       const gameInfo = await getGameInfo(response.game_id)
       const betterResponse = { ...response, ...gameInfo }
@@ -214,11 +214,11 @@ function setupServer(bot) {
   if (serverInstance && typeof serverInstance.on === 'function') {
     serverInstance.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        logger.error(`Port ${port} is already in use. Web server failed to start, but bot will continue.`);
+        logger.error(`Port ${port} is already in use. Web server failed to start, but bot will continue.`)
       } else {
-        logger.error(`Web server error: ${err.message}`);
+        logger.error(`Web server error: ${err.message}`)
       }
-    });
+    })
   }
 
   // Return the express app for tests/introspection; callers don't use the return today.
@@ -229,4 +229,4 @@ module.exports.setupServer = setupServer
 module.exports.getSubscriptions = getSubscriptions
 module.exports.deleteSubscription = deleteSubscription
 module.exports.twitchSubscribe = twitchSubscribe
-module.exports.subscribeAll = subscribeAll;
+module.exports.subscribeAll = subscribeAll

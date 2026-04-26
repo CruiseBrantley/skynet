@@ -4,7 +4,7 @@ function botUpdate () {
     try {
       if (originalMessage.author.bot) return // ignore bots
       if (originalMessage !== undefined) {
-        const authorName = originalMessage.member?.displayName || originalMessage.author.username;
+        const authorName = originalMessage.member?.displayName || originalMessage.author.username
         logger.info(
           'User ' +
             authorName +

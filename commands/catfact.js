@@ -1,24 +1,24 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const axios = require('axios');
-const logger = require('../logger');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js')
+const axios = require('axios')
+const logger = require('../logger')
 
 module.exports = {
-	data: new SlashCommandBuilder()
-		.setName('catfact')
-		.setDescription('Get a random cat fact'),
-	async execute(interaction) {
-        await interaction.deferReply();
-        axios
-          .get(process.env.CATFACT_GET)
-          .then(async response => {
-            await interaction.editReply({ 
-                content: response.data.fact,
-                flags: [MessageFlags.SuppressEmbeds]
-            });
-          })
-          .catch(async error => {
-            logger.info(error);
-            await interaction.editReply('Could not retrieve a cat fact at this time.');
-          });
-	},
-};
+  data: new SlashCommandBuilder()
+    .setName('catfact')
+    .setDescription('Get a random cat fact'),
+  async execute (interaction) {
+    await interaction.deferReply()
+    axios
+      .get(process.env.CATFACT_GET)
+      .then(async response => {
+        await interaction.editReply({
+          content: response.data.fact,
+          flags: [MessageFlags.SuppressEmbeds]
+        })
+      })
+      .catch(async error => {
+        logger.info(error)
+        await interaction.editReply('Could not retrieve a cat fact at this time.')
+      })
+  }
+}

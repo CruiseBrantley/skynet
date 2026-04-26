@@ -51,14 +51,18 @@
 	},
 	"devDependencies": {
 		"cross-env": "^7.0.2",
-		"jest": "^30.3.0"
+		"husky": "^9.1.7",
+		"jest": "^30.3.0",
+		"standard": "^17.1.2"
 	},
 	"scripts": {
 		"test": "node --no-experimental-webstorage node_modules/.bin/jest",
 		"dev-env": "cross-env NODE_ENV=dev node bot.js",
 		"prod-env": "cross-env NODE_ENV=prod node bot.js",
 		"start": "cross-env NODE_ENV=prod node bot.js",
-		"run": "node bot.js"
+		"run": "node bot.js",
+		"prepare": "husky",
+		"lint": "standard"
 	},
 	"jest": {
 		"testEnvironment": "node",
@@ -72,6 +76,10 @@
 	"standard": {
 		"env": [
 			"jest"
+		],
+		"ignore": [
+			"tests/**",
+			"scripts/**"
 		]
 	}
 }

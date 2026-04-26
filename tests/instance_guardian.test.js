@@ -1,107 +1,107 @@
-const InstanceGuardian = require('../util/InstanceGuardian');
-const logger = require('../logger');
-const os = require('os');
+const InstanceGuardian = require('../util/InstanceGuardian')
+const logger = require('../logger')
+const os = require('os')
 
 // Mock dependencies
 jest.mock('../logger', () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-}));
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn()
+}))
 
 jest.mock('os', () => ({
-    hostname: jest.fn().mockReturnValue('test-host'),
-}));
+  hostname: jest.fn().mockReturnValue('test-host')
+}))
 
 describe('InstanceGuardian', () => {
-    let mockDb;
-    let mockInstancesRef;
-    let guardian;
+  let mockDb
+  let mockInstancesRef
+  let guardian
 
-    beforeEach(() => {
-        jest.clearAllMocks();
-        
-        mockInstancesRef = {
-            once: jest.fn(),
-            set: jest.fn(),
-            child: jest.fn().mockReturnThis(),
-            remove: jest.fn(),
-        };
+  beforeEach(() => {
+    jest.clearAllMocks()
 
-        mockDb = {
-            ref: jest.fn().mockReturnValue(mockInstancesRef),
-        };
+    mockInstancesRef = {
+      once: jest.fn(),
+      set: jest.fn(),
+      child: jest.fn().mockReturnThis(),
+      remove: jest.fn()
+    }
 
-        guardian = new InstanceGuardian(mockDb);
-    });
+    mockDb = {
+      ref: jest.fn().mockReturnValue(mockInstancesRef)
+    }
 
-    afterEach(() => {
-        if (guardian) guardian.stop();
-    });
+    guardian = new InstanceGuardian(mockDb)
+  })
 
-    test('should initialize and register heartbeat', async () => {
-        mockInstancesRef.once.mockResolvedValue({ exists: () => false });
-        mockInstancesRef.set.mockResolvedValue();
+  afterEach(() => {
+    if (guardian) guardian.stop()
+  })
 
-        await guardian.init();
+  test('should initialize and register heartbeat', async () => {
+    mockInstancesRef.once.mockResolvedValue({ exists: () => false })
+    mockInstancesRef.set.mockResolvedValue()
 
-        expect(mockDb.ref).toHaveBeenCalledWith('instances');
-        expect(mockInstancesRef.child).toHaveBeenCalledWith(expect.stringContaining('test-host'));
-        expect(mockInstancesRef.set).toHaveBeenCalledWith(expect.objectContaining({
-            hostname: 'test-host',
-            heartbeat: expect.any(Number),
-        }));
-    });
+    await guardian.init()
 
-    test('should detect a conflict with a fresh instance', async () => {
-        const now = Date.now();
-        const mockData = {
-            'other-host_123': {
-                heartbeat: now - 30000, // 30 seconds ago (fresh)
-                hostname: 'other-host',
-            }
-        };
+    expect(mockDb.ref).toHaveBeenCalledWith('instances')
+    expect(mockInstancesRef.child).toHaveBeenCalledWith(expect.stringContaining('test-host'))
+    expect(mockInstancesRef.set).toHaveBeenCalledWith(expect.objectContaining({
+      hostname: 'test-host',
+      heartbeat: expect.any(Number)
+    }))
+  })
 
-        mockInstancesRef.once.mockResolvedValue({
-            exists: () => true,
-            val: () => mockData,
-        });
+  test('should detect a conflict with a fresh instance', async () => {
+    const now = Date.now()
+    const mockData = {
+      'other-host_123': {
+        heartbeat: now - 30000, // 30 seconds ago (fresh)
+        hostname: 'other-host'
+      }
+    }
 
-        const isConflict = await guardian.checkConflict();
+    mockInstancesRef.once.mockResolvedValue({
+      exists: () => true,
+      val: () => mockData
+    })
 
-        expect(isConflict).toBe(true);
-        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Conflict detected'));
-    });
+    const isConflict = await guardian.checkConflict()
 
-    test('should ignore a stale instance', async () => {
-        const now = Date.now();
-        const mockData = {
-            'stale-host_123': {
-                heartbeat: now - 600000, // 10 minutes ago (stale)
-                hostname: 'stale-host',
-            }
-        };
+    expect(isConflict).toBe(true)
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Conflict detected'))
+  })
 
-        mockInstancesRef.once.mockResolvedValue({
-            exists: () => true,
-            val: () => mockData,
-        });
+  test('should ignore a stale instance', async () => {
+    const now = Date.now()
+    const mockData = {
+      'stale-host_123': {
+        heartbeat: now - 600000, // 10 minutes ago (stale)
+        hostname: 'stale-host'
+      }
+    }
 
-        const isConflict = await guardian.checkConflict();
+    mockInstancesRef.once.mockResolvedValue({
+      exists: () => true,
+      val: () => mockData
+    })
 
-        expect(isConflict).toBe(false);
-    });
+    const isConflict = await guardian.checkConflict()
 
-    test('should cleanup on exit', async () => {
-        // Mock process.exit to avoid killing the test runner
-        const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
-        mockInstancesRef.remove.mockResolvedValue();
+    expect(isConflict).toBe(false)
+  })
 
-        await guardian.cleanup();
+  test('should cleanup on exit', async () => {
+    // Mock process.exit to avoid killing the test runner
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {})
+    mockInstancesRef.remove.mockResolvedValue()
 
-        expect(mockInstancesRef.remove).toHaveBeenCalled();
-        expect(exitSpy).toHaveBeenCalledWith(0);
-        
-        exitSpy.mockRestore();
-    });
-});
+    await guardian.cleanup()
+
+    expect(mockInstancesRef.remove).toHaveBeenCalled()
+    expect(exitSpy).toHaveBeenCalledWith(0)
+
+    exitSpy.mockRestore()
+  })
+})
