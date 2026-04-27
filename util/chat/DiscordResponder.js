@@ -123,6 +123,7 @@ class DiscordResponder {
       } catch (discordErr) {
         const fallbackClean = chunks[i]
           .replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '')
+          .replace(/^\[ID: \d+\]\s*@[\w\d._-]+(?:\s*\([^)]+\))?:\s*/, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
           .trim()
 

@@ -200,4 +200,20 @@ describe('DM Handling — DiscordResponder with DM interaction', () => {
     const payloads = allEditReplyCalls.map(p => (typeof p === 'string' ? p : p?.content))
     expect(payloads).toContain('\u200B')
   })
+
+  test('fallback channel.send path strips [ID: ...] @Name: prefix', async () => {
+    const responder = new DiscordResponder({ botName: 'Skynet' })
+    const interaction = buildMockInteraction()
+    // Force editReply to throw so the fallback path fires
+    interaction.editReply.mockRejectedValue(new Error('Unknown interaction'))
+
+    const sharedState = { primaryResponseUsed: false, primaryContent: null, visualActionExecuted: false, highImpactCount: 0 }
+    const dirtyResponse = '[ID: 1498165014400602202] @Skynet: I am a text-based AI and cannot hear you.'
+
+    await responder.sendFinalResponse({ interaction, replyContent: dirtyResponse, sharedState })
+
+    expect(interaction.channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'I am a text-based AI and cannot hear you.' })
+    )
+  })
 })
