@@ -399,6 +399,7 @@ bot.on('messageCreate', async (message) => {
               responseMessage = null
             }
           },
+          fetchReply: async () => responseMessage,
           reply: replyFunc,
           editReply: editFunc,
           followUp: replyFunc,
