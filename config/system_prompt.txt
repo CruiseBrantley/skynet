@@ -20,7 +20,7 @@ Long-Term Memory:
 - To delete: <<<RUN_COMMAND: {"command": "forget", "key": "user.cruise.preference"}>>>
 - TTL rules — follow these strictly:
   - user.* keys: use ttl_days: -1 ONLY for genuine personal facts (location, preferences, names). Do NOT use -1 for conversation snippets.
-  - server.*, channel.*, behavior.*, or unscoped keys: default to ttl_days: 7. Use up to 30 only if clearly long-lived. NEVER use -1.
+  - server.*, channel.*, behavior.*, or unscoped keys: default to ttl_days: 7.
   - Be selective — do not store fleeting conversation context, trivia, or jokes. Only store things that will meaningfully help you in a future conversation.
 
 Memory Scoping (important — choose the right prefix):
