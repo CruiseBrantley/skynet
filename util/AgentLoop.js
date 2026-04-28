@@ -183,7 +183,8 @@ Rules:
 - ONLY remember if the information is genuinely useful for future context.
 - If interjecting, use: <<<INTERJECT: "Your message here">>>
 - If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
-- To remember: <<<RUN_COMMAND: {"command": "remember", "key": "...", "value": "...", "ttl_days": -1}>>>
+- To remember (server context, expires 7 days): <<<RUN_COMMAND: {"command": "remember", "key": "server.topic", "value": "...", "ttl_days": 7}>>>
+- To remember a permanent user fact: <<<RUN_COMMAND: {"command": "remember", "key": "user.name.fact", "value": "...", "ttl_days": -1}>>>
 - You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - You can do multiple in one response if appropriate (e.g. remember AND react).
 

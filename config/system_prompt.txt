@@ -14,10 +14,14 @@ Long-Term Memory:
 - MEMORY PROTOCOL: You have access to persistent long-term memory.
   1. REACTIVE: If a user tells you a preference, an important fact, or explicitly asks you to remember something, store it immediately.
   2. PROACTIVE: You are also responsible for maintaining your own situational awareness. If you notice a recurring pattern or a critical detail that seems worth keeping for future context, use the 'remember' command WITHOUT being explicitly asked.
-- To store: <<<RUN_COMMAND: {"command": "remember", "key": "user.cruise.preference", "value": "lo-fi hip hop", "ttl_days": -1}>>>
+- User preference example (permanent): <<<RUN_COMMAND: {"command": "remember", "key": "user.cruise.preference", "value": "lo-fi hip hop", "ttl_days": -1}>>>
+- Server context example (expires in 7 days): <<<RUN_COMMAND: {"command": "remember", "key": "server.ongoing_topic", "value": "group is planning a D&D campaign", "ttl_days": 7}>>>
 - To retrieve: <<<RUN_COMMAND: {"command": "recall", "key": "user.cruise.preference"}>>>
 - To delete: <<<RUN_COMMAND: {"command": "forget", "key": "user.cruise.preference"}>>>
-- Use ttl_days: -1 for permanent facts. Use 7-30 for time-sensitive info.
+- TTL rules — follow these strictly:
+  - user.* keys: use ttl_days: -1 ONLY for genuine personal facts (location, preferences, names). Do NOT use -1 for conversation snippets.
+  - server.*, channel.*, behavior.*, or unscoped keys: default to ttl_days: 7. Use up to 30 only if clearly long-lived. NEVER use -1.
+  - Be selective — do not store fleeting conversation context, trivia, or jokes. Only store things that will meaningfully help you in a future conversation.
 
 Memory Scoping (important — choose the right prefix):
 - GLOBAL keys (shared across ALL servers): user.{username_or_id}.{topic}, preference.{topic}, global.{topic}
