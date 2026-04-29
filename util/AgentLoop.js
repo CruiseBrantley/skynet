@@ -31,10 +31,10 @@ class AgentLoop {
   }
 
   /**
-     * Start the loop. Safe to call multiple times — won't create duplicate intervals.
-     * @param {import('discord.js').Client} bot - The Discord client.
-     * @param {number} intervalMs - Milliseconds between ticks. Default: 5 minutes.
-     */
+       * Start the loop. Safe to call multiple times — won't create duplicate intervals.
+       * @param {import('discord.js').Client} bot - The Discord client.
+       * @param {number} intervalMs - Milliseconds between ticks. Default: 5 minutes.
+       */
   start (bot, intervalMs = 5 * 60_000) {
     if (this._interval) {
       logger.info('AgentLoop: Already running — ignoring duplicate start().')
@@ -49,8 +49,8 @@ class AgentLoop {
   }
 
   /**
-     * Stop the loop gracefully.
-     */
+       * Stop the loop gracefully.
+       */
   stop () {
     if (this._interval) {
       clearInterval(this._interval)
@@ -60,8 +60,8 @@ class AgentLoop {
   }
 
   /**
-     * Trigger a manual evaluation immediately (e.g. for testing or external triggers).
-     */
+       * Trigger a manual evaluation immediately (e.g. for testing or external triggers).
+       */
   async runOnce () {
     return this._tick()
   }
@@ -92,8 +92,8 @@ class AgentLoop {
   }
 
   /**
-     * Iterate through all whitelisted guilds and decide if we should chime in.
-     */
+       * Iterate through all whitelisted guilds and decide if we should chime in.
+       */
   async _checkProactiveGuilds () {
     if (!this._bot) return
 
@@ -114,8 +114,8 @@ class AgentLoop {
       const channels = await guild.channels.fetch()
       const textChannels = channels.filter(c =>
         c.isTextBased() && !c.isThread() && c.viewable &&
-        c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
-        c.lastMessageId
+                c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
+                c.lastMessageId
       )
 
       // Pick the 3 channels with the most recent activity.
@@ -181,14 +181,15 @@ Rules:
 - ONLY interject if you can be highly useful or adding genuine value.
 - ONLY react if a message is particularly good. Don't react to every message.
 - ONLY remember if the information is genuinely useful for future context.
-- If interjecting, use: <<<INTERJECT: "Your message here">>>
+- If interjecting to the channel: <<<INTERJECT: "Your message here">>>
+- If replying directly to a specific message: <<<INTERJECT: {"message": "Your reply", "replyToId": "<message-id>"}>>>
 - If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
 - To remember (server context, expires 7 days): <<<RUN_COMMAND: {"command": "remember", "key": "server.topic", "value": "...", "ttl_days": 7}>>>
 - To remember a permanent user fact: <<<RUN_COMMAND: {"command": "remember", "key": "user.name.fact", "value": "...", "ttl_days": -1}>>>
 - You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - You can do multiple in one response if appropriate (e.g. remember AND react).
 
-Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔.
+Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.
 
 If nothing is needed, respond with: NOOP`
 
@@ -206,11 +207,40 @@ If nothing is needed, respond with: NOOP`
 
       // Handle Interjections
       if (content.includes('<<<INTERJECT:')) {
-        const msgMatch = content.match(/<<<INTERJECT:\s*"([\s\S]*?)"/)
-        const intercom = msgMatch ? msgMatch[1] : null
-        if (intercom) {
-          await channel.send(`*(Proactive Suggestion)* ${intercom}`)
-          logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`)
+        const interjectMatch = content.match(/<<<INTERJECT:\s*([\s\S]*?)>>>/)
+        if (interjectMatch) {
+          let intercom = null
+          let replyToId = null
+          const raw = interjectMatch[1].trim()
+          if (raw.startsWith('{')) {
+            // JSON format: { message, replyToId? }
+            try {
+              const data = JSON.parse(jsonrepair(raw))
+              intercom = data.message || null
+              replyToId = data.replyToId || null
+            } catch (e) {
+              logger.warn(`AgentLoop: Failed to parse INTERJECT JSON: ${e.message}`)
+            }
+          } else {
+            // Legacy string format: "Your message here"
+            const strMatch = raw.match(/^"([\s\S]*)"$/)
+            intercom = strMatch ? strMatch[1] : raw
+          }
+          if (intercom) {
+            if (replyToId) {
+              const targetMsg = await channel.messages.fetch(replyToId).catch(() => null)
+              if (targetMsg) {
+                await targetMsg.reply(intercom)
+                logger.info(`AgentLoop: Replied to msg ${replyToId} in #${channel.name}: "${intercom.substring(0, 50)}..."`)
+              } else {
+                // Message not found — fall back to channel send
+                await channel.send(intercom)
+              }
+            } else {
+              await channel.send(`*(Proactive Suggestion)* ${intercom}`)
+              logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`)
+            }
+          }
         }
       }
 
@@ -223,9 +253,9 @@ If nothing is needed, respond with: NOOP`
             const message = await channel.messages.fetch(data.messageId).catch(() => null)
             if (message) {
               const existing = message.reactions.cache.get(data.emoji) ||
-                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
+                                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
               if (!existing || !existing.me) {
-                await message.react(data.emoji).catch(() => {})
+                await message.react(data.emoji).catch(() => { })
                 logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`)
               }
             }
@@ -369,9 +399,9 @@ Reason: Recording health check timestamp for diagnostics.`
   }
 
   /**
-     * Execute a single background-safe command.
-     * Returns a short description string for the action log, or null if unsupported/failed.
-     */
+       * Execute a single background-safe command.
+       * Returns a short description string for the action log, or null if unsupported/failed.
+       */
   async _executeCommand (cmdData, guildId = null) {
     const { getParam } = require('./commandHelper')
     const cmd = (cmdData.command || '').trim()

@@ -130,19 +130,66 @@ describe('AgentLoop - Proactive Presence', () => {
     expect(mockChannel.send).not.toHaveBeenCalled()
   })
 
-  test('skips stale conversations', async () => {
-    const oldDate = new Date(Date.now() - 30 * 60 * 1000)
-    const msg = {
-      id: 'msg-1',
+  test('INTERJECT with replyToId replies to the specific message', async () => {
+    const targetMsg = {
+      id: 'msg-target',
       author: { username: 'user1' },
-      content: 'old news',
-      createdAt: oldDate,
-      react: jest.fn()
+      content: 'Anyone know a good recipe for pasta?',
+      createdAt: new Date(Date.now()),
+      react: jest.fn().mockResolvedValue({}),
+      reply: jest.fn().mockResolvedValue({}),
+      reactions: { cache: { get: jest.fn().mockReturnValue(null), find: jest.fn().mockReturnValue(null) } }
     }
-    mockMessages.set('msg-1', msg)
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-target', targetMsg)
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: {
+        content: `<<<INTERJECT: {"message": "Try carbonara! Eggs, pancetta, pecorino.", "replyToId": "msg-target"}}>>>`
+      }
+    })
 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
 
-    expect(queryLocalOrRemote).not.toHaveBeenCalled()
+    expect(targetMsg.reply).toHaveBeenCalledWith(expect.stringContaining('carbonara'))
+    expect(mockChannel.send).not.toHaveBeenCalled()
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Replied to msg msg-target'))
+  })
+
+  test('INTERJECT with replyToId falls back to channel.send when message not found', async () => {
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-new', { id: 'msg-new', author: { username: 'u' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+
+    // fetch for a specific messageId returns null (message was deleted)
+    mockChannel.messages.fetch.mockImplementation((opt) => {
+      if (typeof opt === 'string' && opt === 'msg-deleted') return Promise.resolve(null)
+      return Promise.resolve(mockMessages)
+    })
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: {
+        content: `<<<INTERJECT: {"message": "Interesting point!", "replyToId": "msg-deleted"}>>>`
+      }
+    })
+
+    await agentLoop._evaluateProactivePresence(mockChannel, guildId)
+
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Interesting point!'))
+  })
+
+  test('legacy plain string INTERJECT still works', async () => {
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-1', { id: 'msg-1', author: { username: 'u' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: { content: '<<<INTERJECT: "Hey this is a legacy format message">>>' }
+    })
+
+    await agentLoop._evaluateProactivePresence(mockChannel, guildId)
+
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('legacy format message'))
   })
 })
