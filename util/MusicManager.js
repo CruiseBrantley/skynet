@@ -359,10 +359,6 @@ class MusicManager {
     }
 
     try {
-      // 1. Delete the old message
-      await this.stopUIUpdate(guildId, true)
-
-      // 2. Prepare Display State via Abstraction
       const queue = this.getQueue(guildId)
       const displayState = musicUI.buildFullDisplayState(
         track,
@@ -373,15 +369,13 @@ class MusicManager {
         { volume: queue.volume, bitrate: queue.bitrate }
       )
 
-      // 3. Send single AIO message with defensive check
-      if (typeof textChannel?.send !== 'function') {
-        logger.warn(`Failed to advance UI for guild ${guildId}: textChannel is not a sender. Re-fetching...`)
-        return
-      }
-
+      // 1. Send the new message FIRST to ensure continuity
       const stageMessage = await textChannel.send(displayState)
 
-      // 4. Restart loop
+      // 2. ONLY THEN delete the old message and stop its ticker
+      await this.stopUIUpdate(guildId, true)
+
+      // 3. Start the loop for the new message
       this.startUIUpdate(guildId, stageMessage, textChannel)
     } catch (err) {
       logger.error(`Failed to advance UI for guild ${guildId}: ${err.message}`)
@@ -499,11 +493,9 @@ class MusicManager {
         queue.add(recommendation, 'Skynet Autoplay')
       } else {
         logger.warn(`Autoplay: No valid recommendations found for guild ${guildId}`)
-        this.stopUIUpdate(guildId)
       }
     } catch (err) {
       logger.error(`Autoplay failed for guild ${guildId}: ${err.message}`)
-      this.stopUIUpdate(guildId)
     }
   }
 }

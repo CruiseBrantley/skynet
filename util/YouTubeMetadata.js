@@ -282,7 +282,8 @@ CRITICAL INSTRUCTIONS:
           prompt,
           options: { temperature: dynamicTemp, seed }
         })
-        aiSuggestions = result.response.trim().split('\n').map(s => s.replace(/["']/g, '').trim()).filter(s => s.length > 0)
+        const rawResponse = result?.response || ''
+        aiSuggestions = rawResponse.trim().split('\n').map(s => s.replace(/["']/g, '').trim()).filter(s => s.length > 0)
         logger.info(`AI suggested ${aiSuggestions.length} candidates.`)
       } catch (llmErr) {
         logger.warn(`AI recommendation failed, falling back to basic YouTube search: ${llmErr.message}`)

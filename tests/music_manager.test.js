@@ -478,7 +478,7 @@ describe('MusicManager Autoplay integration', () => {
     )
   })
 
-  test('triggerAutoplay stops UI update if no recommendation found', async () => {
+  test('triggerAutoplay does NOT stop UI update if no recommendation found (continuity fix)', async () => {
     const youtube = require('../util/YouTubeMetadata')
     jest.spyOn(youtube, 'getRecommendation').mockResolvedValueOnce(null)
 
@@ -486,7 +486,7 @@ describe('MusicManager Autoplay integration', () => {
 
     await manager.triggerAutoplay('guild-1', { title: 'Last' }, new Set())
 
-    expect(spyStopUI).toHaveBeenCalledWith('guild-1')
+    expect(spyStopUI).not.toHaveBeenCalled()
     spyStopUI.mockRestore()
   })
 })
