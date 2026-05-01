@@ -26,6 +26,13 @@ async function handlePlay (interaction) {
   const isActive = musicManager.uiStates.has(interaction.guildId)
   await interaction.deferReply({ flags: isActive ? [64] : [] })
 
+  // --- UI RESERVATION ---
+  // If this is a new session, reserve the state immediately to prevent
+  // MusicManager from sending a duplicate message when the track starts.
+  if (!isActive) {
+    musicManager.uiStates.set(interaction.guildId, { reserved: true, createdAt: Date.now() })
+  }
+
   try {
     let tracks = []
     let playlistTitle = null
@@ -112,6 +119,11 @@ async function handlePlay (interaction) {
     }
   } catch (err) {
     logger.error('Music play error:', err)
+    // Cleanup reservation if we failed before starting the UI
+    const state = musicManager.uiStates.get(interaction.guildId)
+    if (state && state.reserved) {
+      musicManager.uiStates.delete(interaction.guildId)
+    }
     await interaction.editReply(`Failed to play: ${err.message}`)
   }
 }
@@ -149,6 +161,11 @@ async function handleSearch (interaction) {
           guildId: btn.guildId,
           guild: btn.guild || interaction.guild,
           member: { voice: { channelId: channel.id } }
+        }
+
+        // Reserve the UI state to prevent double-message race condition
+        if (!musicManager.uiStates.has(btn.guildId)) {
+          musicManager.uiStates.set(btn.guildId, { reserved: true, createdAt: Date.now() })
         }
 
         await musicManager.enqueue(fakeInteraction, track)
@@ -243,7 +260,7 @@ async function handleVolume (interaction) {
   if (queue.player && queue.player.state && queue.player.state.resource) {
     const resource = queue.player.state.resource
     if (resource.volume) {
-      resource.volume.setVolume(volumeDec * 0.25)
+      resource.volume.setVolume(volumeDec * 0.075)
     }
   }
 

@@ -42,7 +42,7 @@ describe('Volume Scaling', () => {
     expect(gq.volume).toBe(1.0)
   })
 
-  test('setVolume should apply 0.25 scaling factor when playing', async () => {
+  test('setVolume should apply 0.075 scaling factor when playing', async () => {
     const mockResource = {
       volume: { setVolume: jest.fn() }
     }
@@ -51,10 +51,10 @@ describe('Volume Scaling', () => {
     gq.queue = [{ title: 'Track 1', url: 'https://yt/1' }]
     await gq._playNext()
 
-    expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.25)
+    expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.075)
   })
 
-  test('setVolume should apply 0.25 scaling factor when seeking', async () => {
+  test('setVolume should apply 0.075 scaling factor when seeking', async () => {
     const mockResource = {
       volume: { setVolume: jest.fn() }
     }
@@ -63,6 +63,6 @@ describe('Volume Scaling', () => {
 
     await gq.seek(30)
 
-    expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.25)
+    expect(mockResource.volume.setVolume).toHaveBeenCalledWith(0.075)
   })
 })

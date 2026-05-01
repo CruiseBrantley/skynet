@@ -85,6 +85,8 @@ describe('MusicManager Autoplay UI tick', () => {
   beforeEach(() => {
     jest.useFakeTimers()
     jest.clearAllMocks()
+    manager.uiStates.clear()
+    manager.queues.clear()
     mockMessage = makeMessage()
     mockChannel = makeChannel(mockMessage)
   })
@@ -124,6 +126,8 @@ describe('MusicManager Autoplay UI tick', () => {
     jest.spyOn(manager, 'getQueue').mockReturnValue(mockQueue)
 
     seedUIState(mockMessage, mockChannel)
+    // Age the state so it's not caught by Fresh UI Protection
+    manager.uiStates.get('guild-1').createdAt -= 15000
     await manager._handleTrackStart('guild-1', { title: 'New Track' })
 
     expect(mockMessage.delete).toHaveBeenCalled()
@@ -487,6 +491,25 @@ describe('MusicManager Autoplay integration', () => {
     await manager.triggerAutoplay('guild-1', { title: 'Last' }, new Set())
 
     expect(spyStopUI).not.toHaveBeenCalled()
+    spyStopUI.mockRestore()
+  })
+
+  test('_handleTrackStart ensures continuity by deleting old message ONLY after successful send', async () => {
+    const mockChannel = {
+      send: jest.fn().mockRejectedValueOnce(new Error('Discord Spike')),
+      id: 'chan-1'
+    }
+    const spyStopUI = jest.spyOn(manager, 'stopUIUpdate')
+    
+    // Simulate active state
+    manager.uiStates.set('guild-1', { stageMessage: { delete: jest.fn() }, textChannel: mockChannel })
+    
+    await manager._handleTrackStart('guild-1', { title: 'New song' }, mockChannel)
+
+    // Should have tried to send, failed, and NOT called stopUIUpdate(..., true)
+    expect(mockChannel.send).toHaveBeenCalled()
+    expect(spyStopUI).not.toHaveBeenCalledWith('guild-1', true)
+    
     spyStopUI.mockRestore()
   })
 })

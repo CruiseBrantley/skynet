@@ -276,7 +276,8 @@ class MusicManager {
       interval: null,
       deleteTimer: null,
       lyrics: null,
-      showLyrics: false
+      showLyrics: false,
+      createdAt: Date.now()
     }
 
     const queue = this.getQueue(guildId)
@@ -342,7 +343,31 @@ class MusicManager {
      * Internal: handles when a new track starts (automatic UI advancement).
      */
   async _handleTrackStart (guildId, track, forcedChannel = null) {
-    let textChannel = forcedChannel || this.uiStates.get(guildId)?.textChannel
+    const existingState = this.uiStates.get(guildId)
+    let textChannel = forcedChannel || existingState?.textChannel
+
+    // --- FRESH UI PROTECTION & RESERVATION ---
+    // If we already have a UI message that was created in the last 10 seconds,
+    // OR if the state is explicitly 'reserved' (meaning a command is handling the initial UI),
+    // don't send a new message.
+    if (existingState && (existingState.reserved || (existingState.stageMessage && Date.now() - existingState.createdAt < 10000))) {
+      logger.info(`Reusing fresh/reserved UI for guild ${guildId} to avoid double-message.`)
+      // If it's just reserved (no message yet), we stop here; the command will provide the message soon.
+      if (!existingState.stageMessage) return
+
+      // Still update the track info in the existing message if it exists
+      const queue = this.getQueue(guildId)
+      const displayState = musicUI.buildFullDisplayState(
+        track,
+        [...queue.queue],
+        0,
+        queue.isPaused(),
+        queue.autoplay,
+        { volume: queue.volume, bitrate: queue.bitrate }
+      )
+      await existingState.stageMessage.edit(displayState).catch(() => {})
+      return
+    }
 
     // --- DEEP RESOLUTION FALLBACK ---
     if (typeof textChannel?.send !== 'function') {

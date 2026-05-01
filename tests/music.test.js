@@ -6,7 +6,14 @@ jest.mock('../util/MusicManager', () => ({
   nowPlaying: jest.fn(),
   skip: jest.fn(),
   stop: jest.fn(),
-  uiStates: { has: jest.fn().mockReturnValue(false) },
+  uiStates: { 
+    has: jest.fn().mockReturnValue(false),
+    set: jest.fn(),
+    delete: jest.fn(),
+    get: jest.fn(),
+    clear: jest.fn()
+  },
+  queues: { clear: jest.fn() },
   startUIUpdate: jest.fn()
 }))
 
@@ -72,6 +79,8 @@ function mockInteraction (subcommand, options = {}) {
 describe('/music Command Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    musicManager.uiStates.clear()
+    musicManager.queues.clear()
   })
 
   describe('play subcommand', () => {

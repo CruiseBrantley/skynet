@@ -31,7 +31,7 @@ class GuildQueue {
     this._seekOffsetMs = 0 // Accumulated offset from seeks
     this._pausedAt = null // Date.now() when paused
     this.bitrate = 64000 // Default 64kbps, updated on join()
-    this.volume = 1.0 // Default 100% volume (internally 25%)
+    this.volume = 1.0 // Default 100% volume (internally 7.5% to provide 30% of previous scale)
     this.autoplay = false // Continue playing similar songs
     this.lastPlayedTrack = null // Memory of last track for recommendations
     this.recentTracks = [] // Rolling history of recent tracks for AI context
@@ -307,7 +307,7 @@ class GuildQueue {
       this._playbackStartedAt = Date.now()
       this._pausedAt = null
       if (resource.volume) {
-        resource.volume.setVolume(this.volume * 0.25)
+        resource.volume.setVolume(this.volume * 0.075)
       }
       this.player.play(resource)
       return true
@@ -460,7 +460,7 @@ class GuildQueue {
         loudnorm: cached?.loudnorm || null
       })
       if (resource.volume) {
-        resource.volume.setVolume(this.volume * 0.25)
+        resource.volume.setVolume(this.volume * 0.075)
       }
       this.player.play(resource)
       logger.info(`Now playing in ${this.guildId}: ${track.title || track.url}`)
