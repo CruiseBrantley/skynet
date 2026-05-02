@@ -57,12 +57,17 @@
 	},
 	"scripts": {
 		"test": "node --no-experimental-webstorage node_modules/.bin/jest",
-		"dev-env": "cross-env NODE_ENV=dev node bot.js",
-		"prod-env": "cross-env NODE_ENV=prod node bot.js",
-		"start": "cross-env NODE_ENV=prod node bot.js",
-		"run": "node bot.js",
-		"prepare": "husky",
-		"lint": "standard"
+		"lint": "standard",
+		"start": "npm run bot:prod",
+		"bot:run": "node bot.js",
+		"bot:dev": "cross-env NODE_ENV=dev node bot.js",
+		"bot:prod": "cross-env NODE_ENV=prod node bot.js",
+		"service:restart": "launchctl kickstart -k gui/$(id -u)/com.user.skynet",
+		"service:status": "launchctl print gui/$(id -u)/com.user.skynet",
+		"service:start": "launchctl bootstrap gui/$(id -u)/com.user.skynet ~/Library/LaunchAgents/com.user.skynet.plist",
+		"service:stop": "launchctl bootout gui/$(id -u)/com.user.skynet",
+		"service:logs": "tail -f logs/launchd_out.log",
+		"prepare": "husky"
 	},
 	"jest": {
 		"testEnvironment": "node",
