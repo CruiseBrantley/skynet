@@ -236,8 +236,11 @@ If nothing is needed, respond with: NOOP`
             intercom = strMatch ? strMatch[1] : raw
           }
           if (intercom) {
-            const { BOILERPLATE_SCRUB_REGEX } = require('./chat/constants')
-            intercom = intercom.replace(BOILERPLATE_SCRUB_REGEX, '').trim()
+            const { BOILERPLATE_SCRUB_REGEX, ID_SCRUB_REGEX } = require('./chat/constants')
+            intercom = intercom
+              .replace(BOILERPLATE_SCRUB_REGEX, '')
+              .replace(ID_SCRUB_REGEX, '')
+              .trim()
           }
 
           if (intercom) {

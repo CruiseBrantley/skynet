@@ -24,12 +24,12 @@ describe('Regression Hardening: Boilerplate & Limits', () => {
   })
 
   describe('DiscordResponder: Boilerplate Scrubbing', () => {
-    test('scrubs model self-introductions and broken tags', async () => {
-      const replyContent = 'I am Gemma 4, developed by Google. <<< Broken Tag >>>\nActually, the answer is 42.'
+    test('scrubs multiple ID prefixes across different lines', async () => {
+      const replyContent = '[ID: 1] @User: Hello\n[ID: 2] @Skynet: Error 404: Dignity not found.\nActually, the answer is 42.'
       await responder.sendFinalResponse({ interaction: mockInteraction, replyContent, sharedState })
       
       expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
-        content: 'Actually, the answer is 42.'
+        content: 'Hello\nError 404: Dignity not found.\nActually, the answer is 42.'
       }))
     })
 

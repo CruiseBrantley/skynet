@@ -1,6 +1,6 @@
 const { MessageFlags } = require('discord.js')
 const logger = require('../../logger')
-const { THOUGHT_SCRUB_REGEX, BOILERPLATE_SCRUB_REGEX } = require('./constants')
+const { THOUGHT_SCRUB_REGEX, BOILERPLATE_SCRUB_REGEX, ID_SCRUB_REGEX } = require('./constants')
 const { splitMessage } = require('./splitMessage')
 
 class DiscordResponder {
@@ -50,7 +50,7 @@ class DiscordResponder {
         const cleanChunk = chunks[i]
           .replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '')
           .replace(BOILERPLATE_SCRUB_REGEX, '')
-          .replace(/^\[ID: \d+\]\s*@[\w\d._-]+(?:\s*\([^)]+\))?:\s*/, '')
+          .replace(ID_SCRUB_REGEX, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
           .trim()
 
