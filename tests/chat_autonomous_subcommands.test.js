@@ -63,6 +63,7 @@ function makeInteraction (message = 'test') {
 describe('chat.js — Autonomous Subcommand Execution', () => {
   beforeEach(() => {
     ollama.queryOllamaWithContext.mockReset()
+    mockExecuteAction.mockClear()
   })
 
   test('successfully executes a subcommand-based command without crashing', async () => {
@@ -247,7 +248,29 @@ describe('chat.js — Autonomous Subcommand Execution', () => {
 
     await chatCmd.execute(mockInteraction)
 
-    // Verify ActionExecutor was called since 'send_message' is not in standard commands
     expect(mockExecuteAction).toHaveBeenCalledWith('send_message', expect.objectContaining({ content: 'hello' }), expect.anything())
+  })
+
+  test('handles naked JSON with tool alias correctly (hallucination regression)', async () => {
+    const mockInteraction = makeInteraction('search price')
+
+    // Simulate LLM hallucinates a raw JSON block with "tool" instead of "command"
+    ollama.queryOllamaWithContext.mockResolvedValueOnce({
+      message: { role: 'assistant', content: '{\n  "tool": "web_search",\n  "params": {\n    "query": "RTX price"\n  }\n}' }
+    }).mockResolvedValueOnce({
+      message: { role: 'assistant', content: 'Done.' }
+    })
+
+    // Mock listActions to include web_search for this test
+    const originalList = mockListActions.getMockImplementation()
+    mockListActions.mockImplementation(() => [
+      { name: 'web_search', description: 'Search', schema: {} }
+    ])
+
+    await chatCmd.execute(mockInteraction)
+
+    expect(mockExecuteAction).toHaveBeenCalledWith('web_search', expect.objectContaining({ query: 'RTX price' }), expect.anything())
+    
+    mockListActions.mockImplementation(originalList)
   })
 })

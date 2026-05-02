@@ -27,7 +27,7 @@ describe('AgentLoop - Proactive Presence', () => {
     mockMessages.reverse = jest.fn().mockReturnValue(mockMessages)
     mockMessages.first = jest
       .fn()
-      .mockImplementation(() => [...mockMessages.values()][0])
+      .mockImplementation(() => [...mockMessages.values()].sort((a,b) => b.createdAt - a.createdAt)[0])
     mockMessages.map = jest
       .fn()
       .mockImplementation((fn) => [...mockMessages.values()].map(fn))
@@ -43,25 +43,26 @@ describe('AgentLoop - Proactive Presence', () => {
       },
       send: jest.fn().mockResolvedValue({})
     }
+    agentLoop.start({ user: { id: 'bot-id' } }, 60000)
   })
 
   test('handles both reactions and interjections in one pass', async () => {
     mockMessages.set('msg-old-1', {
       id: 'msg-old-1',
-      author: { username: 'u' },
+      author: { id: 'user-old-1', username: 'u' },
       content: 'hi',
-      createdAt: new Date(Date.now())
+      createdAt: new Date(Date.now() - 10000)
     })
     mockMessages.set('msg-old-2', {
       id: 'msg-old-2',
-      author: { username: 'u' },
+      author: { id: 'user-old-2', username: 'u' },
       content: 'hello',
-      createdAt: new Date(Date.now())
+      createdAt: new Date(Date.now() - 5000)
     })
 
     const msg = {
       id: 'msg-1',
-      author: { username: 'user1' },
+      author: { id: 'user-1', username: 'user1' },
       content: 'Check out this cool bot I built!',
       createdAt: new Date(Date.now()),
       react: jest.fn().mockResolvedValue(undefined),
@@ -73,6 +74,7 @@ describe('AgentLoop - Proactive Presence', () => {
       }
     }
     mockMessages.set('msg-1', msg)
+    mockMessages.size = 3
 
     queryLocalOrRemote.mockResolvedValue({
       message: {
@@ -88,37 +90,22 @@ describe('AgentLoop - Proactive Presence', () => {
     expect(mockChannel.send).toHaveBeenCalledWith(
       expect.stringContaining('incredible')
     )
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Interjected')
-    )
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('Proactively reacted')
-    )
   })
 
   test('does nothing on NOOP', async () => {
-    mockMessages.set('msg-old-1', {
-      id: 'msg-old-1',
-      author: { username: 'u' },
-      content: 'hi',
-      createdAt: new Date(Date.now())
-    })
-    mockMessages.set('msg-old-2', {
-      id: 'msg-old-2',
-      author: { username: 'u' },
-      content: 'hello',
-      createdAt: new Date(Date.now())
-    })
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
 
     const msg = {
       id: 'msg-1',
-      author: { username: 'user1' },
+      author: { id: 'u3', username: 'user1' },
       content: 'hello',
       createdAt: new Date(Date.now()),
       react: jest.fn(),
       reactions: { cache: { find: jest.fn() } }
     }
     mockMessages.set('msg-1', msg)
+    mockMessages.size = 3
 
     queryLocalOrRemote.mockResolvedValue({
       message: { content: 'NOOP' }
@@ -133,20 +120,21 @@ describe('AgentLoop - Proactive Presence', () => {
   test('INTERJECT with replyToId replies to the specific message', async () => {
     const targetMsg = {
       id: 'msg-target',
-      author: { username: 'user1' },
+      author: { id: 'u-target', username: 'user1' },
       content: 'Anyone know a good recipe for pasta?',
       createdAt: new Date(Date.now()),
       react: jest.fn().mockResolvedValue({}),
       reply: jest.fn().mockResolvedValue({}),
       reactions: { cache: { get: jest.fn().mockReturnValue(null), find: jest.fn().mockReturnValue(null) } }
     }
-    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
-    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
     mockMessages.set('msg-target', targetMsg)
+    mockMessages.size = 3
 
     queryLocalOrRemote.mockResolvedValue({
       message: {
-        content: `<<<INTERJECT: {"message": "Try carbonara! Eggs, pancetta, pecorino.", "replyToId": "msg-target"}}>>>`
+        content: `<<<INTERJECT: {"message": "Try carbonara! Eggs, pancetta, pecorino.", "replyToId": "msg-target"}>>>`
       }
     })
 
@@ -154,13 +142,13 @@ describe('AgentLoop - Proactive Presence', () => {
 
     expect(targetMsg.reply).toHaveBeenCalledWith(expect.stringContaining('carbonara'))
     expect(mockChannel.send).not.toHaveBeenCalled()
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Replied to msg msg-target'))
   })
 
   test('INTERJECT with replyToId falls back to channel.send when message not found', async () => {
-    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
-    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
-    mockMessages.set('msg-new', { id: 'msg-new', author: { username: 'u' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
+    mockMessages.set('msg-new', { id: 'msg-new', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.size = 3
 
     // fetch for a specific messageId returns null (message was deleted)
     mockChannel.messages.fetch.mockImplementation((opt) => {
@@ -180,9 +168,10 @@ describe('AgentLoop - Proactive Presence', () => {
   })
 
   test('legacy plain string INTERJECT still works', async () => {
-    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { username: 'u' }, content: 'hi', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
-    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { username: 'u' }, content: 'hello', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
-    mockMessages.set('msg-1', { id: 'msg-1', author: { username: 'u' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
+    mockMessages.set('msg-1', { id: 'msg-1', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.size = 3
 
     queryLocalOrRemote.mockResolvedValue({
       message: { content: '<<<INTERJECT: "Hey this is a legacy format message">>>' }

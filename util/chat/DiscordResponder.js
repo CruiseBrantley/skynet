@@ -1,6 +1,6 @@
 const { MessageFlags } = require('discord.js')
 const logger = require('../../logger')
-const { THOUGHT_SCRUB_REGEX } = require('./constants')
+const { THOUGHT_SCRUB_REGEX, BOILERPLATE_SCRUB_REGEX } = require('./constants')
 const { splitMessage } = require('./splitMessage')
 
 class DiscordResponder {
@@ -43,16 +43,19 @@ class DiscordResponder {
       return
     }
 
+    let anythingSent = false
     const chunks = splitMessage(replyContent)
     for (let i = 0; i < chunks.length; i++) {
       try {
         const cleanChunk = chunks[i]
           .replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '')
+          .replace(BOILERPLATE_SCRUB_REGEX, '')
           .replace(/^\[ID: \d+\]\s*@[\w\d._-]+(?:\s*\([^)]+\))?:\s*/, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
           .trim()
 
         if (!cleanChunk && i === 0 && !sharedState.primaryResponseUsed) continue
+        if (cleanChunk) anythingSent = true
 
         if (i === 0) {
           // Extract any existing content or embeds
@@ -108,21 +111,33 @@ class DiscordResponder {
                 await interaction.editReply({ content: '\u200B' }).catch(() => {})
               }
             } else if (combinedText) {
-              await interaction.editReply({
-                content: combinedText,
-                flags: [MessageFlags.SuppressEmbeds]
-              })
+              if (combinedText.length > 2000) {
+                const subChunks = splitMessage(combinedText)
+                for (let j = 0; j < subChunks.length; j++) {
+                  if (j === 0) {
+                    await interaction.editReply({ content: subChunks[j], flags: [MessageFlags.SuppressEmbeds] })
+                  } else {
+                    await interaction.followUp({ content: subChunks[j], flags: [MessageFlags.SuppressEmbeds] })
+                  }
+                }
+              } else {
+                await interaction.editReply({
+                  content: combinedText,
+                  flags: [MessageFlags.SuppressEmbeds]
+                })
+              }
             } else {
               // If literally no text, no embeds, and no background action needs confirming, delete.
               await interaction.deleteReply().catch(() => {})
             }
           }
-        } else {
-          await interaction.followUp({ content: chunks[i], flags: [MessageFlags.SuppressEmbeds] })
+        } else if (cleanChunk) {
+          await interaction.followUp({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] })
         }
       } catch (discordErr) {
         const fallbackClean = chunks[i]
           .replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '')
+          .replace(BOILERPLATE_SCRUB_REGEX, '')
           .replace(/^\[ID: \d+\]\s*@[\w\d._-]+(?:\s*\([^)]+\))?:\s*/, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
           .trim()
@@ -132,6 +147,10 @@ class DiscordResponder {
           await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] })
         }
       }
+    }
+
+    if (!anythingSent && !sharedState.primaryResponseUsed && !sharedState.visualActionExecuted) {
+      await interaction.deleteReply().catch(() => {})
     }
   }
 }

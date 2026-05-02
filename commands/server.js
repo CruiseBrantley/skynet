@@ -449,7 +449,8 @@ module.exports = {
       if (!app) return interaction.reply({ content: 'Server not found.', ephemeral: true })
 
       // 1. Immediately disable buttons and show loading state
-      const currentEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+      const firstEmbed = interaction.message.embeds[0]
+      const currentEmbed = firstEmbed ? EmbedBuilder.from(firstEmbed) : new EmbedBuilder().setTitle('Server Status').setColor('#3498db')
       currentEmbed.setFooter({ text: 'Refreshing status... please wait.' })
 
       const disabledRow = new ActionRowBuilder()

@@ -140,6 +140,15 @@ class AgentLoop {
 
       // RECENCY CHECK: Only evaluate if the conversation is still "alive" (last message within 15 mins)
       const lastMessage = messages.first()
+      const botId = this._bot?.user?.id
+
+      // BOT SELF-TALK PREVENTION: Never evaluate or interject if the last message was from me.
+      // We wait for humans to provide fresh input before chiming in again.
+      if (lastMessage.author.id === botId) {
+        logger.info(`AgentLoop: skipping #${channel.name} — last message was from me.`)
+        return
+      }
+
       const fifteenMinsAgo = Date.now() - 15 * 60 * 1000
       if (lastMessage.createdAt.getTime() < fifteenMinsAgo) {
         logger.info(`AgentLoop: skipping #${channel.name} — conversation is stale.`)
@@ -156,7 +165,6 @@ class AgentLoop {
         return
       }
 
-      const botId = this._bot?.user?.id
       const { formatMessagesForContext } = require('./chat/contextHelper')
       const history = formatMessagesForContext(messages, botId)
 
@@ -179,6 +187,7 @@ You have three ways to interact:
 Rules:
 - Be VERY selective. Most of the time, respond with: NOOP
 - ONLY interject if you can be highly useful or adding genuine value.
+- DO NOT repeat yourself. If you have already chimed in recently with similar information in the history, stay quiet (NOOP).
 - ONLY react if a message is particularly good. Don't react to every message.
 - ONLY remember if the information is genuinely useful for future context.
 - If interjecting to the channel: <<<INTERJECT: "Your message here">>>
@@ -226,6 +235,11 @@ If nothing is needed, respond with: NOOP`
             const strMatch = raw.match(/^"([\s\S]*)"$/)
             intercom = strMatch ? strMatch[1] : raw
           }
+          if (intercom) {
+            const { BOILERPLATE_SCRUB_REGEX } = require('./chat/constants')
+            intercom = intercom.replace(BOILERPLATE_SCRUB_REGEX, '').trim()
+          }
+
           if (intercom) {
             if (replyToId) {
               const targetMsg = await channel.messages.fetch(replyToId).catch(() => null)

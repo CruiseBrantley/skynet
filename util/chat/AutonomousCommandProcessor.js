@@ -36,8 +36,12 @@ class AutonomousCommandProcessor {
           try {
             const candidate = replyContent.trim()
             const testData = JSON.parse(jsonrepair(candidate))
+            // Alias 'tool' or 'action' to 'command' for LLMs that hallucinate standard tool calling JSON
+            if (testData.tool && !testData.command) testData.command = testData.tool
+            if (testData.action && !testData.command) testData.command = testData.action
+
             if (testData.command) {
-              jsonStr = candidate
+              jsonStr = JSON.stringify(testData)
               fullMatchString = replyContent
               logger.info(`AUTONOMOUS: Detected naked JSON: ${jsonStr.substring(0, 100)}`)
             }

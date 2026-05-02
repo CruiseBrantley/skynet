@@ -196,6 +196,39 @@ bot.on('interactionCreate', async (interaction) => {
     }
   }
 
+  if (interaction.isButton()) {
+    // 1. Server Management Buttons
+    if (interaction.customId.startsWith('server_')) {
+      const command = interaction.client.commands.get('server')
+      if (command && command.handleButton) {
+        try {
+          await command.handleButton(interaction)
+        } catch (error) {
+          logger.error(`Server button error: ${error.stack || error.message}`)
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'Server interaction failed.', ephemeral: true }).catch(() => {})
+          }
+        }
+      }
+      return
+    }
+
+    // 2. Music Player Buttons (AIO Cinematic Interface)
+    if (interaction.customId.startsWith('music_')) {
+      try {
+        await musicManager.handleInteraction(interaction)
+      } catch (error) {
+        logger.error(`Music button error: ${error.stack || error.message}`)
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'Music interaction failed.', ephemeral: true }).catch(() => {})
+        }
+      }
+      return
+    }
+
+    return
+  }
+
   if (!interaction.isChatInputCommand()) return
 
   const command = interaction.client.commands.get(interaction.commandName)
