@@ -54,7 +54,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
   if (fallbackLevel === true) fallbackLevel = 1
   if (fallbackLevel === false) fallbackLevel = 0
 
-  const timeoutMs = 60000 // 1 minute timeout for faster failover
+  const timeoutMs = 10000 // 10s timeout for faster failover
 
   // Level 1: Gemini API Tier (The first reliable fail-over)
   if (fallbackLevel === 1) {

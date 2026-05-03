@@ -252,6 +252,24 @@ class YouTubeMetadata {
       return new Set(clean.split(' ').filter(w => w.length >= 2 && !noiseWords.has(w)))
     })
 
+    // 2. High-Efficiency Semantic Deduplication against deep history
+    const isNotDuplicate = (r) => {
+      const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ')
+      const rTokens = clean.split(' ').filter(w => w.length >= 2 && !noiseWords.has(w))
+      if (rTokens.length === 0) return true
+
+      const rSet = new Set(rTokens)
+      return !pastTokenSets.some(pastSet => {
+        if (pastSet.size === 0) return false
+        let overlap = 0
+        for (const word of rSet) {
+          if (pastSet.has(word)) overlap++
+        }
+        const threshold = Math.max(2, rSet.size * 0.5)
+        return overlap >= threshold
+      })
+    }
+
     try {
       const { queryOllama } = require('./ollama')
 
@@ -302,23 +320,7 @@ CRITICAL INSTRUCTIONS:
           return vidId && !sessionHistory.has(vidId)
         })
 
-        // 2. High-Efficiency Semantic Deduplication against deep history
-        const distinctUnplayed = unplayed.filter(r => {
-          const clean = r.title.toLowerCase().replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ')
-          const rTokens = clean.split(' ').filter(w => w.length >= 2 && !noiseWords.has(w))
-          if (rTokens.length === 0) return true
-
-          const rSet = new Set(rTokens)
-          return !pastTokenSets.some(pastSet => {
-            if (pastSet.size === 0) return false
-            let overlap = 0
-            for (const word of rSet) {
-              if (pastSet.has(word)) overlap++
-            }
-            const threshold = Math.max(2, rSet.size * 0.5)
-            return overlap >= threshold
-          })
-        })
+        const distinctUnplayed = unplayed.filter(isNotDuplicate)
 
         if (distinctUnplayed.length > 0) {
           // Avoid adding the same video ID twice if multiple AI suggestions lead to the same result
@@ -327,6 +329,19 @@ CRITICAL INSTRUCTIONS:
           if (!finalRecommendations.some(ext => this.extractVideoId(ext.url) === candId)) {
             finalRecommendations.push(candidate)
           }
+        }
+      }
+
+      // Final check: if no results passed the strict filters, use a broad fallback
+      if (finalRecommendations.length === 0) {
+        logger.info('Autoplay: No unique matches found for suggestions. Using broad fallback search.')
+        const fallbackResults = await this.search(`related to ${currentTrack.title} ${currentTrack.channel}`, 10)
+        const absoluteUnplayed = fallbackResults.filter(r => {
+          const vidId = this.extractVideoId(r.url)
+          return vidId && !sessionHistory.has(vidId) && isNotDuplicate(r)
+        })
+        if (absoluteUnplayed.length > 0) {
+          finalRecommendations.push(absoluteUnplayed[0])
         }
       }
 

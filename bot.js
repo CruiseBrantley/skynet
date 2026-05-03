@@ -51,7 +51,8 @@ const bot = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.DirectMessageReactions
+    GatewayIntentBits.DirectMessageReactions,
+    GatewayIntentBits.DirectMessageTyping
   ],
   partials: [
     Partials.Channel,
@@ -275,34 +276,44 @@ bot.on('threadCreate', async (thread) => {
 })
 
 bot.on('messageCreate', async (message) => {
+  const contentPreview = message.content ? message.content.substring(0, 50) : '[Uncached Content]'
+  logger.info(`Message received from ${message.author?.tag || 'unknown'}: "${contentPreview}"`)
   let preFetchedHistory = null
   try {
-    if (message.partial) await message.fetch()
-    if (message.channel?.partial) await message.channel.fetch()
+    if (message.partial) {
+      await Promise.race([
+        message.fetch(),
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Message fetch timeout')), 3000))
+      ]).catch(e => logger.warn(`Partial message fetch failed: ${e.message}`))
+    }
+
+    if (message.channel?.partial) {
+      await Promise.race([
+        message.channel.fetch(),
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Channel fetch timeout')), 3000))
+      ]).catch(e => logger.warn(`Partial channel fetch failed: ${e.message}`))
+    }
 
     if (message.author?.bot) return
 
-    const isDM =
-      !message.guild ||
-      message.channel?.type === ChannelType.DM ||
-      message.channel?.isDMBased?.()
-    const isMentioned = message.mentions.has(bot.user)
+    const isDM = !message.guild
+
     const isThread = message.channel?.isThread?.() || false
 
-    if (isDM || isMentioned) {
-      logger.info(
-        `Message Debug [${message.author?.tag}]: channelId=${message.channelId}, isDM=${isDM}, isMentioned=${isMentioned}`
-      )
-    }
-
     // Skip messages sent more than 10 minutes ago
-    if (Date.now() - message.createdAt.getTime() > 10 * 60 * 1000) {
+    const age = Date.now() - message.createdAt.getTime()
+    if (age > 10 * 60 * 1000) {
       return
     }
 
     if (message.mentions.everyone) return
 
+    const isMentioned = message.mentions.has(bot.user.id) || message.content.includes(`<@${bot.user.id}>`) || message.content.includes(`<@!${bot.user.id}>`)
     let shouldRespond = isMentioned || isDM
+
+    if (shouldRespond) {
+      logger.info(`Message Analysis: shouldRespond=true (isMentioned=${isMentioned}, isDM=${isDM})`)
+    }
 
     if (!shouldRespond && isThread) {
       let isOurThread = false
@@ -440,7 +451,7 @@ bot.on('messageCreate', async (message) => {
         }
 
         try {
-          message.channel.sendTyping()
+          message.channel.sendTyping().catch(e => logger.warn(`Initial sendTyping failed: ${e.message}`))
           await chatCommand.execute(mockInteraction, database)
         } catch (err) {
           logger.error(`Mention error: ${err.stack || err.message}`)

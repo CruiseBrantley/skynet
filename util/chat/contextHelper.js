@@ -10,10 +10,18 @@ function formatMessagesForContext (messages, botId) {
 
   return sorted
     .map(m => {
+      const elapsed = Date.now() - m.createdAt.getTime()
+      const elapsedMinutes = Math.floor(elapsed / 60000)
+      let timeLabel
+      if (elapsedMinutes < 1) timeLabel = 'just now'
+      else if (elapsedMinutes < 60) timeLabel = `${elapsedMinutes}m ago`
+      else if (elapsedMinutes < 1440) timeLabel = `${Math.floor(elapsedMinutes / 60)}h ago`
+      else timeLabel = `${Math.floor(elapsedMinutes / 1440)}d ago`
+
       const role = m.author.id === botId ? 'assistant' : 'user'
       const handle = `@${m.author.username}`
       const content = m.content.replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
-      return { role, content: `[ID: ${m.id}] ${handle}: ${content}` }
+      return { role, content: `[ID: ${m.id} | ${timeLabel}] ${handle}: ${content}` }
     })
     .filter(m => m.content.length > 0)
 }

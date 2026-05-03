@@ -19,7 +19,7 @@ class AutonomousCommandProcessor {
     const executedJson = new Set() // Prevent exact same JSON from running twice in one turn
     let loopCount = 0
 
-    while (loopCount < 5) {
+    while (loopCount < 10) {
       if (!replyContent || typeof replyContent !== 'string') break
 
       const commandMatch = replyContent.match(COMMAND_REGEX)
@@ -68,7 +68,7 @@ class AutonomousCommandProcessor {
 
         // Smart Budgeting: Prevent spam of major actions within a single user request turn.
         // Whitelist minor utility commands that can naturally be multi-fired.
-        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search']
+        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search', 'web_search']
         const highImpactCommands = ['send_embed', 'send_poll', 'summarize_history']
         const visualActions = ['send_embed', 'send_poll', 'summarize_history', 'add_reaction', 'remove_reaction']
 

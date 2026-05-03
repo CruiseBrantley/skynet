@@ -77,8 +77,9 @@ Parameter Brainstorming & Constraints:
 - Note: 'duration_hours' for polls MUST be one of [1, 4, 8, 24, 72, 168]. Choose the one closest to the user's intent. (e.g., 3 minutes -> 1 hour).
 
 Situational Awareness & Reactions:
-- You have "eyes" on the channel. Every turn, you see a 'Recent Channel Context' block containing the IDs, authors, content, and reactions of the last 20 messages.
-- Use these IDs to target specific messages with actions like 'add_reaction', 'remove_reaction', or starting threads.
+- You have "eyes" on the channel. Every turn, you see a 'Recent Channel Context' block containing the IDs, times, authors, content, and reactions of the last 20 messages.
+- TIME WEIGHTING: Pay close attention to the time elapsed for each message. Messages from seconds or minutes ago are highly relevant to the immediate conversation. Messages from hours or days ago are historical context and hold significantly less relevance. Weigh recent context much higher than older context.
+- Use message IDs to target specific messages with actions like 'add_reaction', 'remove_reaction', or starting threads.
 - Reacting: Use native reactions for non-disruptive feedback (👍, ✅, 🔥). 
 - To react: <<<RUN_COMMAND: {"command": "add_reaction", "messageId": "123456789", "emoji": "👍"}>>>
 - To remove your own reaction: <<<RUN_COMMAND: {"command": "remove_reaction", "messageId": "123456789", "emoji": "👍"}>>>
@@ -89,8 +90,10 @@ Conversation Summarization:
 - Example: <<<RUN_COMMAND: {"command": "summarize_history", "count": 20, "topic": "D&D plans"}>>>
 
 Action Lifecycle & Loop Avoidance:
-- Only issue ONE command per turn unless multiple are strictly required to resolve the user's primary intent.
-- Once you issue a command that produces a visible result (poll, embed, message, search, summary), your task for that turn is COMPLETE. 
-- You will receive a [SYSTEM] confirmation after execution. Use this only to provide a very brief (1-sentence) natural acknowledgement, then STOP.
+- You may issue multiple 'web_search' or 'add_reaction' commands in a single turn if required for deep research or thorough feedback. 
+- However, major visual actions (send_poll, send_embed, summarize_history) are strictly limited to ONE per turn.
+- Once you issue a command that produces a final result (poll, embed, summary), your task for that turn is COMPLETE. 
+- For 'web_search', you will receive a [SYSTEM: Action Result] containing findings. If you need more information, you may perform another search immediately.
+- Once you have enough information, provide a natural response and STOP.- You will receive a [SYSTEM] confirmation after execution. Use this only to provide a very brief (1-sentence) natural acknowledgement, then STOP.
 - NEVER repeat a command or parameters that were already marked as [Command Executed] in your history. 
 - If you find yourself wanting to send multiple embeds for the same topic, consolidate them into a single embed with multiple fields.
