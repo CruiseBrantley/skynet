@@ -1,5 +1,15 @@
 const agentLoop = require('../util/AgentLoop')
 const logger = require('../logger')
+const { queryLocalOrRemote } = require('../util/ollama')
+
+jest.mock('../util/ollama')
+jest.mock('../util/chat/contextHelper', () => ({
+  formatMessagesForContext: jest.fn().mockReturnValue([])
+}))
+jest.mock('../util/AgentMemory', () => ({
+  get: jest.fn().mockReturnValue(null),
+  set: jest.fn()
+}))
 
 describe('AgentLoop Self-Talk Prevention', () => {
   let mockBot
@@ -52,11 +62,9 @@ describe('AgentLoop Self-Talk Prevention', () => {
     // But the absence of the "skipping ... last message was from me" log is what we're testing.
     const loggerInfoSpy = jest.spyOn(logger, 'info')
     
-    try {
-      await agentLoop._evaluateProactivePresence(mockChannel, 'guild123')
-    } catch (e) {
-      // Expected failure later in the function
-    }
+    queryLocalOrRemote.mockResolvedValue({ message: { content: 'NOOP' } })
+    
+    await agentLoop._evaluateProactivePresence(mockChannel, 'guild123')
 
     expect(loggerInfoSpy).not.toHaveBeenCalledWith(expect.stringContaining('skipping #general — last message was from me'))
   })
