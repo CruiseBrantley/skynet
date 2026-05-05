@@ -150,7 +150,6 @@ module.exports = {
       }
 
       const successMessagePrefix = ''
-
       const sessionId = sessionRes.data.session_id
 
       // 2. Generate Image

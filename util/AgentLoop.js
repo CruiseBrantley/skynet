@@ -156,8 +156,6 @@ class AgentLoop {
       }
 
       // MESSAGE ID TRACKING: Skip if we've already evaluated this exact conversation snapshot.
-      // This prevents redundant Ollama calls and re-evaluating messages we've already seen.
-      // A new message (including one that references an older one) will always produce a new ID.
       const lastMsgKey = `proactive.last_msg.${channel.id}`
       const lastSeenMsgId = agentMemory.get(lastMsgKey, guildId)
       if (lastSeenMsgId && lastSeenMsgId === lastMessage.id) {
@@ -200,12 +198,14 @@ Rules:
 
 Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.
 
-If nothing is needed, respond with: NOOP`
+If nothing is needed, respond with: NOOP
+
+ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP. You should only interject if the conversation is at a complete standstill or if you have a life-improving piece of information. For casual chat, jokes, or general observations, ALWAYS respond with NOOP. If you are unsure, stay silent. NOOP is the safest and best answer.`
 
       const { queryLocalOrRemote } = require('./ollama')
       const result = await queryLocalOrRemote('/api/chat', {
         messages: [{ role: 'system', content: prompt }],
-        options: { temperature: 0.3 }
+        options: { temperature: 0.05 }
       })
 
       const content = result?.message?.content?.trim() || ''

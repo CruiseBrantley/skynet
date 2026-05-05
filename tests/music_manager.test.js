@@ -64,14 +64,9 @@ function seedUIState (message, channel) {
 }
 
 function cleanup () {
+  manager.clearAll()
+  jest.clearAllTimers()
   jest.useRealTimers()
-  const state = manager.uiStates.get('guild-1')
-  if (state) {
-    if (state.interval) clearInterval(state.interval)
-    if (state.deleteTimer) clearTimeout(state.deleteTimer)
-    manager.uiStates.delete('guild-1')
-  }
-  manager.queues.delete('guild-1')
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +177,8 @@ describe('MusicManager idle-delete window', () => {
     manager._scheduleIdleDelete('guild-1')
 
     const state = manager.uiStates.get('guild-1')
-    // Interval should still be alive (ticker was never stopped)
-    expect(state.interval).not.toBeNull()
+    // updateTimer should still be alive (ticker was never stopped)
+    expect(state.updateTimer).not.toBeNull()
   })
 
   test('stop() deletes the message immediately, bypassing the 5-minute timer', async () => {
@@ -208,8 +203,8 @@ describe('MusicManager idle-delete window', () => {
     // Stop the ticker then advance past 5 min — the delete timer was cancelled
     // so nothing should fire.
     const state = manager.uiStates.get('guild-1')
-    clearInterval(state.interval)
-    state.interval = null
+    clearTimeout(state.updateTimer)
+    state.updateTimer = null
 
     jest.advanceTimersByTime(5 * 60 * 1000 + 1)
     await Promise.resolve()
@@ -237,8 +232,8 @@ describe('MusicManager idle-delete window', () => {
 
     // Stop the ticker so advancing time doesn't spawn an infinite loop
     const state = manager.uiStates.get('guild-1')
-    clearInterval(state.interval)
-    state.interval = null
+    clearTimeout(state.updateTimer)
+    state.updateTimer = null
 
     // Advance to just past the FIRST timer window — message should NOT be deleted yet
     jest.advanceTimersByTime(5 * 60 * 1000 - 1000)

@@ -64,14 +64,31 @@ const bot = new Client({
 })
 
 // Proactive DM channel caching fix for Discord.js v14
+const pendingDMs = new Set()
+
 bot.on('raw', async (packet) => {
   if (packet.t === 'MESSAGE_CREATE' && !packet.d.guild_id) {
+    const msgId = packet.d.id
+    const channelId = packet.d.channel_id
+    pendingDMs.add(msgId)
+
     try {
-      if (!bot.channels.cache.has(packet.d.channel_id)) {
-        await bot.channels.fetch(packet.d.channel_id)
-      }
+      if (packet.d.author) await bot.users.fetch(packet.d.author.id).catch(() => {})
+      const channel = await bot.channels.fetch(channelId).catch(() => null)
+
+      // Safety net: if Discord.js doesn't emit messageCreate in 1.5s, we do it manually.
+      setTimeout(async () => {
+        if (pendingDMs.has(msgId)) {
+          logger.info(`[DM-FIX] Manually triggering event for message ${msgId}`)
+          if (channel) {
+            const message = await channel.messages.fetch(msgId).catch(() => null)
+            if (message) bot.emit('messageCreate', message)
+          }
+          pendingDMs.delete(msgId)
+        }
+      }, 1500)
     } catch (e) {
-      logger.error(`DM pre-fetch failed: ${e.message}`)
+      logger.error(`DM raw handler error: ${e.message}`)
     }
   }
 })
@@ -111,6 +128,12 @@ const botDelete = require('./events/botDelete')
 const { fetchAndFormatContext } = require('./util/chat/contextHelper')
 
 const aloneTimers = new Map()
+
+bot.on('debug', (info) => {
+  if (info.includes('MESSAGE_CREATE')) {
+    logger.info(`DEBUG: ${info}`)
+  }
+})
 
 bot.on('ready', () => {
   logger.info('Connected')
@@ -276,27 +299,39 @@ bot.on('threadCreate', async (thread) => {
 })
 
 bot.on('messageCreate', async (message) => {
+  if (pendingDMs.has(message.id)) {
+    pendingDMs.delete(message.id)
+  }
+
   const contentPreview = message.content ? message.content.substring(0, 50) : '[Uncached Content]'
   logger.info(`Message received from ${message.author?.tag || 'unknown'}: "${contentPreview}"`)
   let preFetchedHistory = null
   try {
     if (message.partial) {
+      logger.info(`BOT: Message ${message.id} is partial. Fetching...`)
       await Promise.race([
         message.fetch(),
-        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Message fetch timeout')), 3000))
-      ]).catch(e => logger.warn(`Partial message fetch failed: ${e.message}`))
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Message fetch timeout')), 5000))
+      ]).catch(e => logger.warn(`BOT: Partial message fetch failed for ${message.id}: ${e.message}`))
     }
 
     if (message.channel?.partial) {
+      logger.info(`BOT: Channel ${message.channelId} is partial. Fetching...`)
       await Promise.race([
         message.channel.fetch(),
-        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Channel fetch timeout')), 3000))
-      ]).catch(e => logger.warn(`Partial channel fetch failed: ${e.message}`))
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error('Channel fetch timeout')), 5000))
+      ]).catch(e => logger.warn(`BOT: Partial channel fetch failed for ${message.channelId}: ${e.message}`))
     }
 
-    if (message.author?.bot) return
+    if (!message.author) {
+      logger.warn(`BOT: Message ${message.id} has no author after fetch. Skipping.`)
+      return
+    }
 
-    const isDM = !message.guild
+    const isDM = !message.guild || message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM
+    logger.info(`BOT: Message Analysis for ${message.id} — isDM=${isDM} guild=${message.guildId || 'DM'}`)
+
+    if (message.author?.bot) return
 
     const isThread = message.channel?.isThread?.() || false
 
@@ -308,11 +343,13 @@ bot.on('messageCreate', async (message) => {
 
     if (message.mentions.everyone) return
 
-    const isMentioned = message.mentions.has(bot.user.id) || message.content.includes(`<@${bot.user.id}>`) || message.content.includes(`<@!${bot.user.id}>`)
-    let shouldRespond = isMentioned || isDM
+    const content = message.content || ''
+    const isReplyToBot = message.type === 19 && message.mentions.repliedUser?.id === bot.user.id // 19 is MessageType.Reply
+    const isMentioned = message.mentions.has(bot.user.id) || content.includes(`<@${bot.user.id}>`) || content.includes(`<@!${bot.user.id}>`)
+    let shouldRespond = isMentioned || isReplyToBot || isDM
 
     if (shouldRespond) {
-      logger.info(`Message Analysis: shouldRespond=true (isMentioned=${isMentioned}, isDM=${isDM})`)
+      logger.info(`BOT: shouldRespond=true for ${message.id} (isMentioned=${isMentioned}, isDM=${isDM})`)
     }
 
     if (!shouldRespond && isThread) {

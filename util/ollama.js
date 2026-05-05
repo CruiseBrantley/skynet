@@ -54,7 +54,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
   if (fallbackLevel === true) fallbackLevel = 1
   if (fallbackLevel === false) fallbackLevel = 0
 
-  const timeoutMs = 10000 // 10s timeout for faster failover
+  const timeoutMs = 20000 // 20s base timeout for more reliable failover
 
   // Level 1: Gemini API Tier (The first reliable fail-over)
   if (fallbackLevel === 1) {
@@ -68,7 +68,18 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     let geminiMessages = []
     if (payload.messages) {
-      geminiMessages = payload.messages
+      geminiMessages = payload.messages.map(msg => {
+        const role = msg.role === 'assistant' ? 'assistant' : 'user'
+        if (msg.images && msg.images.length > 0) {
+          const contentBlocks = [{ type: 'text', text: msg.content || '' }]
+          msg.images.forEach(img => {
+            const dataUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+            contentBlocks.push({ type: 'image_url', image_url: { url: dataUrl } })
+          })
+          return { role, content: contentBlocks }
+        }
+        return { role, content: msg.content || '' }
+      })
     } else if (payload.prompt) {
       geminiMessages = [{ role: 'user', content: payload.prompt }]
     }
@@ -133,7 +144,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       if (payload.messages) {
         logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
       }
-      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: timeoutMs * 1.5 })
+      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 45000 }) // 45s for local load
 
       const data = response.data
       if (data && data.message && data.message.content) {
@@ -241,13 +252,6 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     if (idx === 0 && msg.role === 'system') {
       return { ...msg, content: sysMsg }
     }
-    if (isBackup && msg.images) {
-      const { images, ...rest } = msg
-      return {
-        ...rest,
-        content: (rest.content || '') + `\n\n[SYSTEM: The user attached an image, but your network connection to the primary visual processing core failed. Ignore the image and organically inform the user that ${botName}'s visual sensors are currently offline and you can only process text.]`
-      }
-    }
     return msg
   })
 
@@ -256,7 +260,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
       messages: processedMessages,
       options: {
         num_ctx: 8192,
-        temperature: 0.7,
+        temperature: 0.3,
         top_k: 40,
         top_p: 0.9
       }

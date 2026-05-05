@@ -20,7 +20,16 @@ function formatMessagesForContext (messages, botId) {
 
       const role = m.author.id === botId ? 'assistant' : 'user'
       const handle = `@${m.author.username}`
-      const content = m.content.replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
+      let content = (m.content || '').replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
+
+      // Add image awareness for text-only models
+      if (m.attachments && m.attachments.size > 0) {
+        const hasImage = m.attachments.some(a => a.contentType?.startsWith('image/'))
+        if (hasImage) {
+          content = `[Attached Image] ${content}`.trim()
+        }
+      }
+
       return { role, content: `[ID: ${m.id} | ${timeLabel}] ${handle}: ${content}` }
     })
     .filter(m => m.content.length > 0)

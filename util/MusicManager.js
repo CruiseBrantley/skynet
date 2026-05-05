@@ -11,7 +11,7 @@ class MusicManager {
   constructor () {
     /** @type {Map<string, GuildQueue>} */
     this.queues = new Map()
-    /** @type {Map<string, { stageMessage: any, textChannel: any, interval: NodeJS.Timeout, deleteTimer: NodeJS.Timeout|null }>} */
+    /** @type {Map<string, { stageMessage: any, textChannel: any, updateTimer: NodeJS.Timeout|null, deleteTimer: NodeJS.Timeout|null }>} */
     this.uiStates = new Map()
   }
 
@@ -273,7 +273,7 @@ class MusicManager {
     const state = {
       stageMessage,
       textChannel,
-      interval: null,
+      updateTimer: null,
       deleteTimer: null,
       lyrics: null,
       showLyrics: false,
@@ -287,56 +287,78 @@ class MusicManager {
     // Attach global button listener to ONE message
     this._attachControlCollector(stageMessage, guildId)
 
-    state.interval = setInterval(async () => {
+    this.uiStates.set(guildId, state)
+    // Start the recursive update loop
+    this._runUIUpdate(guildId)
+  }
+
+  /**
+     * Internal: Recursive UI update loop using setTimeout to avoid overlapping ticks.
+     */
+  _runUIUpdate (guildId) {
+    const state = this.uiStates.get(guildId)
+    if (!state) return
+
+    state.updateTimer = setTimeout(async () => {
+      // Re-fetch state because it might have been cleared or replaced during the timeout
+      const currentState = this.uiStates.get(guildId)
+      if (!currentState || currentState.updateTimer !== state.updateTimer) return
+
       const queue = this.getQueue(guildId)
       if (!queue) {
         this.stopUIUpdate(guildId)
         return
       }
-      if (!queue.currentTrack) return
 
-      // Instant Autoplay preload logic...
-      if (queue.autoplay && queue.queue.length === 0 && !queue.isAutoplayFetching) {
-        queue.isAutoplayFetching = true
-        if (queue.onAutoplayTrigger) {
-          queue.onAutoplayTrigger(queue.currentTrack, queue.history).finally(() => {
-            queue.isAutoplayFetching = false
+      if (queue.currentTrack) {
+        // Instant Autoplay preload logic...
+        if (queue.autoplay && queue.queue.length === 0 && !queue.isAutoplayFetching) {
+          queue.isAutoplayFetching = true
+          if (queue.onAutoplayTrigger) {
+            queue.onAutoplayTrigger(queue.currentTrack, queue.history).finally(() => {
+              queue.isAutoplayFetching = false
+            })
+          }
+        }
+
+        try {
+          const track = queue.currentTrack
+          const pos = queue.getPositionSeconds()
+          const upcoming = [...queue.queue]
+          const stats = { volume: queue.volume, bitrate: queue.bitrate }
+
+          const displayState = musicUI.buildFullDisplayState(
+            track,
+            upcoming,
+            pos,
+            queue.isPaused(),
+            queue.autoplay,
+            stats,
+            currentState.showLyrics ? currentState.lyrics : null
+          )
+          await currentState.stageMessage.edit(displayState).catch(err => {
+            if (err.code === 10008) {
+              logger.warn(`UI message deleted in ${guildId}, regenerating...`)
+              this.stopUIUpdate(guildId, false)
+              const channel = currentState.textChannel
+              if (queue.currentTrack && channel) {
+                this._handleTrackStart(guildId, queue.currentTrack, channel)
+              }
+            } else {
+              logger.warn(`UI update failed for guild ${guildId}: ${err.message}`)
+            }
           })
+        } catch (err) {
+          logger.error(`UI update fatal error for guild ${guildId}: ${err.message}`)
         }
       }
 
-      try {
-        const track = queue.currentTrack
-        const pos = queue.getPositionSeconds()
-        const upcoming = [...queue.queue]
-        const stats = { volume: queue.volume, bitrate: queue.bitrate }
-
-        const displayState = musicUI.buildFullDisplayState(
-          track,
-          upcoming,
-          pos,
-          queue.isPaused(),
-          queue.autoplay,
-          stats,
-          state.showLyrics ? state.lyrics : null
-        )
-        await stageMessage.edit(displayState)
-      } catch (err) {
-        if (err.code === 10008) { // Unknown Message
-          logger.warn(`UI message deleted in ${guildId}, regenerating...`)
-          const channel = state.textChannel
-          this.stopUIUpdate(guildId, false)
-          if (queue.currentTrack && channel) {
-            this._handleTrackStart(guildId, queue.currentTrack, channel)
-          }
-        } else {
-          logger.warn(`UI update failed for guild ${guildId}: ${err.message}`)
-          this.stopUIUpdate(guildId, false)
-        }
+      // Schedule next tick only if the state is still the one we started with
+      const finalCheck = this.uiStates.get(guildId)
+      if (finalCheck && finalCheck.updateTimer === state.updateTimer) {
+        this._runUIUpdate(guildId)
       }
     }, 5000)
-
-    this.uiStates.set(guildId, state)
   }
 
   /**
@@ -413,9 +435,14 @@ class MusicManager {
   async stopUIUpdate (guildId, deleteMessage = true) {
     const state = this.uiStates.get(guildId)
     if (state) {
-      if (state.interval) clearInterval(state.interval)
-      // Always cancel any pending idle-delete timer when the state is torn down
-      if (state.deleteTimer) clearTimeout(state.deleteTimer)
+      if (state.updateTimer) {
+        clearTimeout(state.updateTimer)
+        state.updateTimer = null
+      }
+      if (state.deleteTimer) {
+        clearTimeout(state.deleteTimer)
+        state.deleteTimer = null
+      }
       if (deleteMessage) {
         try {
           if (state.stageMessage) await state.stageMessage.delete().catch(() => {})
@@ -479,6 +506,21 @@ class MusicManager {
       queue.stop()
       this.queues.delete(guildId) // Clear from map
     }
+  }
+
+  /**
+     * Clear all queues and UI states. Useful for testing and emergency resets.
+     */
+  clearAll () {
+    const guildIds = Array.from(this.uiStates.keys())
+    for (const guildId of guildIds) {
+      this.stopUIUpdate(guildId, false)
+    }
+    for (const queue of this.queues.values()) {
+      queue.stop()
+    }
+    this.uiStates.clear()
+    this.queues.clear()
   }
 
   /**
