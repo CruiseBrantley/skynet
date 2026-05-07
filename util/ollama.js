@@ -147,7 +147,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 45000 }) // 45s for local load
 
       const data = response.data
-      if (data && data.message && data.message.content) {
+      if (data && data.message && typeof data.message.content === 'string') {
         return data
       } else if (data && data.response) {
         return { message: { role: 'assistant', content: data.response } }
@@ -181,7 +181,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     // NORMALIZATION LAYER: Ensure we always have a message.content structure
     const data = response.data
-    if (data && data.message && data.message.content) {
+    if (data && data.message && typeof data.message.content === 'string') {
       logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
       return data
     } else if (data && data.response) {
