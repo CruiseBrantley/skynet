@@ -16,13 +16,7 @@ const DiscordResponder = require('../util/chat/DiscordResponder')
 const mentionResolver = require('../util/MentionResolver')
 const { getParam } = require('../util/commandHelper')
 
-// Load system prompt from config file, falling back to a generic default
-let SYSTEM_PROMPT
-try {
-  SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, '../config/system_prompt.txt'), 'utf8').trim()
-} catch (e) {
-  SYSTEM_PROMPT = 'You are Skynet.'
-}
+const { getBasePrompt } = require('../util/systemPrompt')
 
 const channelHistories = {}
 const channelQueues = new Map() // Per-channel promise chains for sequential processing
@@ -85,7 +79,7 @@ async function execute (interaction, database) {
       if (!channelHistories[channelId] || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
         channelHistories[channelId] = {
           time: Date.now(),
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }]
+          messages: [{ role: 'system', content: getBasePrompt() }]
         }
 
         // Populate initial context with last 20 messages for better situational awareness
@@ -217,7 +211,7 @@ async function execute (interaction, database) {
         commandsContext,
         logsContext,
         guildId: interaction.guildId,
-        systemPrompt: SYSTEM_PROMPT
+        systemPrompt: getBasePrompt()
       }
       const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName)
       if (responseData && responseData.message) {

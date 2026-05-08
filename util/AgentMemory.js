@@ -174,7 +174,7 @@ class AgentMemory {
 
     const lines = entries
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
-      .map(([k, v]) => `${k} = ${v.value}`)
+      .map(([k, v]) => `- ${k}: ${v.value}`)
 
     let summary = lines.join('\n')
     if (summary.length > maxChars) {

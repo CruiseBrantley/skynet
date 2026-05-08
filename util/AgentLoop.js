@@ -168,10 +168,17 @@ class AgentLoop {
 
       const conversationContext = history.map(m => m.content).join('\n')
       const now = new Date().toLocaleString()
+      const memorySummary = agentMemory.getSummary(guildId, 800) || 'None'
 
-      const prompt = `You are Skynet, a helpful and occasionally humorous autonomous agent.
-You are observing a conversation in #${channel.name}.
+      const { getBasePrompt } = require('./systemPrompt')
+      const prompt = `${getBasePrompt()}
+
+=== AUTONOMOUS PROACTIVE MODE ===
+You are currently observing a conversation in #${channel.name}.
 Current time: ${now}
+
+[LONG-TERM MEMORY & ACTIVE RULES]
+${memorySummary}
 
 [CONVERSATION CONTENT]
 ${conversationContext}
@@ -195,6 +202,7 @@ Rules:
 - To remember a permanent user fact: <<<RUN_COMMAND: {"command": "remember", "key": "user.name.fact", "value": "...", "ttl_days": -1}>>>
 - You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - You can do multiple in one response if appropriate (e.g. remember AND react).
+- MEMORY COMPLIANCE: Treat all entries in LONG-TERM MEMORY & ACTIVE RULES as absolute factual context or active behavioral instructions. If a 'behavior.*' or 'server.*' key specifies a specific style, emoji replacement, or rule, you MUST adhere to it strictly. If reacting, and an active rule specifies a custom emoji replacement, use that custom emoji instead of the standard ones.
 
 Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.
 

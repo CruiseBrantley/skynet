@@ -181,4 +181,30 @@ describe('AgentLoop - Proactive Presence', () => {
 
     expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('legacy format message'))
   })
+
+  test('injects memory rules and memory compliance instructions into the prompt', async () => {
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
+    mockMessages.set('msg-1', { id: 'msg-1', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.size = 3
+
+    const agentMemory = require('../util/AgentMemory')
+    agentMemory.getSummary.mockReturnValue('- behavior.test_rule: active')
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: { content: 'NOOP' }
+    })
+
+    await agentLoop._evaluateProactivePresence(mockChannel, guildId)
+
+    const callArgs = queryLocalOrRemote.mock.calls[0][1]
+    const systemPrompt = callArgs.messages[0].content
+
+    expect(systemPrompt).toContain('[LONG-TERM MEMORY & ACTIVE RULES]')
+    expect(systemPrompt).toContain('- behavior.test_rule: active')
+    expect(systemPrompt).toContain('MEMORY COMPLIANCE')
+    
+    // Reset mock for other tests if necessary
+    agentMemory.getSummary.mockReturnValue(null)
+  })
 })

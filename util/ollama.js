@@ -245,7 +245,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
 
   const agentMemory = require('./AgentMemory')
   const memorySummary = agentMemory.getSummary(guildId)
-  const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY:\n${memorySummary}` : ''
+  const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY & ACTIVE RULES:\n${memorySummary}` : ''
   const sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`
 
   const processedMessages = messages.map((msg, idx) => {
