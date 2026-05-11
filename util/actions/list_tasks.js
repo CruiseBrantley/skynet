@@ -10,9 +10,10 @@ module.exports = {
       return '[SYSTEM: Error - Could not identify user ID.]'
     }
 
-    const tasks = agentScheduler.getByUser(userId)
+    const guildId = context.guildId || context.guild?.id || null
+    const tasks = agentScheduler.getByUser(userId).filter(t => t.guildId === guildId)
     if (tasks.length === 0) {
-      return '[SYSTEM: No scheduled tasks found for your user profile.]'
+      return `[SYSTEM: No scheduled tasks found for your user profile in this ${guildId ? 'server' : 'DM context'}.]`
     }
 
     const taskList = tasks.map(t => {

@@ -5,17 +5,14 @@ const logger = require('../logger')
 class MentionResolver {
   constructor () {
     this.filePath = path.join(__dirname, '../data/mentions.json')
-    this.mentionMap = new Map()
+    this.mentionMap = {} // { guildId: { name: id } }
     this.load()
   }
 
   load () {
     try {
       if (fs.existsSync(this.filePath)) {
-        const data = JSON.parse(fs.readFileSync(this.filePath, 'utf8'))
-        for (const [name, id] of Object.entries(data)) {
-          this.mentionMap.set(name.toLowerCase(), id)
-        }
+        this.mentionMap = JSON.parse(fs.readFileSync(this.filePath, 'utf8'))
       }
     } catch (e) {
       logger.error(`Failed to load mentions.json: ${e.message}`)
@@ -24,43 +21,44 @@ class MentionResolver {
 
   save () {
     try {
-      const data = Object.fromEntries(this.mentionMap)
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2))
+      fs.writeFileSync(this.filePath, JSON.stringify(this.mentionMap, null, 2))
     } catch (e) {
       logger.error(`Failed to save mentions.json: ${e.message}`)
     }
   }
 
   /**
-     * Records a username/nickname to ID mapping.
+     * Records a username/nickname to ID mapping for a specific guild.
      * @param {string} name
      * @param {string} id
+     * @param {string} guildId
      */
-  record (name, id) {
-    if (!name || !id) return
+  record (name, id, guildId) {
+    if (!name || !id || !guildId) return
+    if (!this.mentionMap[guildId]) this.mentionMap[guildId] = {}
+
     const lowerName = name.toLowerCase()
-    if (this.mentionMap.get(lowerName) !== id) {
-      this.mentionMap.set(lowerName, id)
+    if (this.mentionMap[guildId][lowerName] !== id) {
+      this.mentionMap[guildId][lowerName] = id
       this.save()
     }
   }
 
   /**
-     * Resolves all @usernames in the text to Discord mentions using the stored map.
+     * Resolves all @usernames in the text to Discord mentions using the stored map for a guild.
      * @param {string} text
+     * @param {string} guildId
      * @returns {string} resolved text
      */
-  resolve (text) {
-    if (!text) return text
+  resolve (text, guildId) {
+    if (!text || !guildId || !this.mentionMap[guildId]) return text
     let resolved = text
 
     // Sort keys by length descending to prevent partial matches
-    // (e.g. "@bot" replacing "@bot_admin")
-    const names = Array.from(this.mentionMap.keys()).sort((a, b) => b.length - a.length)
+    const names = Object.keys(this.mentionMap[guildId]).sort((a, b) => b.length - a.length)
 
     for (const name of names) {
-      const id = this.mentionMap.get(name)
-      // Match @name followed by a non-word character or end of string
+      const id = this.mentionMap[guildId][name]
       const regex = new RegExp(`@${name}(?![\\w])`, 'gi')
       resolved = resolved.replace(regex, `<@${id}>`)
     }

@@ -151,8 +151,8 @@ async function execute (interaction, database) {
 
       const currentIsBackup = false
 
-      mentionResolver.record(interaction.user.username, interaction.user.id)
-      if (interaction.member?.nickname) mentionResolver.record(interaction.member.nickname, interaction.user.id)
+      mentionResolver.record(interaction.user.username, interaction.user.id, interaction.guildId)
+      if (interaction.member?.nickname) mentionResolver.record(interaction.member.nickname, interaction.user.id, interaction.guildId)
 
       // ---------------------------------------------
       // 🧊 Context Enrichment: Real-time Channel State
@@ -161,8 +161,8 @@ async function execute (interaction, database) {
       try {
         const recentMessages = await interaction.channel.messages.fetch({ limit: 50 })
         channelContext = 'Recent Channel Context:\n' + recentMessages.map(m => {
-          mentionResolver.record(m.author.username, m.author.id)
-          if (m.member?.nickname) mentionResolver.record(m.member.nickname, m.author.id)
+          mentionResolver.record(m.author.username, m.author.id, interaction.guildId)
+          if (m.member?.nickname) mentionResolver.record(m.member.nickname, m.author.id, interaction.guildId)
 
           const reactions = m.reactions.cache.map(r => `${r.emoji.name} (x${r.count})`).join(', ')
           const authorHandle = `@${m.author.username}${m.member?.nickname ? ` (${m.member.nickname})` : ''}`
@@ -176,7 +176,7 @@ async function execute (interaction, database) {
               const user = interaction.client.users.cache.get(id)
               if (user) {
                 enrichedContent = enrichedContent.replaceAll(mention, `@${user.username}`)
-                mentionResolver.record(user.username, id)
+                mentionResolver.record(user.username, id, interaction.guildId)
               }
             }
           }
@@ -223,7 +223,7 @@ async function execute (interaction, database) {
         let replyContent = responseData.message.content || ''
 
         // Resolve @mentions back to <@ID> using the persistent resolver
-        replyContent = mentionResolver.resolve(replyContent)
+        replyContent = mentionResolver.resolve(replyContent, interaction.guildId)
 
         const processor = new AutonomousCommandProcessor({
           botName,
