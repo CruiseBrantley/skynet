@@ -147,8 +147,11 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 45000 }) // 45s for local load
 
       const data = response.data
-      if (data && data.message && typeof data.message.content === 'string') {
-        return data
+      if (data && data.message) {
+        if (data.message.thinking) {
+          logger.info(`Local Model [${localModel}] Thinking: ${data.message.thinking.substring(0, 150)}...`)
+        }
+        if (typeof data.message.content === 'string') return data
       } else if (data && data.response) {
         return { message: { role: 'assistant', content: data.response } }
       }
@@ -181,9 +184,14 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     // NORMALIZATION LAYER: Ensure we always have a message.content structure
     const data = response.data
-    if (data && data.message && typeof data.message.content === 'string') {
-      logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
-      return data
+    if (data && data.message) {
+      if (data.message.thinking) {
+        logger.info(`Remote Model [${remoteModel}] Thinking from ${remoteHost}: ${data.message.thinking.substring(0, 150)}...`)
+      }
+      if (typeof data.message.content === 'string') {
+        logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
+        return data
+      }
     } else if (data && data.response) {
       logger.info(`queryOllama: Level 0 Legacy Success from ${remoteHost} (Mapped to Chat)`)
       return { message: { role: 'assistant', content: data.response } }
@@ -208,6 +216,19 @@ async function queryLocalOrRemote (endpoint, payload) {
   const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
   const timeoutMs = 120_000 // 2 min — background tasks get less priority
+
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  const currentModel = (remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))) ? remoteModel : localModel
+  const isGemma4 = currentModel.toLowerCase().includes('gemma4')
+
+  // Inject enhancements
+  if (isGemma4) {
+    payload.think = true
+    if (!payload.options) payload.options = {}
+    if (!payload.options.num_ctx || payload.options.num_ctx < 131072) {
+      payload.options.num_ctx = 131072
+    }
+  }
 
   if (remoteHost && remoteModel) {
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
@@ -255,11 +276,21 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     return msg
   })
 
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  const remoteModel = process.env.OLLAMA_REMOTE_MODEL
+  const currentModel = (isBackup || !remoteModel) ? localModel : remoteModel
+
+  // Gemma 4 Enhancements: 128k context, Thinking mode, and Automatic Speculative Decoding (MTP)
+  const isGemma4 = currentModel.toLowerCase().includes('gemma4')
+  const numCtx = isGemma4 ? 131072 : 8192
+  const think = isGemma4
+
   try {
     const result = await queryOllama('/api/chat', {
       messages: processedMessages,
+      think,
       options: {
-        num_ctx: 8192,
+        num_ctx: numCtx,
         temperature: 0.3,
         top_k: 40,
         top_p: 0.9

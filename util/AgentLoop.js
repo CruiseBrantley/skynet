@@ -134,8 +134,8 @@ class AgentLoop {
     logger.info(`AgentLoop: Evaluating proactive presence for #${channel.name} in ${guildId}...`)
 
     try {
-      // Peek at the last 20 messages
-      const messages = await channel.messages.fetch({ limit: 20 })
+      // Peek at the last 50 messages
+      const messages = await channel.messages.fetch({ limit: 50 })
       if (messages.size < 3) return // Too quiet
 
       // RECENCY CHECK: Only evaluate if the conversation is still "alive" (last message within 15 mins)

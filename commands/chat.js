@@ -82,9 +82,9 @@ async function execute (interaction, database) {
           messages: [{ role: 'system', content: getBasePrompt() }]
         }
 
-        // Populate initial context with last 20 messages for better situational awareness
+        // Populate initial context with last 50 messages for better situational awareness
         try {
-          const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
+          const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 50, interaction.triggeringMessageId || interaction.id)
           channelHistories[channelId].messages.push(...history)
           logger.info(`Populated ${history.length} historical messages for channel context.`)
         } catch (err) {
@@ -108,11 +108,11 @@ async function execute (interaction, database) {
       channelHistories[channelId].messages.push(userMessage)
 
       // Sliding Window Context Capping:
-      // Reserve index 0 (System Prompt), then only keep the last 20 chat elements (10 back-and-forth pairs).
-      if (channelHistories[channelId].messages.length > 21) {
+      // Reserve index 0 (System Prompt), then only keep the last 50 chat elements (25 back-and-forth pairs).
+      if (channelHistories[channelId].messages.length > 51) {
         channelHistories[channelId].messages = [
           channelHistories[channelId].messages[0],
-          ...channelHistories[channelId].messages.slice(-20)
+          ...channelHistories[channelId].messages.slice(-50)
         ]
       }
 
@@ -159,7 +159,7 @@ async function execute (interaction, database) {
       // Fetch recent messages to see IDs and Reactions so actions like add_reaction or send_thread can target them
       let channelContext = 'Recent Channel Context:\n(No recent history available)'
       try {
-        const recentMessages = await interaction.channel.messages.fetch({ limit: 40 })
+        const recentMessages = await interaction.channel.messages.fetch({ limit: 50 })
         channelContext = 'Recent Channel Context:\n' + recentMessages.map(m => {
           mentionResolver.record(m.author.username, m.author.id)
           if (m.member?.nickname) mentionResolver.record(m.member.nickname, m.author.id)

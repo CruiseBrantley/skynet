@@ -38,7 +38,7 @@ function formatMessagesForContext (messages, botId) {
 /**
  * Fetches the last N messages from a channel and formats them.
  */
-async function fetchAndFormatContext (channel, botId, limit = 20, excludeId = null) {
+async function fetchAndFormatContext (channel, botId, limit = 50, excludeId = null) {
   try {
     const fetched = await channel.messages.fetch({ limit })
     let filtered = Array.from(fetched.values())
