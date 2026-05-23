@@ -34,12 +34,14 @@ describe('Server Webhook Deduplication', () => {
 
   test('ignores duplicate webhooks with the same message-id', async () => {
     // Find the POST handler that was registered
-    const postCall = mockApp.post.mock.calls.find(call => call[0] === '/')
+    const postCall = mockApp.post.mock.calls.find(call => Array.isArray(call[0]) ? call[0].includes('/') : call[0] === '/')
     const postHandler = postCall[1]
 
     const messageId = 'msg_unique_999'
     const req = {
-      headers: { 'twitch-eventsub-message-id': messageId },
+      headers: {
+        'twitch-eventsub-message-id': messageId
+      },
       body: {
         subscription: { id: 'sub_unique' },
         event: { broadcaster_user_id: 'user_unique' }

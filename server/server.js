@@ -154,7 +154,7 @@ async function getChannelInfo (id) {
 function setupServer (bot) {
   subscribeAll()
 
-  server.get('/', async (req, res) => {
+  server.get(['/', '/twitch'], async (req, res) => {
     logger.info('Get: ' + req.query['hub.challenge'])
     res
       .status(200)
@@ -162,7 +162,7 @@ function setupServer (bot) {
       .send(req.query['hub.challenge'])
   })
 
-  server.post('/', async (req, res) => {
+  server.post(['/', '/twitch'], async (req, res) => {
     const messageId = req.headers['twitch-eventsub-message-id']
 
     // 1. Strict Webhook Deduplication (Twitch Retries)
@@ -191,6 +191,7 @@ function setupServer (bot) {
     } else if (
       body &&
       body.subscription &&
+      body.event &&
       body.subscription.id !== streamID
     ) {
       const response = await getChannelInfo(body.event.broadcaster_user_id)
@@ -220,6 +221,13 @@ function setupServer (bot) {
       }
     })
   }
+
+  // HTTP endpoint to refresh Twitch EventSub subscriptions (updates ngrok tunnel)
+  server.get('/refresh-subscriptions', async (req, res) => {
+    logger.info('Manual subscription refresh requested via HTTP')
+    res.status(202).send('Subscription refresh started')
+    subscribeAll().catch(err => logger.error('Error during subscription refresh:', err))
+  })
 
   // Return the express app for tests/introspection; callers don't use the return today.
   return server

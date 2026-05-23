@@ -10,7 +10,10 @@ const ngrok = require('@ngrok/ngrok')
 const getURL = require('../server/ngrok')
 
 describe('ngrok.getURL', () => {
-  beforeEach(() => jest.clearAllMocks())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    delete process.env.TWITCH_CALLBACK_URL
+  })
 
   test('returns a tunnel URL when ngrok connects successfully', async () => {
     ngrok.connect.mockResolvedValueOnce({ url: () => 'https://abc123.ngrok.io' })
@@ -29,5 +32,14 @@ describe('ngrok.getURL', () => {
 
     expect(url).toBeUndefined()
     consoleSpy.mockRestore()
+  })
+
+  test('returns process.env.TWITCH_CALLBACK_URL when specified and bypasses ngrok', async () => {
+    process.env.TWITCH_CALLBACK_URL = 'https://sirian.ddns.net'
+
+    const url = await getURL()
+
+    expect(url).toBe('https://sirian.ddns.net')
+    expect(ngrok.connect).not.toHaveBeenCalled()
   })
 })

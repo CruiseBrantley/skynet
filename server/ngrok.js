@@ -6,6 +6,11 @@ const port = process.env.TWITCH_LISTEN_PORT
 const authtoken = process.env.NGROK_AUTH_TOKEN
 
 const getURL = async () => {
+  if (process.env.TWITCH_CALLBACK_URL) {
+    logger.info('Using custom Twitch Callback URL: ' + process.env.TWITCH_CALLBACK_URL)
+    return process.env.TWITCH_CALLBACK_URL
+  }
+
   try {
     const listener = await ngrok.connect({
       addr: port,
