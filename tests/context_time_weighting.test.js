@@ -13,7 +13,7 @@ describe('Time Weighting in Context Helper', () => {
     Date.now = originalDateNow
   })
 
-  it('formats relative times correctly for various elapsed times', () => {
+  it('formats relative times correctly for various elapsed times', async () => {
     const now = Date.now()
 
     const messages = new Map([
@@ -23,7 +23,7 @@ describe('Time Weighting in Context Helper', () => {
       ['4', { id: '4', author: { id: 'user2', username: 'bob' }, content: 'days ago msg', createdAt: new Date(now - 1000 * 60 * 60 * 24 * 2) }] // 2 days ago
     ])
 
-    const formatted = formatMessagesForContext(messages, 'bot123')
+    const formatted = await formatMessagesForContext(messages, 'bot123')
 
     expect(formatted).toHaveLength(4)
 
@@ -42,13 +42,13 @@ describe('Time Weighting in Context Helper', () => {
     expect(formatted[3].content).toContain('just now msg')
   })
 
-  it('identifies bot messages properly', () => {
+  it('identifies bot messages properly', async () => {
     const now = Date.now()
     const messages = new Map([
       ['1', { id: '1', author: { id: 'bot123', username: 'Skynet' }, content: 'I am a bot', createdAt: new Date(now - 1000 * 60 * 10) }]
     ])
 
-    const formatted = formatMessagesForContext(messages, 'bot123')
+    const formatted = await formatMessagesForContext(messages, 'bot123')
     expect(formatted[0].role).toBe('assistant')
     expect(formatted[0].content).toContain('[ID: 1 | 10m ago]')
   })

@@ -49,6 +49,7 @@ const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
@@ -296,6 +297,37 @@ bot.on('threadCreate', async (thread) => {
     }
   } catch (e) {
     logger.error(`Error auto-joining thread: ${e.message}`)
+  }
+})
+
+// Listen to message reactions to update the reaction cache in real-time
+const { addReaction, removeReaction } = require('./util/chat/reactionCache')
+
+bot.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    if (user.partial) {
+      user = await user.fetch().catch(() => null)
+    }
+    if (!user) return
+
+    const emojiKey = reaction.emoji.id ? `${reaction.emoji.name}:${reaction.emoji.id}` : reaction.emoji.name
+    addReaction(reaction.message.id, emojiKey, user.username)
+  } catch (err) {
+    logger.error(`Error processing messageReactionAdd: ${err.message}`)
+  }
+})
+
+bot.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    if (user.partial) {
+      user = await user.fetch().catch(() => null)
+    }
+    if (!user) return
+
+    const emojiKey = reaction.emoji.id ? `${reaction.emoji.name}:${reaction.emoji.id}` : reaction.emoji.name
+    removeReaction(reaction.message.id, emojiKey, user.username)
+  } catch (err) {
+    logger.error(`Error processing messageReactionRemove: ${err.message}`)
   }
 })
 

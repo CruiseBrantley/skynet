@@ -167,7 +167,7 @@ class AgentLoop {
       }
 
       const { formatMessagesForContext } = require('./chat/contextHelper')
-      const history = formatMessagesForContext(messages, botId)
+      const history = await formatMessagesForContext(messages, botId)
 
       const conversationContext = history.map(m => m.content).join('\n')
       const now = new Date().toLocaleString()
