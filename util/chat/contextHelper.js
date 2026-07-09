@@ -30,7 +30,18 @@ function formatMessagesForContext (messages, botId) {
         }
       }
 
-      return { role, content: `[ID: ${m.id} | ${timeLabel}] ${handle}: ${content}` }
+      // Add reactions awareness if available
+      let reactionsLabel = ''
+      if (m.reactions && m.reactions.cache && m.reactions.cache.size > 0) {
+        const reactions = [...m.reactions.cache.values()]
+          .map(r => `${r.emoji.name} (x${r.count})`)
+          .join(', ')
+        if (reactions) {
+          reactionsLabel = ` [Reactions: ${reactions}]`
+        }
+      }
+
+      return { role, content: `[ID: ${m.id} | ${timeLabel}]${reactionsLabel} ${handle}: ${content}` }
     })
     .filter(m => m.content.length > 0)
 }
