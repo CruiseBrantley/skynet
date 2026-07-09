@@ -31,7 +31,7 @@ describe('Config Error Handling & Branching', () => {
       delete process.env.OLLAMA_REMOTE_HOST
       process.env.GEMINI_API_KEY = 'test-key'
 
-      axios.post.mockResolvedValueOnce({ data: { choices: [{ message: { content: 'gemini' } }] } })
+      axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
       const result = await queryOllama('/api/chat', { messages: [] })
 

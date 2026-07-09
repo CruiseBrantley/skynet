@@ -106,7 +106,10 @@ class AgentLoop {
     const guildSettings = snapshot.val()
 
     for (const guildId in guildSettings) {
-      if (!guildSettings[guildId].agent_enabled) continue
+      const settings = guildSettings[guildId] || {}
+      const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? false
+      const emojiEnabled = settings.proactive_emoji_enabled ?? settings.agent_enabled ?? false
+      if (!textEnabled && !emojiEnabled) continue
 
       const guild = this._bot.guilds.cache.get(guildId)
       if (!guild) continue
@@ -125,12 +128,12 @@ class AgentLoop {
         .slice(0, 3)
 
       for (const channel of topChannels) {
-        await this._evaluateProactivePresence(channel, guildId)
+        await this._evaluateProactivePresence(channel, guildId, settings)
       }
     }
   }
 
-  async _evaluateProactivePresence (channel, guildId) {
+  async _evaluateProactivePresence (channel, guildId, settings = {}) {
     logger.info(`AgentLoop: Evaluating proactive presence for #${channel.name} in ${guildId}...`)
 
     try {
@@ -184,17 +187,21 @@ ${memorySummary}
 ${conversationContext}
 
 Your goal is to decide if you should PROACTIVELY interact.
-You have three ways to interact:
-1. INTERJECT: Provide a helpful suggestion, search result suggestion, or a witty comment if the situation TRULY calls for it.
-2. REACT: React with an emoji to a specific message if you "really like" it, find it funny, or find it highly relevant.
-3. REMEMBER: If you see a piece of information, a preference, or an important fact in the conversation that should be kept for later, use the 'remember' command.
+You have three ways to interact, each with a different threshold:
+
+1. INTERJECT — STRICT. Provide a helpful suggestion only if the situation TRULY calls for it. Most conversations need no input. Stay quiet unless you have genuinely valuable information or insight.
+
+2. REACT — STRICT. React only to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasizes a specific message. Do not react to standard conversational filler or every other message. Keep it selective and meaningful.
+
+3. REMEMBER — LENIENT. If you notice any useful information, preferences, facts, or context in the conversation, remember it. Even small details can be valuable later. Don't overthink it — if it seems worth keeping, store it.
 
 Rules:
-- Be VERY selective. Most of the time, respond with: NOOP
-- ONLY interject if you can be highly useful or adding genuine value.
-- DO NOT repeat yourself. If you have already chimed in recently with similar information in the history, stay quiet (NOOP).
-- ONLY react if a message is particularly good. Don't react to every message.
-- ONLY remember if the information is genuinely useful for future context.
+- For INTERJECT: Be VERY selective. Most of the time, respond with: NOOP
+- For REACT: Be highly selective. Only react if a message is truly outstanding, exceptionally fitting, or if you have a strong reason to emphasize it. If a message is just normal chat, do not react.
+- For REMEMBER: Capture useful info liberally. Small facts, preferences, opinions, recommendations — if it could help later, remember it.
+- MEMORY UPDATE RULE: When you learn new information about something you already have stored, UPDATE the existing entry instead of creating a new one. Check LONG-TERM MEMORY first — if there's an existing key related to this information, use the same key with the updated value. This keeps memory compact and accurate.
+- To find existing entries before creating, use: <<<RUN_COMMAND: {"command": "recall_keys", "prefix": "server."}>>>
+- DO NOT repeat yourself with INTERJECT. If you have already chimed in recently with similar information in the history, stay quiet (NOOP).
 - If interjecting to the channel: <<<INTERJECT: "Your message here">>>
 - If replying directly to a specific message: <<<INTERJECT: {"message": "Your reply", "replyToId": "<message-id>"}>>>
 - If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
@@ -251,7 +258,8 @@ ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP.
               .trim()
           }
 
-          if (intercom) {
+          const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? true
+          if (intercom && textEnabled) {
             if (replyToId) {
               const targetMsg = await channel.messages.fetch(replyToId).catch(() => null)
               if (targetMsg) {
@@ -270,23 +278,26 @@ ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP.
       }
 
       // Handle Reactions (Multiple allowed, no separate cooldown — message ID tracking prevents repeats)
-      const reactMatches = content.matchAll(/<<<REACT:\s*([\s\S]*?)>>>/g)
-      for (const match of reactMatches) {
-        try {
-          const data = JSON.parse(jsonrepair(match[1]))
-          if (data.messageId && data.emoji) {
-            const message = await channel.messages.fetch(data.messageId).catch(() => null)
-            if (message) {
-              const existing = message.reactions.cache.get(data.emoji) ||
-                                message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
-              if (!existing || !existing.me) {
-                await message.react(data.emoji).catch(() => { })
-                logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`)
+      const emojiEnabled = settings.proactive_emoji_enabled ?? settings.agent_enabled ?? true
+      if (emojiEnabled) {
+        const reactMatches = content.matchAll(/<<<REACT:\s*([\s\S]*?)>>>/g)
+        for (const match of reactMatches) {
+          try {
+            const data = JSON.parse(jsonrepair(match[1]))
+            if (data.messageId && data.emoji) {
+              const message = await channel.messages.fetch(data.messageId).catch(() => null)
+              if (message) {
+                const existing = message.reactions.cache.get(data.emoji) ||
+                                  message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
+                if (!existing || !existing.me) {
+                  await message.react(data.emoji).catch(() => { })
+                  logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`)
+                }
               }
             }
+          } catch (e) {
+            logger.warn(`AgentLoop: Failed to parse reaction tag: ${e.message}`)
           }
-        } catch (e) {
-          logger.warn(`AgentLoop: Failed to parse reaction tag: ${e.message}`)
         }
       }
 
@@ -349,6 +360,7 @@ Rules:
 - Format: <<<RUN_COMMAND: {"command": "...", ...}>>>
 - DO NOT attempt to search the web, play music, generate images, or send arbitrary messages.
 - DO NOT schedule tasks speculatively — only if there is explicit context to do so.
+- MEMORY UPDATE RULE: When storing information, check the LONG-TERM MEMORY section first. If you see an existing key that relates to what you're about to remember, use the SAME key with the updated value instead of creating a new one. This keeps memory compact and accurate.
 
 create_action schema:
 <<<RUN_COMMAND: {"command": "create_action", "name": "snake_case_name", "description": "What it does", "schema": {"param": "type — description"}, "code": "// discord.js code here\\nawait channel.send(params.content);"}>>>
@@ -456,6 +468,16 @@ Reason: Recording health check timestamp for diagnostics.`
       logger.info(`AgentLoop: [recall] ${key} = ${val}`)
       // recall is read-only — don't re-evaluate, just log
       return `recall: "${key}" → "${val}"`
+    }
+
+    if (cmd === 'recall_keys') {
+      // Find all keys matching a prefix — useful for finding existing entries to update
+      const prefix = getParam(cmdData, 'prefix')
+      if (!prefix) return null
+      const all = agentMemory.getAll(null)
+      const matching = Object.keys(all).filter(k => k.startsWith(prefix)).sort()
+      logger.info(`AgentLoop: [recall_keys] ${prefix}* → ${matching.join(', ')}`)
+      return `recall_keys: ${prefix}* → [${matching.join(', ')}]`
     }
 
     if (cmd === 'schedule') {

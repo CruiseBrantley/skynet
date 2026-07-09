@@ -6,7 +6,8 @@ const TEST_PREFIX = 'skynet_test_'
 
 // Mock ollama and jsonrepair before ActionExecutor is loaded
 jest.mock('../util/ollama', () => ({
-  queryLocalOrRemote: jest.fn()
+  queryLocalOrRemote: jest.fn(),
+  queryOllama: jest.fn()
 }))
 jest.mock('jsonrepair', () => ({ jsonrepair: s => s }))
 
@@ -242,7 +243,7 @@ describe('ActionExecutor', () => {
 
   describe('classify()', () => {
     test('parses action and params from Ollama JSON response', async () => {
-      mockOllama.queryLocalOrRemote.mockResolvedValue({
+      mockOllama.queryOllama.mockResolvedValue({
         message: { content: '{"action":"send_poll","params":{"question":"Vote?","options":["Yes","No"],"duration_hours":24}}' }
       })
       const result = await executor.classify({ description: 'Create a poll: Vote? Yes/No' })
@@ -252,7 +253,7 @@ describe('ActionExecutor', () => {
     })
 
     test('extracts override_channel_id from Ollama response', async () => {
-      mockOllama.queryLocalOrRemote.mockResolvedValue({
+      mockOllama.queryOllama.mockResolvedValue({
         message: { content: '{"action":"send_poll","override_channel_id":"580867049006301214","params":{"question":"Vote?","options":["Yes","No"]}}' }
       })
       const result = await executor.classify({ description: 'Poll in <#580867049006301214>' })
@@ -260,26 +261,26 @@ describe('ActionExecutor', () => {
     })
 
     test('falls back to send_message on Ollama failure', async () => {
-      mockOllama.queryLocalOrRemote.mockRejectedValue(new Error('offline'))
+      mockOllama.queryOllama.mockRejectedValue(new Error('offline'))
       const result = await executor.classify({ description: 'Hello world!' })
       expect(result.action).toBe('send_message')
     })
 
     test('extracts channel mention from description text on fallback', async () => {
-      mockOllama.queryLocalOrRemote.mockRejectedValue(new Error('offline'))
+      mockOllama.queryOllama.mockRejectedValue(new Error('offline'))
       const result = await executor.classify({ description: 'Announce in <#987654321> that we are live' })
       expect(result.override_channel_id).toBe('987654321')
     })
 
     test('strips channel mention from fallback send_message content', async () => {
-      mockOllama.queryLocalOrRemote.mockRejectedValue(new Error('offline'))
+      mockOllama.queryOllama.mockRejectedValue(new Error('offline'))
       const result = await executor.classify({ description: 'Post in <#111222333> — Server is back online!' })
       expect(result.params.content).not.toContain('<#')
       expect(result.params.content).toContain('Server is back online!')
     })
 
     test('falls back gracefully when response has no JSON', async () => {
-      mockOllama.queryLocalOrRemote.mockResolvedValue({ message: { content: 'Sure, I will do that.' } })
+      mockOllama.queryOllama.mockResolvedValue({ message: { content: 'Sure, I will do that.' } })
       const result = await executor.classify({ description: 'Do something' })
       expect(result.action).toBe('send_message')
     })

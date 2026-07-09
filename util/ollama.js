@@ -54,7 +54,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
   if (fallbackLevel === true) fallbackLevel = 1
   if (fallbackLevel === false) fallbackLevel = 0
 
-  const timeoutMs = 20000 // 20s base timeout for more reliable failover
+  const timeoutMs = 180000 // 180s base timeout for more reliable failover/thinking models
 
   // Level 1: Gemini API Tier (The first reliable fail-over)
   if (fallbackLevel === 1) {
@@ -64,47 +64,45 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       return queryOllama(endpoint, payload, 2) // Drop to local if API key is missing
     }
 
-    logger.info(`Triggering Level 1 fallback: Gemini-3.1-flash-lite for ${endpoint}`)
+    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'
+    logger.info(`Triggering Level 1 fallback: ${geminiModel} for ${endpoint}`)
 
-    let geminiMessages = []
+    let geminiContents = []
     if (payload.messages) {
-      geminiMessages = payload.messages.map(msg => {
-        const role = msg.role === 'assistant' ? 'assistant' : 'user'
+      geminiContents = payload.messages.map(msg => {
+        const role = msg.role === 'assistant' ? 'model' : 'user'
         if (msg.images && msg.images.length > 0) {
-          const contentBlocks = [{ type: 'text', text: msg.content || '' }]
+          const parts = [{ text: msg.content || '' }]
           msg.images.forEach(img => {
-            const dataUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
-            contentBlocks.push({ type: 'image_url', image_url: { url: dataUrl } })
+            const base64Data = img.startsWith('data:') ? img.split(',')[1] : img
+            parts.push({
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: base64Data
+              }
+            })
           })
-          return { role, content: contentBlocks }
+          return { role, parts }
         }
-        return { role, content: msg.content || '' }
+        return { role, parts: [{ text: msg.content || '' }] }
       })
     } else if (payload.prompt) {
-      geminiMessages = [{ role: 'user', content: payload.prompt }]
+      geminiContents = [{ role: 'user', parts: [{ text: payload.prompt }] }]
     }
-
-    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview'
 
     try {
       const response = await axios.post(
-        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+        `https://generativelanguage.googleapis.com/v1/models/${geminiModel}:generateContent?key=${apiKey}`,
         {
-          model: geminiModel,
-          messages: geminiMessages,
-          stream: false
+          contents: geminiContents
         },
         {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          },
           timeout: timeoutMs
         }
       )
 
-      if (response.data.choices && response.data.choices[0]) {
-        const content = response.data.choices[0].message.content
+      if (response.data.candidates && response.data.candidates[0]?.content?.parts?.[0]) {
+        const content = response.data.candidates[0].content.parts[0].text
         if (endpoint === '/api/generate') {
           return { response: content }
         }
@@ -112,16 +110,17 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       }
       throw new Error('Invalid response structure from Gemini API')
     } catch (err) {
-      logger.error(`Gemini fallback failed: ${err.message}. Dropping to Level 2 (Local).`)
+      const errMsg = err.response?.data?.error?.message || err.message
+      logger.error(`Gemini fallback failed: ${errMsg}. Dropping to Level 2 (Local).`)
       return queryOllama(endpoint, payload, 2)
     }
   }
 
   // Level 2: Local Fallback (The final fail-safe)
-  // Model: gemma4:e4b (keeps in RAM for fast responses)
+  // Model: qwen3.5:9b (keeps in RAM for fast responses)
   if (fallbackLevel >= 2) {
     const localUrl = `http://127.0.0.1:11434${endpoint}`
-    const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+    const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
 
     logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`)
 
@@ -140,11 +139,11 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
     }
 
     try {
-      // Debug: log the full payload to see the system prompt and context for the local model
+    // Debug: log the full payload to see the system prompt and context for the local model
       if (payload.messages) {
         logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
       }
-      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 45000 }) // 45s for local load
+      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 180000 }) // 180s for local load
 
       const data = response.data
       if (data && data.message) {
@@ -217,16 +216,18 @@ async function queryLocalOrRemote (endpoint, payload) {
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
   const timeoutMs = 120_000 // 2 min — background tasks get less priority
 
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
   const currentModel = (remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))) ? remoteModel : localModel
-  const isGemma4 = currentModel.toLowerCase().includes('gemma4')
+  const isQwen = currentModel.toLowerCase().includes('qwen')
+  const isQwen3 = currentModel.toLowerCase().includes('qwen3')
+  const numCtx = isQwen3 ? 262144 : (isQwen ? 131072 : 8192)
 
   // Inject enhancements
-  if (isGemma4) {
-    payload.think = true
+  if (isQwen) {
+    if (isQwen3) payload.think = true
     if (!payload.options) payload.options = {}
-    if (!payload.options.num_ctx || payload.options.num_ctx < 131072) {
-      payload.options.num_ctx = 131072
+    if (!payload.options.num_ctx || payload.options.num_ctx < numCtx) {
+      payload.options.num_ctx = numCtx
     }
   }
 
@@ -261,13 +262,23 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     commandsContext = '',
     logsContext = '',
     guildId = null,
-    systemPrompt = ''
+    systemPrompt = '',
+    userId = null
   } = options
 
   const agentMemory = require('./AgentMemory')
-  const memorySummary = agentMemory.getSummary(guildId)
+  const isOwner = userId === process.env.OWNER_ID
+  const isDM = !guildId
+  const memorySummary = (isOwner && isDM) ? agentMemory.getSummary('all') : agentMemory.getSummary(guildId)
   const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY & ACTIVE RULES:\n${memorySummary}` : ''
-  const sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`
+  let sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`
+
+  if (isOwner && isDM) {
+    sysMsg += '\n\nCREATOR SPECIAL ACCESS (DMs ONLY):\n' +
+      'You are communicating directly with your creator (owner) in DMs.\n' +
+      'You have full administrative access to view, update, and manage all scheduled tasks and agent memories across ALL servers.\n' +
+      'When the creator asks you to remember, recall, list, schedule, or cancel tasks/memories for other servers, execute those commands. Do not filter tasks by guild.'
+  }
 
   const processedMessages = messages.map((msg, idx) => {
     if (idx === 0 && msg.role === 'system') {
@@ -276,14 +287,27 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     return msg
   })
 
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
   const currentModel = (isBackup || !remoteModel) ? localModel : remoteModel
 
-  // Gemma 4 Enhancements: 128k context, Thinking mode, and Automatic Speculative Decoding (MTP)
+  // Qwen & Gemma 4 Family Enhancements:
+  const isQwen = currentModel.toLowerCase().includes('qwen')
+  const isQwen3 = currentModel.toLowerCase().includes('qwen3')
   const isGemma4 = currentModel.toLowerCase().includes('gemma4')
-  const numCtx = isGemma4 ? 131072 : 8192
-  const think = isGemma4
+
+  let numCtx = 8192
+  let think = false
+
+  if (isQwen3) {
+    numCtx = 16384 // Cap at 16k to keep KV cache fully in VRAM (32GB 5090)
+    think = true
+  } else if (isQwen) {
+    numCtx = 16384
+  } else if (isGemma4) {
+    numCtx = 16384 // Cap at 16k for fast local execution on Mac Mini
+    think = true
+  }
 
   try {
     const result = await queryOllama('/api/chat', {

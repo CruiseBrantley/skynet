@@ -25,8 +25,11 @@ function linkSummarize (bot) {
 
     // Fetch guild-level settings
     const database = firebase()
-    const snapshot = await database.ref(`guild_settings/${message.guildId}/agent_enabled`).once('value')
-    if (!snapshot.exists() || snapshot.val() !== true) return
+    const snapshot = await database.ref(`guild_settings/${message.guildId}`).once('value')
+    const val = snapshot.val()
+    const settings = (val && typeof val === 'object') ? val : { agent_enabled: val === true }
+    const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? false
+    if (!textEnabled) return
 
     // If the bot is mentioned, let the chat command handle the link instead of the auto-summarizer
     if (message.mentions.has(bot.user)) return

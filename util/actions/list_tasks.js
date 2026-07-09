@@ -11,7 +11,11 @@ module.exports = {
     }
 
     const guildId = context.guildId || context.guild?.id || null
-    const tasks = agentScheduler.getByUser(userId).filter(t => t.guildId === guildId)
+    const isOwner = userId === process.env.OWNER_ID
+    const isDM = !guildId
+    const tasks = isOwner && isDM
+      ? agentScheduler.getByUser(userId)
+      : agentScheduler.getByUser(userId).filter(t => t.guildId === guildId)
     if (tasks.length === 0) {
       return `[SYSTEM: No scheduled tasks found for your user profile in this ${guildId ? 'server' : 'DM context'}.]`
     }

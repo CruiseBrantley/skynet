@@ -107,19 +107,38 @@ Rules:
 Example output:
 {"action":"send_poll","override_channel_id":"580867049006301214","params":{"question":"Who is attending?","options":["Yes","No","Maybe"],"duration_hours":24}}`
 
-    try {
-      const { queryLocalOrRemote } = require('./ollama')
-      const result = await queryLocalOrRemote('/api/chat', {
-        messages: [
-          { role: 'system', content: 'You output only valid JSON. No markdown, no explanation.' },
-          { role: 'user', content: prompt }
-        ]
-      })
+    const classificationLevel = 0
+    let result
 
-      const raw = result?.message?.content?.trim() || ''
-      const firstBrace = raw.indexOf('{')
-      const lastBrace = raw.lastIndexOf('}')
-      if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON object in response')
+    try {
+      const { queryOllama } = require('./ollama')
+      result = await queryOllama('/api/chat', {
+        messages: [
+          { role: 'system', content: 'You are a technical action classifier. You respond with ONLY a valid JSON object and NO other text. No thinking, no explanations, no markdown code blocks.' },
+          { role: 'user', content: prompt }
+        ],
+        options: { temperature: 0, num_predict: 256 }
+      }, classificationLevel)
+
+      let raw = result?.message?.content?.trim() || ''
+      let firstBrace = raw.indexOf('{')
+      let lastBrace = raw.lastIndexOf('}')
+
+      // If Level 0 failed to provide JSON, try Level 1 (Gemini) as a direct retry
+      if ((firstBrace === -1 || lastBrace === -1) && classificationLevel === 0) {
+        logger.info('ActionExecutor: Level 0 classification produced no JSON. Retrying with Level 1 (Gemini)...')
+        result = await queryOllama('/api/chat', {
+          messages: [
+            { role: 'system', content: 'You are a technical action classifier. Output ONLY valid JSON.' },
+            { role: 'user', content: prompt }
+          ]
+        }, 1)
+        raw = result?.message?.content?.trim() || ''
+        firstBrace = raw.indexOf('{')
+        lastBrace = raw.lastIndexOf('}')
+      }
+
+      if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON object in response after retry')
       return JSON.parse(jsonrepair(raw.substring(firstBrace, lastBrace + 1)))
     } catch (e) {
       logger.warn(`ActionExecutor: Classification failed (${e.message}). Falling back to send_message.`)
@@ -144,14 +163,26 @@ Example output:
   async resolveChannel (bot, task, overrideChannelId) {
     const channelId = overrideChannelId || task.channelId
 
+    // Priority 1: explicit DM channel
     if (channelId === 'dm' && task.userId) {
       const user = await bot.users.fetch(task.userId).catch(() => null)
-      return user ? user.createDM().catch(() => null) : null
+      if (user) {
+        return await user.createDM().catch(() => null)
+      }
     }
 
+    // Priority 2: specified channel ID (takes precedence over DM fallback)
     if (channelId && channelId !== 'dm') {
       return bot.channels.cache.get(channelId) ||
-                await bot.channels.fetch(channelId).catch(() => null)
+                 await bot.channels.fetch(channelId).catch(() => null)
+    }
+
+    // Priority 3: DM as last resort (only if no channel was specified)
+    if (!channelId && task.userId) {
+      const user = await bot.users.fetch(task.userId).catch(() => null)
+      if (user) {
+        return await user.createDM().catch(() => null)
+      }
     }
 
     return null
@@ -185,7 +216,20 @@ Example output:
 
     const channel = await this.resolveChannel(bot, task, classified.override_channel_id)
     if (!channel) {
-      logger.warn(`ActionExecutor: Could not resolve delivery channel for task ${task.id}`)
+      logger.warn(`ActionExecutor: Could not resolve delivery channel for task ${task.id}. Attempting DM fallthrough...`)
+      if (task.userId) {
+        const user = await bot.users.fetch(task.userId).catch(() => null)
+        if (user) {
+          const dmChannel = await user.createDM().catch(() => null)
+          if (dmChannel) {
+            const fallbackMsg = `⚠️ **Task Fallthrough:** I couldn't find the original target channel for your scheduled task. Here is the content:\n\n**Task:** ${task.description}`
+            await dmChannel.send(fallbackMsg).catch(() => {})
+            logger.info(`ActionExecutor: Delivered fallthrough notification to user ${task.userId} for task ${task.id}`)
+            return true // Consider delivered so it reschedules
+          }
+        }
+      }
+      logger.error(`ActionExecutor: Total failure to deliver task ${task.id} — no channel and no DM possible.`)
       return false
     }
 

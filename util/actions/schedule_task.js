@@ -28,11 +28,18 @@ module.exports = {
 
     // 2. Add to the local scheduler
     const targetChannelId = channelId || context.channelId || channel.id
+    let targetGuildId = context.guild?.id || context.guildId || null
+    if (!targetGuildId && targetChannelId) {
+      const chan = bot.channels.cache.get(targetChannelId)
+      if (chan && chan.guildId) {
+        targetGuildId = chan.guildId
+      }
+    }
     const task = agentScheduler.add({
       description,
       scheduledAt,
       userId: context.user?.id || context.userId || null,
-      guildId: context.guild?.id || context.guildId || null,
+      guildId: targetGuildId,
       channelId: targetChannelId,
       repeat: ['hourly', 'daily', 'weekly'].includes(repeat) ? repeat : null,
       createdBy: context.user?.username || 'chat_agent'

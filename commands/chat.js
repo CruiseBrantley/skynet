@@ -211,6 +211,7 @@ async function execute (interaction, database) {
         commandsContext,
         logsContext,
         guildId: interaction.guildId,
+        userId: interaction.user?.id || null,
         systemPrompt: getBasePrompt()
       }
       const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName)

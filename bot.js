@@ -10,7 +10,8 @@ const {
   GatewayIntentBits,
   Collection,
   Partials,
-  ChannelType
+  ChannelType,
+  PermissionFlagsBits
 } = require('discord.js')
 const logger = require('./logger')
 const { setupServer: server } = require('./server/server')
@@ -135,7 +136,7 @@ bot.on('debug', (info) => {
   }
 })
 
-bot.on('ready', () => {
+bot.on('clientReady', () => {
   logger.info('Connected')
   logger.info('Logged in as: ')
   logger.info(bot.user.username + ' - (' + bot.user.id + ')')
@@ -343,6 +344,24 @@ bot.on('messageCreate', async (message) => {
 
     if (message.mentions.everyone) return
 
+    let canSendMessages = true
+    let canAddReactions = true
+
+    if (message.guild) {
+      const me = message.guild.members.me || await message.guild.members.fetch(bot.user.id).catch(() => null)
+      if (me) {
+        const permissions = message.channel.permissionsFor(me)
+        if (permissions) {
+          canSendMessages = permissions.has(PermissionFlagsBits.SendMessages)
+          canAddReactions = permissions.has(PermissionFlagsBits.AddReactions)
+        }
+      }
+    }
+
+    if (!canSendMessages && !canAddReactions) {
+      return // No permission to interact at all
+    }
+
     const content = message.content || ''
     const isReplyToBot = message.type === 19 && message.mentions.repliedUser?.id === bot.user.id // 19 is MessageType.Reply
     const isMentioned = message.mentions.has(bot.user.id) || content.includes(`<@${bot.user.id}>`) || content.includes(`<@!${bot.user.id}>`)
@@ -350,6 +369,36 @@ bot.on('messageCreate', async (message) => {
 
     if (shouldRespond) {
       logger.info(`BOT: shouldRespond=true for ${message.id} (isMentioned=${isMentioned}, isDM=${isDM})`)
+    }
+
+    if (shouldRespond && !canSendMessages && canAddReactions) {
+      logger.info(`BOT: Lacks SendMessages permission but has AddReactions. Generating emoji reaction for message ${message.id}`)
+      try {
+        const { queryLocalOrRemote } = require('./util/ollama')
+        const decision = await queryLocalOrRemote('/api/chat', {
+          messages: [
+            {
+              role: 'system',
+              content: 'You are Skynet. Respond ONLY with a single emoji character (e.g. 👍, 😮, 💀, 🔥, 🤔) representing your reaction to the user message. Do not output any other text.'
+            },
+            {
+              role: 'user',
+              content: message.content || ''
+            }
+          ],
+          options: { temperature: 0.5, num_predict: 5 }
+        }).catch(() => null)
+
+        const emoji = decision?.message?.content?.trim()
+        if (emoji && emoji.length > 0) {
+          const cleanEmoji = [...emoji][0]
+          await message.react(cleanEmoji).catch(() => {})
+          logger.info(`BOT: Reacted with ${cleanEmoji} to message ${message.id}`)
+        }
+      } catch (err) {
+        logger.error(`BOT: Failed to generate emoji reaction: ${err.message}`)
+      }
+      return
     }
 
     if (!shouldRespond && isThread) {

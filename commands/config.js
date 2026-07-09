@@ -9,11 +9,16 @@ module.exports = {
     .setDMPermission(true) // Allow in DMs for owner
     .addSubcommand(sub =>
       sub.setName('agent')
-        .setDescription('Toggle proactive autonomous agent suggestions')
+        .setDescription('Configure proactive agent permissions')
         .addBooleanOption(opt =>
-          opt.setName('enabled')
-            .setDescription('Whether the agent can chime in proactively')
-            .setRequired(true)
+          opt.setName('text')
+            .setDescription('Allow Skynet to send proactive text suggestions')
+            .setRequired(false)
+        )
+        .addBooleanOption(opt =>
+          opt.setName('emoji')
+            .setDescription('Allow Skynet to proactively react with emojis')
+            .setRequired(false)
         )
         .addStringOption(opt =>
           opt.setName('server_id')
@@ -40,24 +45,41 @@ module.exports = {
     }
 
     if (sub === 'agent') {
-      const enabled = interaction.options.getBoolean('enabled')
-      const ref = database.ref(`guild_settings/${targetGuildId}/agent_enabled`)
+      const text = interaction.options.getBoolean('text')
+      const emoji = interaction.options.getBoolean('emoji')
+
+      if (text === null && emoji === null) {
+        return interaction.reply({ content: 'Please specify at least one option: `text` or `emoji`.', ephemeral: true })
+      }
+
+      const updates = {}
+      if (text !== null) {
+        updates.proactive_text_enabled = text
+      }
+      if (emoji !== null) {
+        updates.proactive_emoji_enabled = emoji
+      }
+
+      const ref = database.ref(`guild_settings/${targetGuildId}`)
 
       try {
-        await ref.set(enabled)
+        await ref.update(updates)
+
+        // Fetch updated settings to output status correctly
+        const snapshot = await ref.once('value')
+        const settings = snapshot.val() || {}
+        const currentText = settings.proactive_text_enabled !== false
+        const currentEmoji = settings.proactive_emoji_enabled !== false
 
         const embed = new EmbedBuilder()
-          .setTitle('Skynet Configuration Updated')
-          .setDescription(`Proactive Agent Suggestions are now **${enabled ? 'ENABLED' : 'DISABLED'}** for server \`${targetGuildId}\`.`)
-          .setColor(enabled ? 0x00FF00 : 0xFF0000)
+          .setTitle('Skynet Proactive Agent Configuration Updated')
+          .setDescription(`Permissions for server \`${targetGuildId}\` have been updated:`)
+          .addFields(
+            { name: '💬 Proactive Text Replies', value: currentText ? '✅ **ENABLED**' : '❌ **DISABLED**', inline: true },
+            { name: '🎭 Proactive Emoji Reactions', value: currentEmoji ? '✅ **ENABLED**' : '❌ **DISABLED**', inline: true }
+          )
+          .setColor(0x3498db)
           .setTimestamp()
-
-        if (enabled) {
-          embed.addFields({
-            name: 'What this means',
-            value: 'Skynet will occasionally analyze recent messages and chime in with suggestions if it finds a high-impact way to help, without needing a direct mention.'
-          })
-        }
 
         return interaction.reply({ embeds: [embed] })
       } catch (err) {

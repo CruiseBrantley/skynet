@@ -48,7 +48,7 @@ describe('Ollama Fallback Hierarchy', () => {
       if (event === 'error' || event === 'timeout') setImmediate(cb)
     })
 
-    axios.post.mockResolvedValueOnce({ data: { choices: [{ message: { content: 'gemini' } }] } })
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
     const result = await queryOllama('/api/chat', { messages: [] })
     expect(result.message.content).toBe('gemini')
   })
@@ -72,7 +72,7 @@ describe('Ollama Fallback Hierarchy', () => {
 
   test('should skip Level 0 entirely if OLLAMA_REMOTE_HOST is missing', async () => {
     delete process.env.OLLAMA_REMOTE_HOST
-    axios.post.mockResolvedValueOnce({ data: { choices: [{ message: { content: 'gemini' } }] } })
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
 

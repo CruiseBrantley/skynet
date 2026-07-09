@@ -109,18 +109,28 @@ class AutonomousCommandProcessor {
 
         // Special case: natural language "memories" handled locally
         if (['remember', 'recall', 'forget'].includes(rawCmdName)) {
+          const isOwner = interaction.user?.id === process.env.OWNER_ID
+          const isDM = !interaction.guildId
+          const targetGuildId = cmdData.guildId || cmdData.params?.guildId || (isOwner && isDM ? null : interaction.guildId)
+
           if (rawCmdName === 'remember') {
             const key = cmdData.key || cmdData.params?.key
             const value = cmdData.value || cmdData.params?.value
             const ttl = parseInt(cmdData.ttl_days ?? cmdData.params?.ttl_days ?? 30)
             if (key && value !== undefined) {
-              this.agentMemory.set(key, value, ttl, interaction.guildId)
+              this.agentMemory.set(key, value, ttl, targetGuildId)
               channelHistory.messages.push({ role: 'system', content: `[SYSTEM: Stored memory "${key}"]. Acknowledge naturally.]` })
             }
           } else if (rawCmdName === 'recall') {
             const key = cmdData.key || cmdData.params?.key
-            const val = key ? this.agentMemory.get(key, interaction.guildId) : null
+            const val = key ? this.agentMemory.get(key, targetGuildId) : null
             channelHistory.messages.push({ role: 'system', content: val ? `[SYSTEM: Memory found: "${val}"]` : `[SYSTEM: No memory found for "${key}"]` })
+          } else if (rawCmdName === 'forget') {
+            const key = cmdData.key || cmdData.params?.key
+            if (key) {
+              const success = this.agentMemory.delete(key)
+              channelHistory.messages.push({ role: 'system', content: success ? `[SYSTEM: Forgotten memory "${key}"]` : `[SYSTEM: No memory found for "${key}"]` })
+            }
           }
 
           channelHistory.messages.push({ role: 'system', content: '[SYSTEM: Operations complete. The user has been notified. Provide a 1-sentence final acknowledgement, then stop.]' })

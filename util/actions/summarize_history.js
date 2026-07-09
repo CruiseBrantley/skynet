@@ -23,7 +23,11 @@ module.exports = {
         .join('\n')
 
       if (!historyText) {
-        return await context.editReply("I couldn't find any recent messages to summarize.")
+        if (context && typeof context.editReply === 'function') {
+          return await context.editReply("I couldn't find any recent messages to summarize.")
+        } else {
+          return await channel.send("I couldn't find any recent messages to summarize.")
+        }
       }
 
       const prompt = `Summarize the following Discord conversation history${topic ? ` focusing on: "${topic}"` : ''}. 
@@ -45,7 +49,11 @@ ${historyText}`
           .setColor('#3498db')
           .setFooter({ text: `Focus: ${topic || 'General Context'}` })
 
-        await context.editReply({ embeds: [embed] })
+        if (context && typeof context.editReply === 'function') {
+          await context.editReply({ embeds: [embed] })
+        } else {
+          await channel.send({ embeds: [embed] })
+        }
         logger.info('ActionExecutor: Summarization complete.')
       } else {
         throw new Error('AI failed to generate a summary.')

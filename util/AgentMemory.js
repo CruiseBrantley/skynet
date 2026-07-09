@@ -165,6 +165,7 @@ class AgentMemory {
   getSummary (guildId = null, maxChars = 1200) {
     this._pruneExpired()
     const entries = Object.entries(this._data).filter(([, e]) => {
+      if (guildId === 'all') return true
       // Include global entries always
       if (e.guildId === null || e.guildId === undefined) return true
       // Include server-scoped entries only if guildId matches current guild
@@ -198,8 +199,8 @@ class AgentMemory {
   }
 
   /**
-     * Returns total number of stored entries.
-     */
+      * Returns total number of stored entries.
+      */
   size () {
     return Object.keys(this._data).length
   }

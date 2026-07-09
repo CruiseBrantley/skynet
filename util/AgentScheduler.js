@@ -95,7 +95,8 @@ class AgentScheduler {
   }
 
   /**
-     * For repeating tasks: advance the scheduledAt to the next interval.
+     * For repeating tasks: advance the scheduledAt to the next future interval.
+     * Prevents "backlog firing" where a bot catching up after downtime spams old missed tasks.
      * @param {string} id
      */
   reschedule (id) {
@@ -105,7 +106,11 @@ class AgentScheduler {
     const intervals = { hourly: 3_600_000, daily: 86_400_000, weekly: 604_800_000 }
     const interval = intervals[task.repeat]
     if (interval) {
-      task.scheduledAt += interval
+      const now = Date.now()
+      // Advance by interval until we are in the future
+      while (task.scheduledAt <= now) {
+        task.scheduledAt += interval
+      }
       this._save()
       logger.info(`AgentScheduler: Rescheduled task ${id} → ${new Date(task.scheduledAt).toLocaleString()}`)
     }
