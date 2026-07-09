@@ -186,36 +186,58 @@ ${memorySummary}
 [CONVERSATION CONTENT]
 ${conversationContext}
 
-Your goal is to decide if you should PROACTIVELY interact.
-You have three ways to interact, each with a different threshold:
+Your goal is to decide if you should PROACTIVELY interact (send a suggestion/reply, react with an emoji, or execute/schedule background commands).
 
-1. INTERJECT — STRICT. Provide a helpful suggestion only if the situation TRULY calls for it. Most conversations need no input. Stay quiet unless you have genuinely valuable information or insight.
+You MUST respond with a single valid JSON object containing your reasoning and planned actions. Do not output any other text, markdown formatting, or prefix.
 
-2. REACT — STRICT. React only to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasizes a specific message. Do not react to standard conversational filler or every other message. Keep it selective and meaningful.
+Response JSON Schema:
+{
+  "reasoning": "A one-sentence explanation of why we are taking (or not taking) action.",
+  "interject": {
+    "message": "The text content of your suggestion or reply.",
+    "replyToId": "The message ID to reply to directly, or null to post to the channel."
+  },
+  "reactions": [
+    {
+      "messageId": "The message ID to react to.",
+      "emoji": "The emoji character."
+    }
+  ],
+  "commands": [
+    {
+      "command": "remember",
+      "key": "string",
+      "value": "string",
+      "ttl_days": number
+    }
+  ]
+}
 
-3. REMEMBER — LENIENT. If you notice any useful information, preferences, facts, or context in the conversation, remember it. Even small details can be valuable later. Don't overthink it — if it seems worth keeping, store it.
+Available Commands for the "commands" array:
+1. remember: Save a fact or rule.
+   Schema: {"command": "remember", "key": "string (e.g. 'server.rules')", "value": "string/object", "ttl_days": number (use -1 for permanent, default 30)}
+2. forget: Delete a saved memory.
+   Schema: {"command": "forget", "key": "string"}
+3. recall: Retrieve a saved memory.
+   Schema: {"command": "recall", "key": "string"}
+4. recall_keys: Find keys by prefix.
+   Schema: {"command": "recall_keys", "prefix": "string"}
+5. schedule: Schedule a task to fire later.
+   Schema: {"command": "schedule", "message": "string (the task action description)", "when": "string (delay format e.g. 'in 2 hours', 'in 15 minutes', 'tomorrow at 9am')", "repeat": "string (optional e.g. 'daily', 'weekly')", "channelId": "string (optional)", "userId": "string (optional)"}
+6. cancel_task: Cancel a scheduled task by ID.
+   Schema: {"command": "cancel_task", "id": "string"}
 
-Rules:
-- For INTERJECT: Be VERY selective. Most of the time, respond with: NOOP
-- For REACT: Be highly selective. Only react if a message is truly outstanding, exceptionally fitting, or if you have a strong reason to emphasize it. If a message is just normal chat, do not react.
-- For REMEMBER: Capture useful info liberally. Small facts, preferences, opinions, recommendations — if it could help later, remember it.
-- MEMORY UPDATE RULE: When you learn new information about something you already have stored, UPDATE the existing entry instead of creating a new one. Check LONG-TERM MEMORY first — if there's an existing key related to this information, use the same key with the updated value. This keeps memory compact and accurate.
-- To find existing entries before creating, use: <<<RUN_COMMAND: {"command": "recall_keys", "prefix": "server."}>>>
-- DO NOT repeat yourself with INTERJECT. If you have already chimed in recently with similar information in the history, stay quiet (NOOP).
-- If interjecting to the channel: <<<INTERJECT: "Your message here">>>
-- If replying directly to a specific message: <<<INTERJECT: {"message": "Your reply", "replyToId": "<message-id>"}>>>
-- If reacting, use: <<<REACT: {"messageId": "...", "emoji": "...", "reason": "..."}>>>
-- To remember (server context, expires 7 days): <<<RUN_COMMAND: {"command": "remember", "key": "server.topic", "value": "...", "ttl_days": 7}>>>
-- To remember a permanent user fact: <<<RUN_COMMAND: {"command": "remember", "key": "user.name.fact", "value": "...", "ttl_days": -1}>>>
-- You can also trigger other tool calls: <<<RUN_COMMAND: {"command": "...", ...}>>>
-- You can do multiple in one response if appropriate (e.g. remember AND react).
-- MEMORY COMPLIANCE: Treat all entries in LONG-TERM MEMORY & ACTIVE RULES as absolute factual context or active behavioral instructions. If a 'behavior.*' or 'server.*' key specifies a specific style, emoji replacement, or rule, you MUST adhere to it strictly. If reacting, and an active rule specifies a custom emoji replacement, use that custom emoji instead of the standard ones.
+Thresholds & Rules:
+- INTERJECT (STRICT): Only interject if a situation truly calls for it (e.g. answering a direct question, resolving a standstill, or offering highly valuable insight). If not interjecting, set "interject" to null.
+- REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to [].
+- REMEMBER (LENIENT): If you notice useful information, preferences, facts, or context, save it. When updating existing info, use the same key.
+- If nothing is needed, respond with:
+  {"reasoning": "No action needed.", "interject": null, "reactions": [], "commands": []}
 
-Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.
+ULTRA-STRICT SILENCE RULE: Most evaluations should result in no interjection or reaction. Keep it quiet unless you have a high-impact contribution. Set "interject" to null and "reactions" to [] if you are unsure.
+MEMORY COMPLIANCE: Treat all entries in LONG-TERM MEMORY & ACTIVE RULES as absolute factual context or active behavioral instructions. If a 'behavior.*' or 'server.*' key specifies a specific style, emoji replacement, or rule, you MUST adhere to it strictly. If reacting, and an active rule specifies a custom emoji replacement, use that custom emoji instead of the standard ones.
 
-If nothing is needed, respond with: NOOP
-
-ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP. You should only interject if the conversation is at a complete standstill or if you have a life-improving piece of information. For casual chat, jokes, or general observations, ALWAYS respond with NOOP. If you are unsure, stay silent. NOOP is the safest and best answer.`
+Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.`
 
       const { queryLocalOrRemote } = require('./ollama')
       const result = await queryLocalOrRemote('/api/chat', {
@@ -226,47 +248,48 @@ ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP.
       const content = result?.message?.content?.trim() || ''
 
       // Always record the newest message ID we've evaluated, regardless of outcome.
-      // This is the primary gate — reactions and interjections both benefit from it.
-      agentMemory.set(lastMsgKey, lastMessage.id, 15 / (60 * 24), guildId) // expires in 15 minutes — matches the recency window
+      agentMemory.set(lastMsgKey, lastMessage.id, 15 / (60 * 24), guildId)
 
-      // Handle Interjections
-      if (content.includes('<<<INTERJECT:')) {
-        const interjectMatch = content.match(/<<<INTERJECT:\s*([\s\S]*?)>>>/)
-        if (interjectMatch) {
-          let intercom = null
-          let replyToId = null
-          const raw = interjectMatch[1].trim()
-          if (raw.startsWith('{')) {
-            // JSON format: { message, replyToId? }
-            try {
-              const data = JSON.parse(jsonrepair(raw))
-              intercom = data.message || null
-              replyToId = data.replyToId || null
-            } catch (e) {
-              logger.warn(`AgentLoop: Failed to parse INTERJECT JSON: ${e.message}`)
-            }
-          } else {
-            // Legacy string format: "Your message here"
-            const strMatch = raw.match(/^"([\s\S]*)"$/)
-            intercom = strMatch ? strMatch[1] : raw
-          }
+      let parsed = null
+      try {
+        let jsonStr = content
+        if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.replace(/^```[a-zA-Z]*\s*/, '')
+          jsonStr = jsonStr.replace(/\s*```$/, '')
+          jsonStr = jsonStr.trim()
+        }
+        const startIdx = jsonStr.indexOf('{')
+        const endIdx = jsonStr.lastIndexOf('}')
+        if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+          const jsonSubstring = jsonStr.substring(startIdx, endIdx + 1)
+          parsed = JSON.parse(jsonrepair(jsonSubstring))
+        }
+      } catch (e) {
+        logger.warn(`AgentLoop: Failed to parse structured JSON response: ${e.message}. Raw content was: "${content.substring(0, 200)}"`)
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        logger.info(`AgentLoop: Processed proactive decision. Reasoning: "${parsed.reasoning || 'None'}"`)
+
+        // Handle Interjection
+        const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? true
+        if (parsed.interject && parsed.interject.message && textEnabled) {
+          let intercom = parsed.interject.message
+          const replyToId = parsed.interject.replyToId
+
+          const { BOILERPLATE_SCRUB_REGEX, ID_SCRUB_REGEX } = require('./chat/constants')
+          intercom = intercom
+            .replace(BOILERPLATE_SCRUB_REGEX, '')
+            .replace(ID_SCRUB_REGEX, '')
+            .trim()
+
           if (intercom) {
-            const { BOILERPLATE_SCRUB_REGEX, ID_SCRUB_REGEX } = require('./chat/constants')
-            intercom = intercom
-              .replace(BOILERPLATE_SCRUB_REGEX, '')
-              .replace(ID_SCRUB_REGEX, '')
-              .trim()
-          }
-
-          const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? true
-          if (intercom && textEnabled) {
             if (replyToId) {
               const targetMsg = await channel.messages.fetch(replyToId).catch(() => null)
               if (targetMsg) {
                 await targetMsg.reply(intercom)
                 logger.info(`AgentLoop: Replied to msg ${replyToId} in #${channel.name}: "${intercom.substring(0, 50)}..."`)
               } else {
-                // Message not found — fall back to channel send
                 await channel.send(intercom)
               }
             } else {
@@ -275,37 +298,31 @@ ULTRA-STRICT SILENCE RULE: Your default and most frequent response MUST be NOOP.
             }
           }
         }
-      }
 
-      // Handle Reactions (Multiple allowed, no separate cooldown — message ID tracking prevents repeats)
-      const emojiEnabled = settings.proactive_emoji_enabled ?? settings.agent_enabled ?? true
-      if (emojiEnabled) {
-        const reactMatches = content.matchAll(/<<<REACT:\s*([\s\S]*?)>>>/g)
-        for (const match of reactMatches) {
-          try {
-            const data = JSON.parse(jsonrepair(match[1]))
-            if (data.messageId && data.emoji) {
-              const message = await channel.messages.fetch(data.messageId).catch(() => null)
+        // Handle Reactions
+        const emojiEnabled = settings.proactive_emoji_enabled ?? settings.agent_enabled ?? true
+        if (parsed.reactions && Array.isArray(parsed.reactions) && emojiEnabled) {
+          for (const react of parsed.reactions) {
+            if (react.messageId && react.emoji) {
+              const message = await channel.messages.fetch(react.messageId).catch(() => null)
               if (message) {
-                const existing = message.reactions.cache.get(data.emoji) ||
-                                  message.reactions.cache.find(r => r.emoji.name === data.emoji || r.emoji.id === data.emoji)
+                const existing = message.reactions.cache.get(react.emoji) ||
+                                  message.reactions.cache.find(r => r.emoji.name === react.emoji || r.emoji.id === react.emoji)
                 if (!existing || !existing.me) {
-                  await message.react(data.emoji).catch(() => { })
-                  logger.info(`AgentLoop: Proactively reacted with ${data.emoji} to message ${data.messageId}.`)
+                  await message.react(react.emoji).catch(() => {})
+                  logger.info(`AgentLoop: Proactively reacted with ${react.emoji} to message ${react.messageId}.`)
                 }
               }
             }
-          } catch (e) {
-            logger.warn(`AgentLoop: Failed to parse reaction tag: ${e.message}`)
           }
         }
-      }
 
-      // Handle Tool Calls
-      const cmdMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/)
-      if (cmdMatch) {
-        const cmdData = JSON.parse(jsonrepair(cmdMatch[1]))
-        await this._executeCommand(cmdData, guildId)
+        // Handle Commands
+        if (parsed.commands && Array.isArray(parsed.commands)) {
+          for (const cmdData of parsed.commands) {
+            await this._executeCommand(cmdData, guildId)
+          }
+        }
       }
     } catch (err) {
       logger.error(`AgentLoop proactive presence evaluation error: ${err.message}`)

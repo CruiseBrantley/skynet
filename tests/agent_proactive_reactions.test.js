@@ -78,24 +78,32 @@ describe('AgentLoop - Proactive Presence', () => {
 
     queryLocalOrRemote.mockResolvedValue({
       message: {
-        content: `That's awesome!
-                <<<REACT: {"messageId": "msg-1", "emoji": "🔥", "reason": "Cool bot"}>>>
-                <<<INTERJECT: "Wow user1, that bot looks incredible. How long did it take you?">>>`
+        content: JSON.stringify({
+          reasoning: "User built a cool bot, I want to show support and react.",
+          interject: {
+            message: "Wow user1, that bot looks incredible. How long did it take you?",
+            replyToId: null
+          },
+          reactions: [
+            { messageId: "msg-1", emoji: "🔥" }
+          ],
+          commands: []
+        })
       }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
+ 
     expect(msg.react).toHaveBeenCalledWith('🔥')
     expect(mockChannel.send).toHaveBeenCalledWith(
       expect.stringContaining('incredible')
     )
   })
-
+ 
   test('does nothing on NOOP', async () => {
     mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
-
+ 
     const msg = {
       id: 'msg-1',
       author: { id: 'u3', username: 'user1' },
@@ -106,17 +114,24 @@ describe('AgentLoop - Proactive Presence', () => {
     }
     mockMessages.set('msg-1', msg)
     mockMessages.size = 3
-
+ 
     queryLocalOrRemote.mockResolvedValue({
-      message: { content: 'NOOP' }
+      message: {
+        content: JSON.stringify({
+          reasoning: "No action needed.",
+          interject: null,
+          reactions: [],
+          commands: []
+        })
+      }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
+ 
     expect(msg.react).not.toHaveBeenCalled()
     expect(mockChannel.send).not.toHaveBeenCalled()
   })
-
+ 
   test('INTERJECT with replyToId replies to the specific message', async () => {
     const targetMsg = {
       id: 'msg-target',
@@ -131,75 +146,108 @@ describe('AgentLoop - Proactive Presence', () => {
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
     mockMessages.set('msg-target', targetMsg)
     mockMessages.size = 3
-
+ 
     queryLocalOrRemote.mockResolvedValue({
       message: {
-        content: `<<<INTERJECT: {"message": "Try carbonara! Eggs, pancetta, pecorino.", "replyToId": "msg-target"}>>>`
+        content: JSON.stringify({
+          reasoning: "User wants a recipe, recommending carbonara.",
+          interject: {
+            message: "Try carbonara! Eggs, pancetta, pecorino.",
+            replyToId: "msg-target"
+          },
+          reactions: [],
+          commands: []
+        })
       }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
+ 
     expect(targetMsg.reply).toHaveBeenCalledWith(expect.stringContaining('carbonara'))
     expect(mockChannel.send).not.toHaveBeenCalled()
   })
-
+ 
   test('INTERJECT with replyToId falls back to channel.send when message not found', async () => {
     mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
     mockMessages.set('msg-new', { id: 'msg-new', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
     mockMessages.size = 3
-
+ 
     // fetch for a specific messageId returns null (message was deleted)
     mockChannel.messages.fetch.mockImplementation((opt) => {
       if (typeof opt === 'string' && opt === 'msg-deleted') return Promise.resolve(null)
       return Promise.resolve(mockMessages)
     })
-
+ 
     queryLocalOrRemote.mockResolvedValue({
       message: {
-        content: `<<<INTERJECT: {"message": "Interesting point!", "replyToId": "msg-deleted"}>>>`
+        content: JSON.stringify({
+          reasoning: "Replying to user message.",
+          interject: {
+            message: "Interesting point!",
+            replyToId: "msg-deleted"
+          },
+          reactions: [],
+          commands: []
+        })
       }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
+ 
     expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Interesting point!'))
   })
-
-  test('legacy plain string INTERJECT still works', async () => {
+ 
+  test('standard interjection without replyToId posts to the channel', async () => {
     mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
     mockMessages.set('msg-1', { id: 'msg-1', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
     mockMessages.size = 3
-
+ 
     queryLocalOrRemote.mockResolvedValue({
-      message: { content: '<<<INTERJECT: "Hey this is a legacy format message">>>' }
+      message: {
+        content: JSON.stringify({
+          reasoning: "Interjecting to channel",
+          interject: {
+            message: "Hey this is a standard message",
+            replyToId: null
+          },
+          reactions: [],
+          commands: []
+        })
+      }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('legacy format message'))
+ 
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('standard message'))
   })
-
+ 
   test('injects memory rules and memory compliance instructions into the prompt', async () => {
     mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
     mockMessages.set('msg-1', { id: 'msg-1', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
     mockMessages.size = 3
-
+ 
     const agentMemory = require('../util/AgentMemory')
     agentMemory.getSummary.mockReturnValue('- behavior.test_rule: active')
-
+ 
     queryLocalOrRemote.mockResolvedValue({
-      message: { content: 'NOOP' }
+      message: {
+        content: JSON.stringify({
+          reasoning: "No action needed.",
+          interject: null,
+          reactions: [],
+          commands: []
+        })
+      }
     })
-
+ 
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
-
+ 
     const callArgs = queryLocalOrRemote.mock.calls[0][1]
     const systemPrompt = callArgs.messages[0].content
-
+ 
     expect(systemPrompt).toContain('[LONG-TERM MEMORY & ACTIVE RULES]')
     expect(systemPrompt).toContain('- behavior.test_rule: active')
     expect(systemPrompt).toContain('MEMORY COMPLIANCE')
