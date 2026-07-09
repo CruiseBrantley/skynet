@@ -35,6 +35,19 @@ describe('AgentLoop - Proactive Presence', () => {
     mockChannel = {
       name: 'general',
       id: 'channel-1',
+      guild: {
+        id: guildId,
+        channels: {
+          fetch: jest.fn().mockResolvedValue(new Map([
+            ['channel-1', { name: 'general', id: 'channel-1', isTextBased: () => true }]
+          ]))
+        },
+        emojis: {
+          cache: new Map([
+            ['emoji-1', { name: 'custom_emoji', id: '123456789' }]
+          ])
+        }
+      },
       messages: {
         fetch: jest.fn().mockImplementation((opt) => {
           if (typeof opt === 'string') { return Promise.resolve(mockMessages.get(opt)) }
@@ -254,5 +267,34 @@ describe('AgentLoop - Proactive Presence', () => {
     
     // Reset mock for other tests if necessary
     agentMemory.getSummary.mockReturnValue(null)
+  })
+
+  test('injects active channels and custom emojis into the system prompt', async () => {
+    mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
+    mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })
+    mockMessages.set('msg-1', { id: 'msg-1', author: { id: 'u3' }, content: 'latest', createdAt: new Date(Date.now()), react: jest.fn(), reactions: { cache: { get: jest.fn(), find: jest.fn() } } })
+    mockMessages.size = 3
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: {
+        content: JSON.stringify({
+          reasoning: "No action needed.",
+          interject: null,
+          reactions: [],
+          commands: []
+        })
+      }
+    })
+
+    await agentLoop._evaluateProactivePresence(mockChannel, guildId)
+
+    const callArgs = queryLocalOrRemote.mock.calls[0][1]
+    const systemPrompt = callArgs.messages[0].content
+
+    expect(systemPrompt).toContain('[AVAILABLE GUILD RESOURCES]')
+    expect(systemPrompt).toContain('Text Channels on this server:')
+    expect(systemPrompt).toContain('#general (ID: "channel-1")')
+    expect(systemPrompt).toContain('Custom Emojis on this server:')
+    expect(systemPrompt).toContain(':custom_emoji: -> <:custom_emoji:123456789>')
   })
 })

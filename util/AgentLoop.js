@@ -173,12 +173,32 @@ class AgentLoop {
       const now = new Date().toLocaleString()
       const memorySummary = agentMemory.getSummary(guildId, 800) || 'None'
 
+      const guild = channel.guild
+      const rawChannels = await guild.channels.fetch().catch(() => null)
+      const activeChannelsList = rawChannels
+        ? [...rawChannels.values()]
+            .filter(c => c.isTextBased())
+            .map(c => `  - #${c.name} (ID: "${c.id}")`)
+            .join('\n')
+        : `  - #${channel.name} (ID: "${channel.id}")`
+
+      const customEmojisList = [...guild.emojis.cache.values()]
+        .map(e => `  - :${e.name}: -> <:${e.name}:${e.id}> (Reaction ID: "${e.id}")`)
+        .join('\n') || '  None'
+
       const { getBasePrompt } = require('./systemPrompt')
       const prompt = `${getBasePrompt()}
 
 === AUTONOMOUS PROACTIVE MODE ===
 You are currently observing a conversation in #${channel.name}.
 Current time: ${now}
+
+[AVAILABLE GUILD RESOURCES]
+Text Channels on this server:
+${activeChannelsList}
+
+Custom Emojis on this server:
+${customEmojisList}
 
 [LONG-TERM MEMORY & ACTIVE RULES]
 ${memorySummary}
@@ -228,8 +248,8 @@ Available Commands for the "commands" array:
    Schema: {"command": "cancel_task", "id": "string"}
 
 Thresholds & Rules:
-- INTERJECT (STRICT): Only interject if a situation truly calls for it (e.g. answering a direct question, resolving a standstill, or offering highly valuable insight). If not interjecting, set "interject" to null.
-- REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to [].
+- INTERJECT (STRICT): Only interject if a situation truly calls for it (e.g. answering a direct question, resolving a standstill, or offering highly valuable insight). If not interjecting, set "interject" to null. You can mention other channels using "<#channel_id>" and include custom emojis in your text using their full markdown string (e.g. "<:emoji_name:emoji_id>").
+- REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to []. You can react with standard Unicode emojis or use any custom emoji ID (Reaction ID) listed under [AVAILABLE GUILD RESOURCES].
 - REMEMBER (LENIENT): If you notice useful information, preferences, facts, or context, save it. When updating existing info, use the same key.
 - If nothing is needed, respond with:
   {"reasoning": "No action needed.", "interject": null, "reactions": [], "commands": []}
