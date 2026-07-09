@@ -195,13 +195,36 @@ async function execute (interaction, database) {
         logger.warn(`Context Enrichment: Failed to fetch channel context: ${e.message}`)
       }
 
+      // Get guild resources (channels and custom emojis) if in a guild
+      let resourcesContext = ''
+      if (interaction.guild && interaction.guild.channels && interaction.guild.emojis) {
+        try {
+          const rawChannels = await interaction.guild.channels.fetch().catch(() => null)
+          const activeChannelsList = rawChannels
+            ? [...rawChannels.values()]
+                .filter(c => typeof c.isTextBased === 'function' && c.isTextBased())
+                .map(c => `  - #${c.name} (ID: "${c.id}")`)
+                .join('\n')
+            : `  - #${interaction.channel?.name || 'unknown'} (ID: "${interaction.channelId}")`
+
+          const emojis = interaction.guild.emojis.cache ? [...interaction.guild.emojis.cache.values()] : []
+          const customEmojisList = emojis
+            .map(e => `  - :${e.name}: -> <:${e.name}:${e.id}> (Reaction ID: "${e.id}")`)
+            .join('\n') || '  None'
+
+          resourcesContext = `\n[AVAILABLE GUILD RESOURCES]\nText Channels on this server:\n${activeChannelsList}\n\nCustom Emojis on this server:\n${customEmojisList}\n`
+        } catch (resErr) {
+          logger.warn(`Failed to fetch guild resources for chat context: ${resErr.message}`)
+        }
+      }
+
       // We append this as a TEMPORARY system message for this specific prompt, but ensure it goes BEFORE the user's latest message
       const historyWithoutLast = channelHistories[channelId].messages.slice(0, -1)
       const lastUserMessage = channelHistories[channelId].messages[channelHistories[channelId].messages.length - 1]
 
       const finalPromptMessages = [
         ...historyWithoutLast,
-        { role: 'system', content: channelContext },
+        { role: 'system', content: channelContext + (resourcesContext ? `\n${resourcesContext}` : '') },
         lastUserMessage
       ]
 
