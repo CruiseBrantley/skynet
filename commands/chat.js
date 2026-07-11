@@ -100,8 +100,39 @@ async function execute (interaction, database) {
 
       channelHistories[channelId].time = Date.now()
 
+      let attachedText = ''
+      if (attachment) {
+        const name = attachment.name || ''
+        const contentType = attachment.contentType || ''
+        const textExtensions = /\.(txt|log|js|json|py|java|cpp|c|h|css|html|sh|yml|yaml|md|ini|conf)$/i
+        const isText = contentType.startsWith('text/') ||
+                       contentType.includes('json') ||
+                       contentType.includes('javascript') ||
+                       contentType.includes('xml') ||
+                       textExtensions.test(name)
+
+        if (isText) {
+          try {
+            logger.info(`Downloading content of text attachment: ${name}`)
+            const fileResponse = await axios.get(attachment.url, { responseType: 'text' })
+            let fileContent = fileResponse.data
+            if (typeof fileContent === 'object') {
+              fileContent = JSON.stringify(fileContent, null, 2)
+            }
+            if (fileContent && fileContent.length > 0) {
+              if (fileContent.length > 8000) {
+                fileContent = fileContent.substring(0, 8000) + '\n... (truncated due to length)'
+              }
+              attachedText = `\n\n[Content of attached file "${name}":]\n\`\`\`\n${fileContent}\n\`\`\``
+            }
+          } catch (fileErr) {
+            logger.error(`Failed to read text attachment content for ${name}: ${fileErr.message}`)
+          }
+        }
+      }
+
       const userHandle = `@${interaction.user.username}${interaction.member?.nickname ? ` (${interaction.member.nickname})` : ''}`
-      const userMessage = { role: 'user', content: `${userHandle}: ${messageText}` }
+      const userMessage = { role: 'user', content: `${userHandle}: ${messageText}${attachedText}` }
       if (base64Image) {
         userMessage.images = [base64Image]
       }
