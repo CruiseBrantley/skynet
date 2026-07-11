@@ -27,12 +27,15 @@ async function formatMessagesForContext (messages, botId) {
     const handle = `@${m.author.username}`
     let content = (m.content || '').replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
 
-    // Add image awareness for text-only models
+    // Add attachment/media awareness
     if (m.attachments && m.attachments.size > 0) {
-      const hasImage = m.attachments.some(a => a.contentType?.startsWith('image/'))
-      if (hasImage) {
-        content = `[Attached Image] ${content}`.trim()
-      }
+      const attachmentList = [...m.attachments.values()].map(a => {
+        if (a.contentType?.startsWith('image/')) return '[Attached Image]'
+        if (a.contentType?.startsWith('video/')) return '[Attached Video]'
+        if (a.contentType?.startsWith('audio/')) return '[Attached Audio/Voice]'
+        return `[Attached File: ${a.name}]`
+      }).join(' ')
+      content = `${attachmentList} ${content}`.trim()
     }
 
     // Add reactions awareness if available

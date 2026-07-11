@@ -188,7 +188,18 @@ async function execute (interaction, database) {
           else if (elapsedMinutes < 1440) timeLabel = `${Math.floor(elapsedMinutes / 60)}h ago`
           else timeLabel = `${Math.floor(elapsedMinutes / 1440)}d ago`
 
-          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle} | Text: "${enrichedContent.substring(0, 100)}${enrichedContent.length > 100 ? '...' : ''}" ${reactions ? `| Reactions: [${reactions}]` : ''}`
+          let attachmentLabel = ''
+          if (m.attachments && m.attachments.size > 0) {
+            const types = [...m.attachments.values()].map(a => {
+              if (a.contentType?.startsWith('image/')) return 'Image'
+              if (a.contentType?.startsWith('video/')) return 'Video'
+              if (a.contentType?.startsWith('audio/')) return 'Audio/Voice'
+              return `File: ${a.name}`
+            }).join(', ')
+            attachmentLabel = ` [Attachments: ${types}]`
+          }
+
+          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle} | Text: "${enrichedContent.substring(0, 100)}${enrichedContent.length > 100 ? '...' : ''}"${attachmentLabel} ${reactions ? `| Reactions: [${reactions}]` : ''}`
         }).reverse().join('\n')
         logger.info(`Context Enrichment: Fetched ${recentMessages.size} messages for context.`)
       } catch (e) {
