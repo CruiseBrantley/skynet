@@ -37,7 +37,6 @@ class MentionResolver {
     if (!name || !id || !guildId) return
     if (!this.mentionMap[guildId]) this.mentionMap[guildId] = {}
 
-    // Record the full name
     const lowerName = name.toLowerCase()
     let changed = false
     if (this.mentionMap[guildId][lowerName] !== id) {
@@ -46,9 +45,15 @@ class MentionResolver {
     }
 
     // Strip parenthetical notes, e.g. "xayde (his/him/god)" -> "xayde"
-    const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim()
-    if (cleanName && cleanName.length > 0 && cleanName !== name) {
-      const lowerClean = cleanName.toLowerCase()
+    const cleanParenthesis = name.replace(/\s*\(.*?\)\s*/g, ' ').trim()
+
+    // Also handle comma-separated notes or suffixes, e.g. "dr. sean, phbee." -> "dr. sean"
+    const cleanComma = cleanParenthesis.split(',')[0].trim()
+
+    const cleanNames = [cleanParenthesis, cleanComma].filter(n => n && n.length > 0 && n.toLowerCase() !== lowerName)
+
+    for (const cName of cleanNames) {
+      const lowerClean = cName.toLowerCase()
       if (this.mentionMap[guildId][lowerClean] !== id) {
         this.mentionMap[guildId][lowerClean] = id
         changed = true
