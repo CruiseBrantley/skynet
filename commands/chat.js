@@ -260,15 +260,12 @@ async function execute (interaction, database) {
         }
       }
 
-      // We append this as a TEMPORARY system message for this specific prompt, but ensure it goes BEFORE the user's latest message
-      const historyWithoutLast = channelHistories[channelId].messages.slice(0, -1)
-      const lastUserMessage = channelHistories[channelId].messages[channelHistories[channelId].messages.length - 1]
+      // Keep history unmodified to preserve standard ChatML structure
+      const finalPromptMessages = channelHistories[channelId].messages
 
-      const finalPromptMessages = [
-        ...historyWithoutLast,
-        { role: 'system', content: channelContext + (resourcesContext ? `\n${resourcesContext}` : '') },
-        lastUserMessage
-      ]
+      // Append channel context and resources context directly to the systemPrompt option
+      const contextPrefix = channelContext + (resourcesContext ? `\n${resourcesContext}` : '')
+      const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
 
       logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available.`)
       const ollamaContext = {
@@ -277,7 +274,7 @@ async function execute (interaction, database) {
         logsContext,
         guildId: interaction.guildId,
         userId: interaction.user?.id || null,
-        systemPrompt: getBasePrompt()
+        systemPrompt: enhancedSystemPrompt
       }
       const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName)
       if (responseData && responseData.message) {
