@@ -28,28 +28,44 @@ class MentionResolver {
   }
 
   /**
-     * Records a username/nickname to ID mapping for a specific guild.
-     * @param {string} name
-     * @param {string} id
-     * @param {string} guildId
-     */
+   * Records a username/nickname to ID mapping for a specific guild.
+   * @param {string} name
+   * @param {string} id
+   * @param {string} guildId
+   */
   record (name, id, guildId) {
     if (!name || !id || !guildId) return
     if (!this.mentionMap[guildId]) this.mentionMap[guildId] = {}
 
+    // Record the full name
     const lowerName = name.toLowerCase()
+    let changed = false
     if (this.mentionMap[guildId][lowerName] !== id) {
       this.mentionMap[guildId][lowerName] = id
+      changed = true
+    }
+
+    // Strip parenthetical notes, e.g. "xayde (his/him/god)" -> "xayde"
+    const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim()
+    if (cleanName && cleanName.length > 0 && cleanName !== name) {
+      const lowerClean = cleanName.toLowerCase()
+      if (this.mentionMap[guildId][lowerClean] !== id) {
+        this.mentionMap[guildId][lowerClean] = id
+        changed = true
+      }
+    }
+
+    if (changed) {
       this.save()
     }
   }
 
   /**
-     * Resolves all @usernames in the text to Discord mentions using the stored map for a guild.
-     * @param {string} text
-     * @param {string} guildId
-     * @returns {string} resolved text
-     */
+   * Resolves all @usernames in the text to Discord mentions using the stored map for a guild.
+   * @param {string} text
+   * @param {string} guildId
+   * @returns {string} resolved text
+   */
   resolve (text, guildId) {
     if (!text || !guildId || !this.mentionMap[guildId]) return text
     let resolved = text
@@ -58,9 +74,14 @@ class MentionResolver {
     const names = Object.keys(this.mentionMap[guildId]).sort((a, b) => b.length - a.length)
 
     for (const name of names) {
-      const id = this.mentionMap[guildId][name]
-      const regex = new RegExp(`@${name}(?![\\w])`, 'gi')
-      resolved = resolved.replace(regex, `<@${id}>`)
+      try {
+        const id = this.mentionMap[guildId][name]
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const regex = new RegExp(`@${escapedName}(?![\\w])`, 'gi')
+        resolved = resolved.replace(regex, `<@${id}>`)
+      } catch (err) {
+        logger.error(`Failed to resolve mention for name "${name}" in guild ${guildId}: ${err.message}`)
+      }
     }
     return resolved
   }

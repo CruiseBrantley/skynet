@@ -66,4 +66,23 @@ describe('MentionResolver', () => {
     const resolved = mentionResolver.resolve(text, 'different_guild')
     expect(resolved).toBe('Hello @sirian')
   })
+
+  test('should handle names with regex characters safely', () => {
+    mentionResolver.record('dr. sean, phbee.', '102', guildId)
+    const text = 'Paging @dr. sean, phbee. for assistance'
+    const resolved = mentionResolver.resolve(text, guildId)
+    expect(resolved).toBe('Paging <@102> for assistance')
+  })
+
+  test('should strip parenthetical notes from nicknames when recording', () => {
+    mentionResolver.record('xayde (his/him/god)', '103', guildId)
+    
+    // Should resolve the full name with parentheticals
+    const text1 = 'Hello @xayde (his/him/god)'
+    expect(mentionResolver.resolve(text1, guildId)).toBe('Hello <@103>')
+
+    // Should also resolve the stripped name
+    const text2 = 'Hello @xayde'
+    expect(mentionResolver.resolve(text2, guildId)).toBe('Hello <@103>')
+  })
 })
