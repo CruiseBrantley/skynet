@@ -17,9 +17,9 @@ describe('Time Weighting in Context Helper', () => {
     const now = Date.now()
 
     const messages = new Map([
-      ['1', { id: '1', author: { id: 'user1', username: 'alice' }, content: 'just now msg', createdAt: new Date(now - 1000 * 30) }], // 30 seconds ago
+      ['1', { id: '1', author: { id: 'bot123', username: 'Skynet' }, content: 'just now msg', createdAt: new Date(now - 1000 * 30) }], // 30 seconds ago
       ['2', { id: '2', author: { id: 'user2', username: 'bob' }, content: 'minutes ago msg', createdAt: new Date(now - 1000 * 60 * 5) }], // 5 mins ago
-      ['3', { id: '3', author: { id: 'user1', username: 'alice' }, content: 'hours ago msg', createdAt: new Date(now - 1000 * 60 * 60 * 3) }], // 3 hours ago
+      ['3', { id: '3', author: { id: 'bot123', username: 'Skynet' }, content: 'hours ago msg', createdAt: new Date(now - 1000 * 60 * 60 * 3) }], // 3 hours ago
       ['4', { id: '4', author: { id: 'user2', username: 'bob' }, content: 'days ago msg', createdAt: new Date(now - 1000 * 60 * 60 * 24 * 2) }] // 2 days ago
     ])
 

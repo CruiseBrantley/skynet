@@ -76,7 +76,13 @@ async function formatMessagesForContext (messages, botId) {
       }
     }
 
-    formatted.push({ role, content: `[ID: ${m.id} | ${timeLabel}]${reactionsLabel} ${handle}: ${content}` })
+    const messageContent = `[ID: ${m.id} | ${timeLabel}]${reactionsLabel} ${handle}: ${content}`
+    const lastMsg = formatted[formatted.length - 1]
+    if (lastMsg && lastMsg.role === role) {
+      lastMsg.content += '\n' + messageContent
+    } else {
+      formatted.push({ role, content: messageContent })
+    }
   }
 
   return formatted.filter(m => m.content.length > 0)
