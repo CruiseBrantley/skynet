@@ -25,6 +25,25 @@ module.exports = {
             .setDescription('Target Server ID (Owner Only)')
             .setRequired(false)
         )
+    )
+    .addSubcommand(sub =>
+      sub.setName('gif')
+        .setDescription('Configure GIF settings for this server')
+        .addStringOption(opt =>
+          opt.setName('theme')
+            .setDescription('GIF theme restriction (default, anime, or disabled)')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Default / None', value: 'default' },
+              { name: 'Anime Only', value: 'anime' },
+              { name: 'Disabled', value: 'disabled' }
+            )
+        )
+        .addStringOption(opt =>
+          opt.setName('server_id')
+            .setDescription('Target Server ID (Owner Only)')
+            .setRequired(false)
+        )
     ),
 
   async execute (interaction, database) {
@@ -84,6 +103,28 @@ module.exports = {
         return interaction.reply({ embeds: [embed] })
       } catch (err) {
         logger.error(`Failed to update config for ${targetGuildId}: ${err.message}`)
+        return interaction.reply({ content: 'Failed to update configuration in the database.', ephemeral: true })
+      }
+    } else if (sub === 'gif') {
+      const theme = interaction.options.getString('theme')
+      const updates = { gif_theme: theme }
+      const ref = database.ref(`guild_settings/${targetGuildId}`)
+
+      try {
+        await ref.update(updates)
+
+        const embed = new EmbedBuilder()
+          .setTitle('Skynet GIF Configuration Updated')
+          .setDescription(`GIF settings for server \`${targetGuildId}\` have been updated:`)
+          .addFields(
+            { name: '🖼️ GIF Theme / Restriction', value: `**${theme.toUpperCase()}**`, inline: true }
+          )
+          .setColor(0x2ecc71)
+          .setTimestamp()
+
+        return interaction.reply({ embeds: [embed] })
+      } catch (err) {
+        logger.error(`Failed to update GIF config for ${targetGuildId}: ${err.message}`)
         return interaction.reply({ content: 'Failed to update configuration in the database.', ephemeral: true })
       }
     }
