@@ -66,7 +66,7 @@ describe('GIF Lookup Service (gifService)', () => {
     const mockGiphyResponse = {
       data: {
         data: [
-          { images: { original: { url: 'https://giphy.com/anime-test.gif' } } }
+          { slug: 'anime-test', images: { original: { url: 'https://giphy.com/anime-test.gif' } } }
         ]
       }
     }

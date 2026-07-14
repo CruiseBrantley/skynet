@@ -8,7 +8,7 @@ module.exports = {
     search_query: 'string — the query or emotion to search for (e.g. "happy", "crying", "dance")'
   },
   execute: async (bot, channel, params) => {
-    const guildId = channel.guildId || null
+    const guildId = channel.guildId || (channel.guild ? channel.guild.id : null) || null
     const query = params.search_query || params.query || 'happy'
 
     try {

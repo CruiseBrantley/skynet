@@ -139,6 +139,7 @@ class GifService {
    */
   async getGif (query, guildId) {
     const theme = await this.getThemeSetting(guildId)
+    logger.info(`GifService.getGif: query="${query}" guildId="${guildId}" theme="${theme}"`)
     if (theme === 'disabled') {
       logger.info(`GifService: GIFs are disabled for guild ${guildId}. Skipping.`)
       return null
@@ -158,10 +159,34 @@ class GifService {
         const response = await axios.get(url)
         const data = response.data?.data
         if (data && data.length > 0) {
-          const randIdx = Math.floor(Math.random() * Math.min(data.length, 5))
-          const gifUrl = data[randIdx].images?.original?.url
-          if (gifUrl) {
-            return gifUrl
+          let candidates = data
+          if (theme === 'anime') {
+            // Filter to ensure results are anime-related by checking slug, title, or username
+            candidates = data.filter(item => {
+              const textToMatch = `${item.slug || ''} ${item.title || ''} ${item.username || ''}`.toLowerCase()
+              return textToMatch.includes('anime') ||
+                     textToMatch.includes('manga') ||
+                     textToMatch.includes('chibi') ||
+                     textToMatch.includes('otaku') ||
+                     textToMatch.includes('waifu') ||
+                     textToMatch.includes('ghibli') ||
+                     textToMatch.includes('naruto') ||
+                     textToMatch.includes('one piece') ||
+                     textToMatch.includes('dragon ball') ||
+                     textToMatch.includes('sailor moon') ||
+                     textToMatch.includes('pokemon')
+            })
+            logger.info(`GifService: Giphy returned ${data.length} results, filtered down to ${candidates.length} anime candidates.`)
+          }
+
+          if (candidates.length > 0) {
+            const randIdx = Math.floor(Math.random() * candidates.length)
+            const gifUrl = candidates[randIdx].images?.original?.url
+            if (gifUrl) {
+              return gifUrl
+            }
+          } else if (theme === 'anime') {
+            logger.info(`GifService: Giphy results for "${searchQuery}" contained no valid anime matches. Falling back to nekos.best.`)
           }
         }
       } catch (err) {
