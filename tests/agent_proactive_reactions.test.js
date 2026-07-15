@@ -3,6 +3,9 @@ const logger = require('../logger')
 
 jest.mock('../util/ollama')
 jest.mock('../logger')
+jest.mock('../util/chat/gifService', () => ({
+  getGif: jest.fn().mockResolvedValue('https://giphy.com/mock-proactive-reaction.gif')
+}))
 jest.mock('../util/AgentMemory', () => ({
   get: jest.fn().mockReturnValue(null), // skip gate always allows evaluation
   set: jest.fn(),
@@ -112,7 +115,56 @@ describe('AgentLoop - Proactive Presence', () => {
       expect.stringContaining('incredible')
     )
   })
- 
+
+  test('handles proactive interjection with a GIF', async () => {
+    const gifService = require('../util/chat/gifService')
+    gifService.getGif.mockResolvedValueOnce('https://giphy.com/mock-proactive-reaction.gif')
+
+    mockMessages.set('msg-old-1', {
+      id: 'msg-old-1',
+      author: { id: 'user-old-1', username: 'u' },
+      content: 'hi',
+      createdAt: new Date(Date.now() - 10000)
+    })
+    mockMessages.set('msg-old-2', {
+      id: 'msg-old-2',
+      author: { id: 'user-old-2', username: 'u' },
+      content: 'hello',
+      createdAt: new Date(Date.now() - 5000)
+    })
+    mockMessages.set('msg-1', {
+      id: 'msg-1',
+      author: { id: 'user-1', username: 'user1' },
+      content: 'I got the promotion!',
+      createdAt: new Date(Date.now()),
+      react: jest.fn(),
+      reactions: { cache: { get: jest.fn(), find: jest.fn() } }
+    })
+    mockMessages.size = 3
+
+    queryLocalOrRemote.mockResolvedValue({
+      message: {
+        content: JSON.stringify({
+          reasoning: "User got promoted, let's post a celebratory GIF.",
+          interject: {
+            message: "Congratulations!",
+            replyToId: null,
+            gif: "congratulations"
+          },
+          reactions: [],
+          commands: []
+        })
+      }
+    })
+
+    await agentLoop._evaluateProactivePresence(mockChannel, guildId)
+
+    expect(gifService.getGif).toHaveBeenCalledWith('congratulations', guildId)
+    expect(mockChannel.send).toHaveBeenCalledWith(
+      expect.stringContaining('Congratulations!\nhttps://giphy.com/mock-proactive-reaction.gif')
+    )
+  })
+
   test('does nothing on NOOP', async () => {
     mockMessages.set('msg-old-1', { id: 'msg-old-1', author: { id: 'u1' }, content: 'hi', createdAt: new Date(Date.now() - 10000) })
     mockMessages.set('msg-old-2', { id: 'msg-old-2', author: { id: 'u2' }, content: 'hello', createdAt: new Date(Date.now() - 5000) })

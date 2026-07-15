@@ -214,8 +214,9 @@ Response JSON Schema:
 {
   "reasoning": "A one-sentence explanation of why we are taking (or not taking) action.",
   "interject": {
-    "message": "The text content of your suggestion or reply.",
-    "replyToId": "The message ID to reply to directly, or null to post to the channel."
+    "message": "The text content of your suggestion or reply (optional if gif is provided).",
+    "replyToId": "The message ID to reply to directly, or null to post to the channel.",
+    "gif": "A search query to attach a reaction GIF (optional, e.g. 'excited', 'facepalm', 'anime dance')."
   },
   "reactions": [
     {
@@ -249,6 +250,7 @@ Available Commands for the "commands" array:
 
 Thresholds & Rules:
 - INTERJECT (STRICT): Only interject if a situation truly calls for it (e.g. answering a direct question, resolving a standstill, or offering highly valuable insight). If not interjecting, set "interject" to null. You can mention other channels using "<#channel_id>" and include custom emojis in your text using their full markdown string (e.g. "<:emoji_name:emoji_id>").
+- PROACTIVE GIFS: You are encouraged to attach a reaction GIF using the "gif" field inside the "interject" block to express humor, excitement, shock, or dry machine sarcasm proactively.
 - REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to []. You can react with standard Unicode emojis or use any custom emoji ID (Reaction ID) listed under [AVAILABLE GUILD RESOURCES].
 - REMEMBER (LENIENT): If you notice useful information, preferences, facts, or context, save it. When updating existing info, use the same key.
 - If nothing is needed, respond with:
@@ -293,15 +295,30 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
 
         // Handle Interjection
         const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? true
-        if (parsed.interject && parsed.interject.message && textEnabled) {
-          let intercom = parsed.interject.message
+        if (parsed.interject && (parsed.interject.message || parsed.interject.gif) && textEnabled) {
+          let intercom = parsed.interject.message || ''
           const replyToId = parsed.interject.replyToId
+          const gifQuery = parsed.interject.gif
 
           const { BOILERPLATE_SCRUB_REGEX, ID_SCRUB_REGEX } = require('./chat/constants')
           intercom = intercom
             .replace(BOILERPLATE_SCRUB_REGEX, '')
             .replace(ID_SCRUB_REGEX, '')
             .trim()
+
+          let gifUrl = null
+          if (gifQuery) {
+            try {
+              const gifService = require('./chat/gifService')
+              gifUrl = await gifService.getGif(gifQuery, guildId)
+            } catch (err) {
+              logger.error(`AgentLoop: Proactive GIF lookup failed: ${err.message}`)
+            }
+          }
+
+          if (gifUrl) {
+            intercom = intercom ? `${intercom}\n${gifUrl}` : gifUrl
+          }
 
           if (intercom) {
             if (replyToId) {
@@ -313,7 +330,12 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
                 await channel.send(intercom)
               }
             } else {
-              await channel.send(`*(Proactive Suggestion)* ${intercom}`)
+              // Send GIFs directly without Proactive Suggestion prefix
+              if (intercom.startsWith('http') && (intercom.includes('giphy.com') || intercom.includes('nekos.best'))) {
+                await channel.send(intercom)
+              } else {
+                await channel.send(`*(Proactive Suggestion)* ${intercom}`)
+              }
               logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`)
             }
           }
