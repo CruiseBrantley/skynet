@@ -4,44 +4,44 @@ const logger = require('../../logger')
 // Curated list of high-quality generic reaction GIFs to use when Giphy API key is missing
 const CURATED_FALLBACK_GIFS = {
   happy: [
-    'https://media.giphy.com/media/l3q2zVr6cu95nF6O4/giphy.gif', // Minion happy
-    'https://media.giphy.com/media/t3s3BLmFAjVW8/giphy.gif', // Spongebob happy
-    'https://media.giphy.com/media/111ebonMs90YLu/giphy.gif' // Carlton dance / happy
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZzU0b2RrNTE5czl0ZXYzNmExeG9xdGlmMTRhYjhxbW8yMG51YWEyeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BWplyaNrHRjRvweNjS/giphy.gif',
+    'https://media3.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZzU0b2RrNTE5czl0ZXYzNmExeG9xdGlmMTRhYjhxbW8yMG51YWEyeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/3o7qE2VAxuXWeyvJIY/giphy.gif',
+    'https://media1.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZzU0b2RrNTE5czl0ZXYzNmExeG9xdGlmMTRhYjhxbW8yMG51YWEyeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/aQYR1p8saOQla/giphy.gif'
   ],
   sad: [
-    'https://media.giphy.com/media/9Y5BbDSkSTiY8/giphy.gif', // Sad puppy
-    'https://media.giphy.com/media/2WxWlkKWUsQhy/giphy.gif', // Sad doctor who
-    'https://media.giphy.com/media/d2lcHJTG5Tscg/giphy.gif' // Crying face
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNmF3OXFhY2cwYmUwY3hva3lwbzh5Y2N2Y2J0bmd5amFwcTU3dHVveSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/lGBecpB2dIMwt6ohfI/giphy.gif',
+    'https://media4.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNmF3OXFhY2cwYmUwY3hva3lwbzh5Y2N2Y2J0bmd5amFwcTU3dHVveSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/q2qxiBO5prG9i/giphy.gif',
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNmF3OXFhY2cwYmUwY3hva3lwbzh5Y2N2Y2J0bmd5amFwcTU3dHVveSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/H6cmWzp6LGFvqjidB7/giphy.gif'
   ],
   facepalm: [
-    'https://media.giphy.com/media/3og0INyMrrC6cyUM80/giphy.gif', // Facepalm
-    'https://media.giphy.com/media/w89ak63KNl0n6/giphy.gif', // Star Trek facepalm
-    'https://media.giphy.com/media/1tHzw9PXX3eCs/giphy.gif' // Animated facepalm
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzOGM0ZWoyMXc4Nzk1MTNsZXEyNTh5OWgwbmVsYms0OHA3M3V2NGpmeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/XD4qHZpkyUFfq/giphy.gif',
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzOGM0ZWoyMXc4Nzk1MTNsZXEyNTh5OWgwbmVsYms0OHA3M3V2NGpmeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/Ra1bmpxpsppNC/giphy.gif',
+    'https://media3.giphy.com/media/v1.Y2lkPTc0MTM1NmMzOGM0ZWoyMXc4Nzk1MTNsZXEyNTh5OWgwbmVsYms0OHA3M3V2NGpmeSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/vwI4mYEHP8k0w/giphy.gif'
   ],
   shock: [
-    'https://media.giphy.com/media/jivGiBTdqvZOg/giphy.gif', // Shocked cat
-    'https://media.giphy.com/media/PUBxelwT57jsQ/giphy.gif', // Shocked kid
-    'https://media.giphy.com/media/cl90q5wYv8lsQ/giphy.gif' // Shocked Minion
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzeWpuMTF5YnFnbDJyZWpydHJya3pscGd0YWV6dDBnbzZ1aGh6MnZqcSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/5VKbvrjxpVJCM/giphy.gif',
+    'https://media4.giphy.com/media/v1.Y2lkPTc0MTM1NmMzeWpuMTF5YnFnbDJyZWpydHJya3pscGd0YWV6dDBnbzZ1aGh6MnZqcSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/l3q2K5jinAlChoCLS/giphy.gif',
+    'https://media3.giphy.com/media/v1.Y2lkPTc0MTM1NmMzeWpuMTF5YnFnbDJyZWpydHJya3pscGd0YWV6dDBnbzZ1aGh6MnZqcSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/bGPTxLislwm3u/giphy.gif'
   ],
   popcorn: [
-    'https://media.giphy.com/media/pUeXcg80c58I/giphy.gif', // Michael Jackson eating popcorn
-    'https://media.giphy.com/media/hVTouqNmVKiMo/giphy.gif', // Popcorn reaction
-    'https://media.giphy.com/media/NipFetnQeYYTu/giphy.gif' // Eating popcorn
+    'https://media1.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNTR6ZWZ4bnBiNHZ5ZGk4Z3FlYnl4NWNtdHp0c25tbjl3aXJqb3hzMCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/pUeXcg80cO8I8/giphy.gif',
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNTR6ZWZ4bnBiNHZ5ZGk4Z3FlYnl4NWNtdHp0c25tbjl3aXJqb3hzMCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/tyqcJoNjNv0Fq/giphy.gif',
+    'https://media4.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNTR6ZWZ4bnBiNHZ5ZGk4Z3FlYnl4NWNtdHp0c25tbjl3aXJqb3hzMCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/iDJuQR0UmiqOI/giphy.gif'
   ],
   dance: [
-    'https://media.giphy.com/media/13xsE7W54k7szo/giphy.gif', // Carlton dance
-    'https://media.giphy.com/media/5GovlcmPQTeGQ/giphy.gif', // Excited dance
-    'https://media.giphy.com/media/l3V0lsGtTMSB5YNgA/giphy.gif' // Dance party
+    'https://media1.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZ2F6N3lvcGV5dXh4NzFqZnh0aHJxbzkyaHNqbGNhcGF1ZnN3ejQxbiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/ujTVMASREzuRbH6zy5/giphy.gif',
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZ2F6N3lvcGV5dXh4NzFqZnh0aHJxbzkyaHNqbGNhcGF1ZnN3ejQxbiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/V7jkATiqn3mRie2LI2/giphy.gif',
+    'https://media3.giphy.com/media/v1.Y2lkPTc0MTM1NmMzZ2F6N3lvcGV5dXh4NzFqZnh0aHJxbzkyaHNqbGNhcGF1ZnN3ejQxbiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/FbiL9rsmZN3ib2JSGo/giphy.gif'
   ],
   think: [
-    'https://media.giphy.com/media/a5viI92UXDSKY/giphy.gif', // Thinking face
-    'https://media.giphy.com/media/3o7qE1YN7aBOFPRw8E/giphy.gif', // Thinking Minion
-    'https://media.giphy.com/media/d3mlYqJJ9RfmkwKs/giphy.gif' // Smart guy tapping head
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNDBpeGgwOWdrNjd6bWZwbGxhOG1mdjRkb3g1bzFqdWQybXI3Zjh1MiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/d3mlE7uhX8KFgEmY/giphy.gif',
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNDBpeGgwOWdrNjd6bWZwbGxhOG1mdjRkb3g1bzFqdWQybXI3Zjh1MiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/a5viI92PAF89q/giphy.gif',
+    'https://media0.giphy.com/media/v1.Y2lkPTc0MTM1NmMzNDBpeGgwOWdrNjd6bWZwbGxhOG1mdjRkb3g1bzFqdWQybXI3Zjh1MiZlcD12MV9naWZzX3NlYXJjaCZjdD1n/777Aby0ZetYE8/giphy.gif'
   ],
   shrug: [
-    'https://media.giphy.com/media/jPAdK8LY2Wv7TdlwOP/giphy.gif', // Shrug kid
-    'https://media.giphy.com/media/G5X6MzyxjAnK/giphy.gif', // Spongebob shrug
-    'https://media.giphy.com/media/14aUO0Mf7dWDXW/giphy.gif' // Shrug animation
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzYmV2cGhra24ybnNyZTY2NzZ1NHRpamt3NGx3Z2ZwZzk3ZTh2MHk1MyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/jPAdK8Nfzzwt2/giphy.gif',
+    'https://media2.giphy.com/media/v1.Y2lkPTc0MTM1NmMzYmV2cGhra24ybnNyZTY2NzZ1NHRpamt3NGx3Z2ZwZzk3ZTh2MHk1MyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/SAHGcjT1jNvDB6oxI8/giphy.gif',
+    'https://media4.giphy.com/media/v1.Y2lkPTc0MTM1NmMzYmV2cGhra24ybnNyZTY2NzZ1NHRpamt3NGx3Z2ZwZzk3ZTh2MHk1MyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/ma7VlDSlty3EA/giphy.gif'
   ]
 }
 
@@ -202,7 +202,11 @@ class GifService {
         const category = getBestNekoCategory(cleanQuery)
         const url = `https://nekos.best/api/v2/${category}`
         logger.info(`GifService: Fetching anime GIF from nekos.best category: "${category}"`)
-        const response = await axios.get(url)
+        const response = await axios.get(url, {
+          headers: {
+            'User-Agent': 'SkynetBot (https://github.com/CruiseBrantley/skynet)'
+          }
+        })
         const gifUrl = response.data?.results?.[0]?.url
         if (gifUrl) {
           return gifUrl

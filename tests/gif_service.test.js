@@ -92,15 +92,18 @@ describe('GIF Lookup Service (gifService)', () => {
 
     const result = await gifService.getGif('crying', 'guild-123')
 
-    expect(axios.get).toHaveBeenCalledWith(expect.stringContaining('nekos.best/api/v2/cry'))
+    expect(axios.get).toHaveBeenCalledWith(
+      expect.stringContaining('nekos.best/api/v2/cry'),
+      expect.any(Object)
+    )
     expect(result).toBe('https://nekos.best/anime-reaction.gif')
   })
 
   test('should fallback to curated reaction GIF when no GIPHY key and theme is default', async () => {
     const result = await gifService.getGif('facepalm', 'guild-123')
-    
+
     // Curated facepalm list has direct Giphy links
-    expect(result).toContain('media.giphy.com/media/')
+    expect(result).toContain('giphy.com/media/')
     expect(result).toContain('giphy.gif')
   })
 })
