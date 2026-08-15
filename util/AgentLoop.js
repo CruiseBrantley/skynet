@@ -2,6 +2,7 @@ const logger = require('../logger')
 const agentMemory = require('./AgentMemory')
 const agentScheduler = require('./AgentScheduler')
 const { jsonrepair } = require('jsonrepair')
+const { isChannelInFlight, markChannelInFlight, clearChannelInFlight } = require('./inFlightChannels')
 
 // Max recursion depth per tick — prevents the model from chaining tool calls indefinitely
 const MAX_LOOP_DEPTH = 5
@@ -134,6 +135,12 @@ class AgentLoop {
   }
 
   async _evaluateProactivePresence (channel, guildId, settings = {}) {
+    if (isChannelInFlight(channel.id)) {
+      logger.info(`AgentLoop: skipping #${channel.name} — command currently in-flight in channel.`)
+      return
+    }
+
+    markChannelInFlight(channel.id)
     logger.info(`AgentLoop: Evaluating proactive presence for #${channel.name} in ${guildId}...`)
 
     try {
@@ -165,6 +172,9 @@ class AgentLoop {
         logger.info(`AgentLoop: skipping #${channel.name} — no new messages since last evaluation.`)
         return
       }
+
+      // Always record the newest message ID we're evaluating right at the start of evaluation
+      agentMemory.set(lastMsgKey, lastMessage.id, 15 / (60 * 24), guildId)
 
       const { formatMessagesForContext } = require('./chat/contextHelper')
       const history = await formatMessagesForContext(messages, botId)
@@ -249,14 +259,14 @@ Available Commands for the "commands" array:
    Schema: {"command": "cancel_task", "id": "string"}
 
 Thresholds & Rules:
-- INTERJECT (STRICT): Only interject if a situation truly calls for it (e.g. answering a direct question, resolving a standstill, or offering highly valuable insight). If not interjecting, set "interject" to null. You can mention other channels using "<#channel_id>" and include custom emojis in your text using their full markdown string (e.g. "<:emoji_name:emoji_id>").
-- PROACTIVE GIFS: You are encouraged to attach a reaction GIF using the "gif" field inside the "interject" block to express humor, excitement, shock, or dry machine sarcasm proactively.
+- INTERJECT (HIGH BAR / ULTRA-STRICT): Default to SILENCE ("interject": null). Only interject if your contribution is genuinely beneficial (e.g. answering a direct question, providing essential technical info) or genuinely hilarious. Standard casual chatter, minor jokes, or generic comments DO NOT warrant an interjection. If not interjecting, set "interject" to null. You can mention other channels using "<#channel_id>" and include custom emojis in your text using their full markdown string (e.g. "<:emoji_name:emoji_id>").
+- PROACTIVE GIFS: Use reaction GIFs sparingly via the "gif" field ONLY when directly relevant or truly funny. Never send low-quality or irrelevant GIFs.
 - REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to []. You can react with standard Unicode emojis or use any custom emoji ID (Reaction ID) listed under [AVAILABLE GUILD RESOURCES].
 - REMEMBER (LENIENT): If you notice useful information, preferences, facts, or context, save it. When updating existing info, use the same key.
 - If nothing is needed, respond with:
   {"reasoning": "No action needed.", "interject": null, "reactions": [], "commands": []}
 
-ULTRA-STRICT SILENCE RULE: Most evaluations should result in no interjection or reaction. Keep it quiet unless you have a high-impact contribution. Set "interject" to null and "reactions" to [] if you are unsure.
+ULTRA-STRICT SILENCE RULE: Most channel evaluations MUST result in no interjection ("interject": null). Keep quiet unless you have a high-impact, genuinely beneficial, or hilarious contribution. Set "interject" to null if you are unsure.
 MEMORY COMPLIANCE: Treat all entries in LONG-TERM MEMORY & ACTIVE RULES as absolute factual context or active behavioral instructions. If a 'behavior.*' or 'server.*' key specifies a specific style, emoji replacement, or rule, you MUST adhere to it strictly. If reacting, and an active rule specifies a custom emoji replacement, use that custom emoji instead of the standard ones.
 
 Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.`
@@ -316,27 +326,28 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
             }
           }
 
+          const { EmbedBuilder } = require('discord.js')
+          let embed = null
           if (gifUrl) {
-            intercom = intercom ? `${intercom}\n${gifUrl}` : gifUrl
+            embed = new EmbedBuilder().setImage(gifUrl).setColor(0x3498db)
           }
 
-          if (intercom) {
+          if (intercom || embed) {
+            const payload = {}
+            if (intercom) payload.content = intercom
+            if (embed) payload.embeds = [embed]
+
             if (replyToId) {
               const targetMsg = await channel.messages.fetch(replyToId).catch(() => null)
               if (targetMsg) {
-                await targetMsg.reply(intercom)
-                logger.info(`AgentLoop: Replied to msg ${replyToId} in #${channel.name}: "${intercom.substring(0, 50)}..."`)
+                await targetMsg.reply(payload)
+                logger.info(`AgentLoop: Replied to msg ${replyToId} in #${channel.name}: "${(intercom || 'GIF').substring(0, 50)}..."`)
               } else {
-                await channel.send(intercom)
+                await channel.send(payload)
               }
             } else {
-              // Send GIFs directly without Proactive Suggestion prefix
-              if (intercom.startsWith('http') && (intercom.includes('giphy.com') || intercom.includes('nekos.best'))) {
-                await channel.send(intercom)
-              } else {
-                await channel.send(`*(Proactive Suggestion)* ${intercom}`)
-              }
-              logger.info(`AgentLoop: Interjected in #${channel.name}: "${intercom.substring(0, 50)}..."`)
+              await channel.send(payload)
+              logger.info(`AgentLoop: Interjected in #${channel.name}: "${(intercom || 'GIF').substring(0, 50)}..."`)
             }
           }
         }
@@ -368,6 +379,8 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
       }
     } catch (err) {
       logger.error(`AgentLoop proactive presence evaluation error: ${err.message}`)
+    } finally {
+      clearChannelInFlight(channel.id)
     }
   }
 

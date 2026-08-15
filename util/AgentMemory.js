@@ -162,7 +162,7 @@ class AgentMemory {
      * @param {string|null} guildId - Current guild ID (null for DMs — only global memory shown)
      * @param {number} maxChars
      */
-  getSummary (guildId = null, maxChars = 1200) {
+  getSummary (guildId = null, maxChars = 8000) {
     this._pruneExpired()
     const entries = Object.entries(this._data).filter(([, e]) => {
       if (guildId === 'all') return true

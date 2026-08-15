@@ -56,16 +56,60 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
   const timeoutMs = 180000 // 180s base timeout for more reliable failover/thinking models
 
-  // Level 1: Gemini API Tier (The first reliable fail-over)
+  // Level 1: Local Mac Fallback (Unlimited local hardware fallback)
   if (fallbackLevel === 1) {
-    const apiKey = process.env.GEMINI_API_KEY
-    if (!apiKey) {
-      logger.error('GEMINI_API_KEY is not configured in .env and fallback reached Level 1.')
-      return queryOllama(endpoint, payload, 2) // Drop to local if API key is missing
+    const localUrl = `http://127.0.0.1:11434${endpoint}`
+    const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+
+    logger.info(`Triggering Level 1 fallback: Local Ollama (${localModel}) for ${endpoint}`)
+
+    // Try to start local Ollama if offline
+    let isOnline = await checkPortOpen('127.0.0.1', 11434, 1000)
+    if (!isOnline) {
+      logger.info('Local Ollama is offline. Attempting to start with \'open -a Ollama\'...')
+      const { exec } = require('child_process')
+      exec('open -a Ollama')
+      // Give it more time to spin up if it was completely closed
+      for (let i = 0; i < 8; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        isOnline = await checkPortOpen('127.0.0.1', 11434, 1000)
+        if (isOnline) break
+      }
     }
 
-    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'
-    logger.info(`Triggering Level 1 fallback: ${geminiModel} for ${endpoint}`)
+    try {
+      // Debug: log the full payload to see the system prompt and context for the local model
+      if (payload.messages) {
+        logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
+      }
+      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 180000 }) // 180s for local load
+
+      const data = response.data
+      if (data && data.message) {
+        if (data.message.thinking) {
+          logger.info(`Local Model [${localModel}] Thinking: ${data.message.thinking.substring(0, 150)}...`)
+        }
+        if (typeof data.message.content === 'string') return data
+      } else if (data && data.response) {
+        return { message: { role: 'assistant', content: data.response } }
+      }
+      return data
+    } catch (err) {
+      logger.error(`Local Ollama fallback failed: ${err.message}. Dropping to Level 2 (Gemini).`)
+      return queryOllama(endpoint, payload, 2)
+    }
+  }
+
+  // Level 2: Gemini API Tier (Final Cloud API Fallback — preserves quota)
+  if (fallbackLevel >= 2) {
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      logger.error('GEMINI_API_KEY is not configured in .env and fallback reached Level 2.')
+      throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
+    }
+
+    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
+    logger.info(`Triggering Level 2 fallback: ${geminiModel} for ${endpoint}`)
 
     let geminiContents = []
     if (payload.messages) {
@@ -111,53 +155,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       throw new Error('Invalid response structure from Gemini API')
     } catch (err) {
       const errMsg = err.response?.data?.error?.message || err.message
-      logger.error(`Gemini fallback failed: ${errMsg}. Dropping to Level 2 (Local).`)
-      return queryOllama(endpoint, payload, 2)
-    }
-  }
-
-  // Level 2: Local Fallback (The final fail-safe)
-  // Model: qwen3.5:9b (keeps in RAM for fast responses)
-  if (fallbackLevel >= 2) {
-    const localUrl = `http://127.0.0.1:11434${endpoint}`
-    const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
-
-    logger.info(`Triggering Level 2 fallback: Local Ollama (${localModel}) for ${endpoint}`)
-
-    // Try to start local Ollama if offline
-    let isOnline = await checkPortOpen('127.0.0.1', 11434, 1000)
-    if (!isOnline) {
-      logger.info('Local Ollama is offline. Attempting to start with \'open -a Ollama\'...')
-      const { exec } = require('child_process')
-      exec('open -a Ollama')
-      // Give it more time to spin up if it was completely closed
-      for (let i = 0; i < 8; i++) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        isOnline = await checkPortOpen('127.0.0.1', 11434, 1000)
-        if (isOnline) break
-      }
-    }
-
-    try {
-    // Debug: log the full payload to see the system prompt and context for the local model
-      if (payload.messages) {
-        logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
-      }
-      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 180000 }) // 180s for local load
-
-      const data = response.data
-      if (data && data.message) {
-        if (data.message.thinking) {
-          logger.info(`Local Model [${localModel}] Thinking: ${data.message.thinking.substring(0, 150)}...`)
-        }
-        if (typeof data.message.content === 'string') return data
-      } else if (data && data.response) {
-        return { message: { role: 'assistant', content: data.response } }
-      }
-      return data
-    } catch (err) {
-      logger.error(`Final local fallback failed: ${err.message}`)
-      throw new Error('All fallback tiers (Remote, Gemini, Local) are unreachable.')
+      logger.error(`Final Gemini fallback failed: ${errMsg}`)
+      throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
   }
 
@@ -220,7 +219,7 @@ async function queryLocalOrRemote (endpoint, payload) {
   const currentModel = (remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))) ? remoteModel : localModel
   const isQwen = currentModel.toLowerCase().includes('qwen')
   const isQwen3 = currentModel.toLowerCase().includes('qwen3')
-  const numCtx = isQwen3 ? 262144 : (isQwen ? 131072 : 8192)
+  const numCtx = isQwen3 ? 65536 : (isQwen ? 65536 : 8192)
 
   // Inject enhancements
   if (isQwen) {
@@ -248,8 +247,8 @@ async function queryLocalOrRemote (endpoint, payload) {
     }
   }
 
-  // Fall through to local — never calls Gemini (level 2 directly)
-  return queryOllama(endpoint, payload, 2)
+  // Fall through to local — never calls Gemini (level 1 is local)
+  return queryOllama(endpoint, payload, 1)
 }
 
 /**
@@ -266,10 +265,41 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     userId = null
   } = options
 
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
+  const remoteModel = process.env.OLLAMA_REMOTE_MODEL
+  const currentModel = (isBackup || !remoteModel) ? localModel : remoteModel
+
+  // Qwen & Gemma 4 Family Enhancements:
+  const isQwen = currentModel.toLowerCase().includes('qwen')
+  const isQwen3 = currentModel.toLowerCase().includes('qwen3')
+  const isGemma4 = currentModel.toLowerCase().includes('gemma4')
+
+  let numCtx = 8192
+  let think = false
+  let maxMemoryChars = 3500 // Cap for local Mac fallback (Level 2)
+
+  if (isBackup) {
+    // Level 1 Backup is Gemini API (1M token context window)
+    maxMemoryChars = 8000
+  } else if (isQwen3) {
+    numCtx = 65536 // 64k context window on RTX 5090
+    maxMemoryChars = 8000 // Full deep memory history for 5090
+    think = true
+  } else if (isQwen) {
+    numCtx = 16384
+    maxMemoryChars = 3500
+  } else if (isGemma4) {
+    numCtx = 16384 // Cap at 16k for fast local execution on Mac Mini
+    maxMemoryChars = 3500
+    think = true
+  }
+
   const agentMemory = require('./AgentMemory')
   const isOwner = userId === process.env.OWNER_ID
   const isDM = !guildId
-  const memorySummary = (isOwner && isDM) ? agentMemory.getSummary('all') : agentMemory.getSummary(guildId)
+  const memorySummary = (isOwner && isDM)
+    ? agentMemory.getSummary('all', maxMemoryChars)
+    : agentMemory.getSummary(guildId, maxMemoryChars)
   const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY & ACTIVE RULES:\n${memorySummary}` : ''
   let sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`
 
@@ -286,28 +316,6 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     }
     return msg
   })
-
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
-  const remoteModel = process.env.OLLAMA_REMOTE_MODEL
-  const currentModel = (isBackup || !remoteModel) ? localModel : remoteModel
-
-  // Qwen & Gemma 4 Family Enhancements:
-  const isQwen = currentModel.toLowerCase().includes('qwen')
-  const isQwen3 = currentModel.toLowerCase().includes('qwen3')
-  const isGemma4 = currentModel.toLowerCase().includes('gemma4')
-
-  let numCtx = 8192
-  let think = false
-
-  if (isQwen3) {
-    numCtx = 16384 // Cap at 16k to keep KV cache fully in VRAM (32GB 5090)
-    think = true
-  } else if (isQwen) {
-    numCtx = 16384
-  } else if (isGemma4) {
-    numCtx = 16384 // Cap at 16k for fast local execution on Mac Mini
-    think = true
-  }
 
   try {
     const result = await queryOllama('/api/chat', {

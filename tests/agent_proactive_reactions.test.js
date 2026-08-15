@@ -112,7 +112,7 @@ describe('AgentLoop - Proactive Presence', () => {
  
     expect(msg.react).toHaveBeenCalledWith('🔥')
     expect(mockChannel.send).toHaveBeenCalledWith(
-      expect.stringContaining('incredible')
+      expect.objectContaining({ content: expect.stringContaining('incredible') })
     )
   })
 
@@ -161,7 +161,10 @@ describe('AgentLoop - Proactive Presence', () => {
 
     expect(gifService.getGif).toHaveBeenCalledWith('congratulations', guildId)
     expect(mockChannel.send).toHaveBeenCalledWith(
-      expect.stringContaining('Congratulations!\nhttps://giphy.com/mock-proactive-reaction.gif')
+      expect.objectContaining({
+        content: 'Congratulations!',
+        embeds: [expect.objectContaining({ data: expect.objectContaining({ image: { url: 'https://giphy.com/mock-proactive-reaction.gif' } }) })]
+      })
     )
   })
 
@@ -228,7 +231,7 @@ describe('AgentLoop - Proactive Presence', () => {
  
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
  
-    expect(targetMsg.reply).toHaveBeenCalledWith(expect.stringContaining('carbonara'))
+    expect(targetMsg.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('carbonara') }))
     expect(mockChannel.send).not.toHaveBeenCalled()
   })
  
@@ -260,7 +263,7 @@ describe('AgentLoop - Proactive Presence', () => {
  
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
  
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Interesting point!'))
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Interesting point!') }))
   })
  
   test('standard interjection without replyToId posts to the channel', async () => {
@@ -285,7 +288,7 @@ describe('AgentLoop - Proactive Presence', () => {
  
     await agentLoop._evaluateProactivePresence(mockChannel, guildId)
  
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('standard message'))
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('standard message') }))
   })
  
   test('injects memory rules and memory compliance instructions into the prompt', async () => {

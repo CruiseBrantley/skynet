@@ -200,6 +200,29 @@ function getUpdateEmbed (app, stages, error = null, finalResult = null) {
   return embed
 }
 
+function parseStartupActivity (logOutput) {
+  if (!logOutput) return 'Initializing server environment...'
+  if (logOutput.includes('IsoRegionWorker') || logOutput.includes('DataChunk')) {
+    return '🔨 Building World / IsoRegion Index'
+  }
+  if (logOutput.includes('LOADING ASSETS')) {
+    return '📦 Loading Game Assets'
+  }
+  if (logOutput.includes('Waiting for response from Steam servers')) {
+    return '🌐 Connecting to Steam Services'
+  }
+  if (logOutput.includes('Enter new administrator password')) {
+    return '🔑 Waiting for Admin Password Input'
+  }
+  if (logOutput.includes('SERVER STARTED') || logOutput.includes('Server started')) {
+    return '✅ Server Started'
+  }
+
+  const lines = logOutput.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('at ') && !l.startsWith('Stack trace'))
+  const lastLine = lines[lines.length - 1] || 'Initializing server environment...'
+  return lastLine.length > 80 ? lastLine.substring(0, 77) + '...' : lastLine
+}
+
 async function fetchStatusPayload (app) {
   const hostIp = SSH_HOST.split('@')[1]
   const info = app.queryPort ? await getServerInfo(hostIp, app.queryPort) : null
@@ -207,19 +230,35 @@ async function fetchStatusPayload (app) {
   // Get resource usage via SSH
   let resources = 'Unknown'
   try {
-    const resOutput = await runSSH(`tasklist /FI "IMAGENAME eq ${app.processName}" /NH /FO CSV`)
-    if (resOutput && resOutput.toLowerCase().includes(app.processName.toLowerCase())) {
-      const parts = resOutput.split('","')
-      if (parts.length >= 5) {
-        resources = parts[4].replace('"', '').trim()
+    const resOutput = await runSSH('tasklist /FO CSV')
+    if (resOutput) {
+      const lines = resOutput.split('\n')
+      const matchLine = lines.find(l => l.toLowerCase().includes(app.processName.toLowerCase()))
+      if (matchLine) {
+        const parts = matchLine.split('","')
+        if (parts.length >= 5) {
+          resources = parts[4].replace('"', '').trim()
+        } else {
+          resources = 'Running'
+        }
       } else {
-        resources = 'Running'
+        resources = 'Offline'
       }
     } else {
       resources = 'Offline'
     }
   } catch (resErr) {
     logger.warn(`Failed to get resource usage for ${app.name}: ${resErr.message}`)
+  }
+
+  let activity = null
+  if (!info && resources !== 'Offline' && app.logCommand) {
+    try {
+      const logOutput = await runSSH(app.logCommand)
+      activity = parseStartupActivity(logOutput)
+    } catch (logErr) {
+      logger.warn(`Failed to fetch log activity for ${app.name}: ${logErr.message}`)
+    }
   }
 
   let displayVersion = info ? info.version : null
@@ -235,7 +274,7 @@ async function fetchStatusPayload (app) {
 
   const embed = new EmbedBuilder()
     .setTitle(`${app.name} Server Status`)
-    .setColor(info ? 0x00FF00 : 0xFF0000)
+    .setColor(info ? 0x00FF00 : (resources !== 'Offline' ? 0xFFA500 : 0xFF0000))
     .setTimestamp()
 
   if (info) {
@@ -248,14 +287,21 @@ async function fetchStatusPayload (app) {
       { name: 'VAC Secure', value: info.vac ? '🛡️ Yes' : '❌ No', inline: true }
     )
     if (info.name) embed.setDescription(`**Server Name**: ${info.name}`)
+  } else if (resources !== 'Offline') {
+    embed.addFields(
+      { name: 'Status', value: '🟡 Starting Up...', inline: true },
+      { name: 'Process', value: '⚙️ Running', inline: true },
+      { name: 'Memory', value: `\`${resources}\``, inline: true }
+    )
+    if (activity) {
+      embed.addFields({ name: 'Current Step', value: `\`${activity}\``, inline: false })
+    }
+    embed.setDescription('**Server is initializing** — game ports will open once startup completes.')
   } else {
     embed.addFields(
       { name: 'Status', value: '🔴 Offline', inline: true },
-      { name: 'Process', value: resources === 'Offline' ? '❌ Not Running' : '⚠️ Unresponsive', inline: true }
+      { name: 'Process', value: '❌ Not Running', inline: true }
     )
-    if (resources !== 'Offline') {
-      embed.addFields({ name: 'Memory', value: `\`${resources}\``, inline: true })
-    }
   }
 
   const row = new ActionRowBuilder()

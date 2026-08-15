@@ -21,7 +21,7 @@ describe('Built-in Action - send_gif', () => {
     await action.execute(null, mockChannel, { search_query: 'happy reaction' })
 
     expect(gifService.getGif).toHaveBeenCalledWith('happy reaction', 'guild-123')
-    expect(mockChannel.send).toHaveBeenCalledWith({ content: 'https://giphy.com/happy.gif' })
+    expect(mockChannel.send).toHaveBeenCalledWith({ embeds: [expect.objectContaining({ data: expect.objectContaining({ image: { url: 'https://giphy.com/happy.gif' } }) })] })
   })
 
   test('should handle missing parameters and fallback to happy query', async () => {
@@ -30,7 +30,7 @@ describe('Built-in Action - send_gif', () => {
     await action.execute(null, mockChannel, {})
 
     expect(gifService.getGif).toHaveBeenCalledWith('happy', 'guild-123')
-    expect(mockChannel.send).toHaveBeenCalledWith({ content: 'https://giphy.com/happy-fallback.gif' })
+    expect(mockChannel.send).toHaveBeenCalledWith({ embeds: [expect.objectContaining({ data: expect.objectContaining({ image: { url: 'https://giphy.com/happy-fallback.gif' } }) })] })
   })
 
   test('should handle null response from service (disabled)', async () => {

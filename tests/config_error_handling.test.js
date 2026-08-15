@@ -29,33 +29,31 @@ describe('Config Error Handling & Branching', () => {
     test('should skip Level 0 when OLLAMA_REMOTE_HOST is missing', async () => {
       const originalHost = process.env.OLLAMA_REMOTE_HOST
       delete process.env.OLLAMA_REMOTE_HOST
-      process.env.GEMINI_API_KEY = 'test-key'
+      process.env.OLLAMA_LOCAL_MODEL = 'gemma4:e4b'
 
-      axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
+      axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
 
       const result = await queryOllama('/api/chat', { messages: [] })
 
-      expect(result.message.content).toBe('gemini')
-      // Ensure no connection attempt to an undefined host
-      expect(net.Socket).not.toHaveBeenCalled()
+      expect(result.message.content).toBe('local')
+      const connectCalls = mockSocket.connect.mock.calls
+      const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
+      expect(remoteConnects.length).toBe(0)
 
       process.env.OLLAMA_REMOTE_HOST = originalHost
     })
 
-    test('should skip Level 1 when GEMINI_API_KEY is missing and drop to Level 2', async () => {
-      const originalKey = process.env.GEMINI_API_KEY
-      delete process.env.GEMINI_API_KEY
-
-      // Start at Level 1
-      // mock Level 2 (Local) success
-      axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
+    test('should skip Level 1 when Local Mac fails and drop to Level 2 (Gemini)', async () => {
+      // Start at Level 1 (Local Mac) - mock failure for Level 1 and success for Level 2 (Gemini)
+      process.env.GEMINI_API_KEY = 'test-key'
+      axios.post
+        .mockRejectedValueOnce(new Error('Local mac offline'))
+        .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
       const result = await queryOllama('/api/chat', { messages: [] }, 1)
 
-      expect(result.message.content).toBe('local')
-      expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('127.0.0.1:11434'), expect.any(Object), expect.any(Object))
-
-      if (originalKey) process.env.GEMINI_API_KEY = originalKey
+      expect(result.message.content).toBe('gemini')
+      expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('generativelanguage.googleapis.com'), expect.any(Object), expect.any(Object))
     })
   })
 

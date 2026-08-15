@@ -1,3 +1,4 @@
+const { EmbedBuilder } = require('discord.js')
 const gifService = require('../chat/gifService')
 const logger = require('../../logger')
 
@@ -14,7 +15,8 @@ module.exports = {
     try {
       const gifUrl = await gifService.getGif(query, guildId)
       if (gifUrl) {
-        await channel.send({ content: gifUrl })
+        const embed = new EmbedBuilder().setImage(gifUrl).setColor(0x3498db)
+        await channel.send({ embeds: [embed] })
       } else {
         logger.info(`send_gif action: GIF search returned null (possibly disabled for guild ${guildId}).`)
       }

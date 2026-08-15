@@ -17,6 +17,7 @@ const mentionResolver = require('../util/MentionResolver')
 const { getParam } = require('../util/commandHelper')
 
 const { getBasePrompt } = require('../util/systemPrompt')
+const { markChannelInFlight, clearChannelInFlight } = require('../util/inFlightChannels')
 
 const channelHistories = {}
 const channelQueues = new Map() // Per-channel promise chains for sequential processing
@@ -52,6 +53,12 @@ async function execute (interaction, database) {
   // Chain the new request
   const currentTurn = (async () => {
     await previousTurn.catch(() => {}) // Wait for previous turn, ignore its errors
+    markChannelInFlight(channelId)
+
+    const msgIdToMark = interaction.triggeringMessageId || interaction.id
+    if (msgIdToMark && interaction.guildId && agentMemory && typeof agentMemory.set === 'function') {
+      agentMemory.set(`proactive.last_msg.${channelId}`, msgIdToMark, 15 / (60 * 24), interaction.guildId)
+    }
 
     try {
       const sharedState = {
@@ -326,6 +333,8 @@ async function execute (interaction, database) {
       } catch (e) {
         await interaction.channel.send(`There was an error communicating with the ${botName} AI Core.`)
       }
+    } finally {
+      clearChannelInFlight(channelId)
     }
   })()
 

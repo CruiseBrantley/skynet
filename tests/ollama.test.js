@@ -38,7 +38,7 @@ describe('Ollama Fallback Hierarchy', () => {
     expect(result.message.content).toBe('remote')
   })
 
-  test('should failover to Level 1 (Gemini) when Remote is offline', async () => {
+  test('should failover to Level 1 (Local Mac) when Remote is offline', async () => {
     // Mock remote port as closed
     mockSocket.connect.mockImplementation((p, h, cb) => {
       if (p === 11434 && h === 'remote-host') return // fail
@@ -48,37 +48,39 @@ describe('Ollama Fallback Hierarchy', () => {
       if (event === 'error' || event === 'timeout') setImmediate(cb)
     })
 
-    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
-    const result = await queryOllama('/api/chat', { messages: [] })
-    expect(result.message.content).toBe('gemini')
-  })
-
-  test('should failover to Level 2 (Local) when Gemini fails', async () => {
-    // Mock remote port as closed
-    mockSocket.connect.mockImplementation((p, h, cb) => {
-      if (p === 11434 && h === 'remote-host') return // fail
-      if (cb) setImmediate(cb)
-    })
-    mockSocket.once.mockImplementation((event, cb) => {
-      if (event === 'error' || event === 'timeout') setImmediate(cb)
-    })
-
-    axios.post.mockRejectedValueOnce(new Error('Gemini error'))
     axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
-
     const result = await queryOllama('/api/chat', { messages: [] })
     expect(result.message.content).toBe('local')
   })
 
-  test('should skip Level 0 entirely if OLLAMA_REMOTE_HOST is missing', async () => {
-    delete process.env.OLLAMA_REMOTE_HOST
+  test('should failover to Level 2 (Gemini) when Local Mac fails', async () => {
+    // Mock remote port as closed
+    mockSocket.connect.mockImplementation((p, h, cb) => {
+      if (p === 11434 && h === 'remote-host') return // fail
+      if (cb) setImmediate(cb)
+    })
+    mockSocket.once.mockImplementation((event, cb) => {
+      if (event === 'error' || event === 'timeout') setImmediate(cb)
+    })
+
+    axios.post.mockRejectedValueOnce(new Error('Local error'))
     axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
-
     expect(result.message.content).toBe('gemini')
-    // Should NOT have attempted a port check for remote host that is undefined
-    expect(net.Socket).not.toHaveBeenCalled()
+  })
+
+  test('should skip Level 0 entirely if OLLAMA_REMOTE_HOST is missing', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+    axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
+
+    const result = await queryOllama('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('local')
+    // Any socket checks should be against localhost, never the remote host
+    const connectCalls = mockSocket.connect.mock.calls
+    const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
+    expect(remoteConnects.length).toBe(0)
   })
 })
 
