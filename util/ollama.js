@@ -338,9 +338,41 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
   }
 }
 
+/**
+ * Helper to check current active model tier and recommended prompt/context limits.
+ */
+async function getActiveModelCapabilities () {
+  const remoteHost = process.env.OLLAMA_REMOTE_HOST
+  const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
+  const remoteModel = process.env.OLLAMA_REMOTE_MODEL
+
+  const isRemoteOnline = remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))
+
+  if (isRemoteOnline) {
+    return {
+      tier: 'remote_5090',
+      modelName: remoteModel,
+      maxContextTokens: 65536,
+      maxDigestMessages: 100,
+      supportsDeepResearch: true
+    }
+  }
+
+  // Local Mac Fallback (Level 1)
+  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  return {
+    tier: 'local_mac',
+    modelName: localModel,
+    maxContextTokens: 16384,
+    maxDigestMessages: 25,
+    supportsDeepResearch: false // Simplified single-pass search
+  }
+}
+
 module.exports = {
   queryOllama,
   queryOllamaWithContext,
   checkOllamaOnline,
-  queryLocalOrRemote
+  queryLocalOrRemote,
+  getActiveModelCapabilities
 }
