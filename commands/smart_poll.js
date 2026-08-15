@@ -1,6 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 const logger = require('../logger')
 
 module.exports = {
@@ -15,16 +14,9 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    const guildId = interaction.guildId
-    if (!isFeatureEnabled('smart_poll', guildId)) {
-      return interaction.reply({
-        content: '❌ The `/smart-poll` feature is currently disabled on this server. Server admins can enable it using `/skynet-config toggle feature:smart_poll enabled:true`.',
-        ephemeral: true
-      })
-    }
-
     await interaction.deferReply()
     const customTopic = interaction.options.getString('topic')
+    const guildId = interaction.guildId
 
     try {
       const caps = await getActiveModelCapabilities()
@@ -70,14 +62,12 @@ module.exports = {
       }
 
       if (!pollData || !pollData.question || !Array.isArray(pollData.options) || pollData.options.length < 2) {
-        // Fallback default if model returned invalid JSON
         pollData = {
           question: customTopic || `Community Vote: #${interaction.channel.name}`,
           options: ['Option A (Yes)', 'Option B (No)']
         }
       }
 
-      // Ensure options are max 55 chars and max 5 options (Discord poll limits)
       const cleanQuestion = pollData.question.substring(0, 250)
       const cleanAnswers = pollData.options
         .slice(0, 5)
@@ -85,7 +75,6 @@ module.exports = {
 
       logger.info(`smart-poll: Creating Discord Poll "${cleanQuestion}" with ${cleanAnswers.length} options`)
 
-      // Delete deferred reply and post native poll in channel
       await interaction.deleteReply().catch(() => {})
 
       await interaction.channel.send({

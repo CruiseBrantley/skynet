@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 const logger = require('../logger')
 
 module.exports = {
@@ -23,15 +22,8 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    const guildId = interaction.guildId
-    if (!isFeatureEnabled('tldr', guildId)) {
-      return interaction.reply({
-        content: '❌ The `/tldr` channel digest feature is currently disabled on this server. Server admins can enable it using `/skynet-config toggle feature:tldr enabled:true`.',
-        ephemeral: true
-      })
-    }
-
     await interaction.deferReply()
+    const guildId = interaction.guildId
 
     try {
       const caps = await getActiveModelCapabilities()

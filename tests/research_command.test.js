@@ -1,11 +1,9 @@
 const researchCmd = require('../commands/research')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 const ActionExecutor = require('../util/ActionExecutor')
 
 jest.mock('../logger')
 jest.mock('../util/ollama')
-jest.mock('../util/config_manager')
 jest.mock('../util/ActionExecutor')
 
 describe('commands/research', () => {
@@ -13,7 +11,6 @@ describe('commands/research', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    isFeatureEnabled.mockReturnValue(true)
     getActiveModelCapabilities.mockResolvedValue({
       tier: 'remote_5090',
       supportsDeepResearch: true
@@ -37,16 +34,6 @@ describe('commands/research', () => {
     queryOllamaWithContext.mockResolvedValue({
       message: { content: 'Executive Summary: Switch A is best.' }
     })
-  })
-
-  test('blocks execution when feature is disabled for guild', async () => {
-    isFeatureEnabled.mockReturnValue(false)
-    await researchCmd.execute(mockInteraction)
-
-    expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('disabled'),
-      ephemeral: true
-    }))
   })
 
   test('executes web search and posts research embed', async () => {

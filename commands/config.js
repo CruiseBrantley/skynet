@@ -1,37 +1,55 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js')
-const { getGuildConfig, setFeatureEnabled, SUPPORTED_FEATURES } = require('../util/config_manager')
+const { getGuildProactiveConfig, setProactiveSetting } = require('../util/config_manager')
 const logger = require('../logger')
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config')
-    .setDescription('Manage Skynet bot configuration and AI feature toggles')
+    .setDescription('Configure autonomous proactive AI behavior and channel settings')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(subcommand =>
       subcommand
         .setName('status')
-        .setDescription('View active AI feature toggles for this server')
+        .setDescription('View active proactive AI settings and channel whitelists')
     )
     .addSubcommand(subcommand =>
       subcommand
-        .setName('toggle')
-        .setDescription('Enable or disable a specific AI feature')
-        .addStringOption(option =>
+        .setName('proactive')
+        .setDescription('Configure autonomous chat presence and reactions')
+        .addBooleanOption(option =>
           option
-            .setName('feature')
-            .setDescription('The AI feature to toggle')
+            .setName('presence')
+            .setDescription('Enable or disable autonomous chat interjections')
             .setRequired(true)
-            .addChoices(
-              { name: 'Channel Digest (/tldr)', value: 'tldr' },
-              { name: 'Deep Web Research (/research)', value: 'research' },
-              { name: 'Smart Discussion Polls (/smart-poll)', value: 'smart_poll' }
-            )
         )
         .addBooleanOption(option =>
           option
+            .setName('reactions')
+            .setDescription('Enable or disable automatic GIF/emoji reactions')
+            .setRequired(false)
+        )
+        .addStringOption(option =>
+          option
+            .setName('channels')
+            .setDescription('Allowed channels (e.g. "all", or comma-separated "#general, #gaming")')
+            .setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('patch-notes')
+        .setDescription('Configure proactive game patch notes digests')
+        .addBooleanOption(option =>
+          option
             .setName('enabled')
-            .setDescription('Set feature state (true = enabled, false = disabled)')
+            .setDescription('Enable or disable proactive game patch digests')
             .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName('channels')
+            .setDescription('Target channels for patch notes (e.g. "#game-news, #patch-notes")')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -73,43 +91,73 @@ module.exports = {
     const guildId = interaction.guildId
 
     if (subcommand === 'status') {
-      const config = getGuildConfig(guildId)
+      const config = getGuildProactiveConfig(guildId)
       const embed = new EmbedBuilder()
-        .setTitle('⚙️ Skynet AI Feature Configuration')
+        .setTitle('⚙️ Skynet Proactive AI Configuration')
         .setColor(0x0099ff)
-        .setDescription(guildId ? 'Current AI feature states for this server:' : 'AI features in Direct Messages are always active.')
+        .setDescription(guildId ? 'Active autonomous background settings for this server:' : 'Autonomous settings in DMs are using defaults.')
         .setTimestamp()
 
       for (const [key, item] of Object.entries(config)) {
-        const icon = item.enabled ? '✅ Enabled' : '❌ Disabled'
-        embed.addFields({ name: item.name, value: `${icon} (\`key: ${key}\`)`, inline: false })
+        let valDisplay = String(item.value)
+        if (typeof item.value === 'boolean') {
+          valDisplay = item.value ? '✅ Enabled' : '❌ Disabled'
+        } else if (!valDisplay.trim()) {
+          valDisplay = '*None configured*'
+        }
+        embed.addFields({ name: item.name, value: `${valDisplay} (\`${key}\`)`, inline: false })
       }
 
       return interaction.reply({ embeds: [embed], ephemeral: true })
     }
 
-    if (subcommand === 'toggle') {
+    if (subcommand === 'proactive') {
       if (!guildId) {
-        return interaction.reply({ content: 'Feature toggles are server-specific and cannot be modified in DMs.', ephemeral: true })
+        return interaction.reply({ content: 'Proactive settings are server-specific.', ephemeral: true })
       }
 
-      const feature = interaction.options.getString('feature')
+      const presence = interaction.options.getBoolean('presence')
+      const reactions = interaction.options.getBoolean('reactions')
+      const channels = interaction.options.getString('channels')
+
+      setProactiveSetting('proactive_presence', presence, guildId)
+      if (reactions !== null && reactions !== undefined) {
+        setProactiveSetting('proactive_reactions', reactions, guildId)
+      }
+      if (channels !== null && channels !== undefined) {
+        setProactiveSetting('proactive_channels', channels, guildId)
+      }
+
+      const chanText = channels ? `\n- Channels: \`${channels}\`` : ''
+      const reactText = reactions !== null ? `\n- Reactions: ${reactions ? '✅ Enabled' : '❌ Disabled'}` : ''
+
+      logger.info(`config: User ${interaction.user.username} set proactive presence to ${presence} in guild ${guildId}`)
+      return interaction.reply({
+        content: `⚙️ Updated proactive chat presence for this server:\n- Interjections: ${presence ? '✅ Enabled' : '❌ Disabled'}${reactText}${chanText}`,
+        ephemeral: true
+      })
+    }
+
+    if (subcommand === 'patch-notes') {
+      if (!guildId) {
+        return interaction.reply({ content: 'Patch notes settings are server-specific.', ephemeral: true })
+      }
+
       const enabled = interaction.options.getBoolean('enabled')
+      const channels = interaction.options.getString('channels')
 
-      try {
-        setFeatureEnabled(feature, enabled, guildId)
-        const featureMeta = SUPPORTED_FEATURES[feature]
-        const stateText = enabled ? '✅ **Enabled**' : '❌ **Disabled**'
-
-        logger.info(`config: User ${interaction.user.username} set ${feature} to ${enabled} in guild ${guildId}`)
-        return interaction.reply({
-          content: `${stateText} feature **${featureMeta.name}** for this server.`,
-          ephemeral: true
-        })
-      } catch (err) {
-        logger.error(`config error: ${err.message}`)
-        return interaction.reply({ content: `Failed to update configuration: ${err.message}`, ephemeral: true })
+      setProactiveSetting('game_patch_notes', enabled, guildId)
+      if (channels !== null && channels !== undefined) {
+        setProactiveSetting('patch_channels', channels, guildId)
       }
+
+      const chanText = channels ? `\n- Target Channels: \`${channels}\`` : ''
+
+      logger.info(`config: User ${interaction.user.username} set game_patch_notes to ${enabled} in guild ${guildId}`)
+      return interaction.reply({
+        content: `⚙️ Updated proactive game patch notes for this server:\n- Status: ${enabled ? '✅ Enabled' : '❌ Disabled'}${chanText}`,
+        ephemeral: true
+      })
     }
 
     if (subcommand === 'gif') {

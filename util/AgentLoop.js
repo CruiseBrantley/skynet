@@ -106,6 +106,8 @@ class AgentLoop {
     if (!snapshot.exists()) return
     const guildSettings = snapshot.val()
 
+    const { isProactiveChannelAllowed } = require('./config_manager')
+
     for (const guildId in guildSettings) {
       const settings = guildSettings[guildId] || {}
       const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? false
@@ -118,8 +120,9 @@ class AgentLoop {
       const channels = await guild.channels.fetch()
       const textChannels = channels.filter(c =>
         c.isTextBased() && !c.isThread() && c.viewable &&
-                c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
-                c.lastMessageId
+        c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
+        c.lastMessageId &&
+        isProactiveChannelAllowed(guildId, c.id, c.name)
       )
 
       // Pick the 3 channels with the most recent activity.

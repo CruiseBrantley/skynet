@@ -34,15 +34,32 @@ describe('commands/config', () => {
     }))
   })
 
-  test('executes toggle subcommand', async () => {
-    mockInteraction.options.getSubcommand.mockReturnValue('toggle')
-    mockInteraction.options.getString.mockReturnValue('tldr')
-    mockInteraction.options.getBoolean.mockReturnValue(false)
+  test('executes proactive subcommand', async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue('proactive')
+    mockInteraction.options.getBoolean.mockImplementation((name) => {
+      if (name === 'presence') return true
+      if (name === 'reactions') return false
+      return null
+    })
+    mockInteraction.options.getString.mockReturnValue('general, gaming')
 
     await configCmd.execute(mockInteraction)
 
     expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('Disabled'),
+      content: expect.stringContaining('Updated proactive chat presence'),
+      ephemeral: true
+    }))
+  })
+
+  test('executes patch-notes subcommand', async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue('patch-notes')
+    mockInteraction.options.getBoolean.mockReturnValue(true)
+    mockInteraction.options.getString.mockReturnValue('#game-news')
+
+    await configCmd.execute(mockInteraction)
+
+    expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Updated proactive game patch notes'),
       ephemeral: true
     }))
   })

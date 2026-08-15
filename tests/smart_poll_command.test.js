@@ -1,17 +1,14 @@
 const smartPollCmd = require('../commands/smart_poll')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 
 jest.mock('../logger')
 jest.mock('../util/ollama')
-jest.mock('../util/config_manager')
 
 describe('commands/smart_poll', () => {
   let mockInteraction
 
   beforeEach(() => {
     jest.clearAllMocks()
-    isFeatureEnabled.mockReturnValue(true)
     getActiveModelCapabilities.mockResolvedValue({
       tier: 'remote_5090',
       maxDigestMessages: 20
@@ -50,16 +47,6 @@ describe('commands/smart_poll', () => {
         })
       }
     })
-  })
-
-  test('blocks execution when feature is disabled for guild', async () => {
-    isFeatureEnabled.mockReturnValue(false)
-    await smartPollCmd.execute(mockInteraction)
-
-    expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('disabled'),
-      ephemeral: true
-    }))
   })
 
   test('synthesizes discussion and posts native Discord poll', async () => {

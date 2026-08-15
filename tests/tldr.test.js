@@ -1,17 +1,14 @@
 const tldrCmd = require('../commands/tldr')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 
 jest.mock('../logger')
 jest.mock('../util/ollama')
-jest.mock('../util/config_manager')
 
 describe('commands/tldr', () => {
   let mockInteraction
 
   beforeEach(() => {
     jest.clearAllMocks()
-    isFeatureEnabled.mockReturnValue(true)
     getActiveModelCapabilities.mockResolvedValue({
       tier: 'remote_5090',
       maxDigestMessages: 100
@@ -44,16 +41,6 @@ describe('commands/tldr', () => {
     queryOllamaWithContext.mockResolvedValue({
       message: { content: '1. Key Topics: Chatting' }
     })
-  })
-
-  test('blocks execution when feature is disabled for guild', async () => {
-    isFeatureEnabled.mockReturnValue(false)
-    await tldrCmd.execute(mockInteraction)
-
-    expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('disabled'),
-      ephemeral: true
-    }))
   })
 
   test('fetches messages and posts channel summary embed', async () => {

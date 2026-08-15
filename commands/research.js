@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
-const { isFeatureEnabled } = require('../util/config_manager')
 const ActionExecutor = require('../util/ActionExecutor')
 const logger = require('../logger')
 
@@ -16,16 +15,9 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    const guildId = interaction.guildId
-    if (!isFeatureEnabled('research', guildId)) {
-      return interaction.reply({
-        content: '❌ The `/research` feature is currently disabled on this server. Server admins can enable it using `/skynet-config toggle feature:research enabled:true`.',
-        ephemeral: true
-      })
-    }
-
     await interaction.deferReply()
     const query = interaction.options.getString('query')
+    const guildId = interaction.guildId
 
     try {
       const caps = await getActiveModelCapabilities()
