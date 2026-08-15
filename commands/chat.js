@@ -7,6 +7,7 @@ const { queryOllamaWithContext } = require('../util/ollama')
 const logger = require('../logger')
 const agentMemory = require('../util/AgentMemory')
 const ActionExecutor = require('../util/ActionExecutor')
+const { extractKeyframes, isVideoOrGif } = require('../util/videoFrameExtractor')
 
 const { COMMAND_REGEX, SCRUB_REGEX } = require('../util/chat/constants')
 const { scrubTags } = require('../util/chat/scrubTags')
@@ -71,14 +72,25 @@ async function execute (interaction, database) {
       const rawInput = interaction.options.getString('message')
       const messageText = rawInput.replace(new RegExp(`<@!?${interaction.client.user.id}>`, 'g'), '').trim()
       const attachment = interaction.options.getAttachment('image') || (interaction.options.attachments && interaction.options.attachments.size > 0 ? interaction.options.attachments.first() : null)
-
-      let base64Image = null
-      if (attachment && attachment.contentType && attachment.contentType.startsWith('image/')) {
-        try {
-          const imageResponse = await axios.get(attachment.url, { responseType: 'arraybuffer' })
-          base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64')
-        } catch (err) {
-          logger.error(`Failed to download image: ${err.message}`)
+      let base64Images = []
+      if (attachment) {
+        const cType = attachment.contentType || ''
+        const aName = attachment.name || ''
+        if (isVideoOrGif(cType, aName, attachment.url)) {
+          try {
+            logger.info(`Extracting keyframes from video/GIF attachment: ${aName || attachment.url}`)
+            base64Images = await extractKeyframes(attachment.url, 6)
+          } catch (err) {
+            logger.error(`Failed to extract keyframes: ${err.message}`)
+          }
+        } else if (cType.startsWith('image/')) {
+          try {
+            const imageResponse = await axios.get(attachment.url, { responseType: 'arraybuffer' })
+            const base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64')
+            base64Images = [base64Image]
+          } catch (err) {
+            logger.error(`Failed to download image: ${err.message}`)
+          }
         }
       }
 
@@ -140,8 +152,8 @@ async function execute (interaction, database) {
 
       const userHandle = `@${interaction.user.username}${interaction.member?.nickname ? ` (${interaction.member.nickname})` : ''}`
       const userMessage = { role: 'user', content: `${userHandle}: ${messageText}${attachedText}` }
-      if (base64Image) {
-        userMessage.images = [base64Image]
+      if (base64Images && base64Images.length > 0) {
+        userMessage.images = base64Images
       }
       channelHistories[channelId].messages.push(userMessage)
 
