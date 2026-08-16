@@ -262,14 +262,18 @@ Available Commands for the "commands" array:
    Schema: {"command": "cancel_task", "id": "string"}
 
 Thresholds & Rules:
-- INTERJECT (HIGH BAR / ULTRA-STRICT): Default to SILENCE ("interject": null). Only interject if your contribution is genuinely beneficial (e.g. answering a direct question, providing essential technical info) or genuinely hilarious. Standard casual chatter, minor jokes, or generic comments DO NOT warrant an interjection. If not interjecting, set "interject" to null. You can mention other channels using "<#channel_id>" and include custom emojis in your text using their full markdown string (e.g. "<:emoji_name:emoji_id>").
+- INTERJECT (ULTRA-STRICT SILENCE MANDATE): Default to SILENCE ("interject": null).
+- NEVER interject for small talk, casual jokes, conversational filler, or to rephrase/summarize what users just said.
+- ONLY interject if there is a specific, unanswered technical, coding, or factual question that nobody in the channel has resolved, or if someone explicitly requests bot assistance.
+- Keep any interjection under 2 sentences, direct, and focused strictly on high substance. No circular commentary.
+- If not interjecting, set "interject" to null.
 - PROACTIVE GIFS: Use reaction GIFs sparingly via the "gif" field ONLY when directly relevant or truly funny. Never send low-quality or irrelevant GIFs.
 - REACT (STRICT): Only react to messages that are exceptionally funny, highly notable, or when a reaction adds genuine value or emphasis. Do not react to standard conversational filler. If not reacting, set "reactions" to []. You can react with standard Unicode emojis or use any custom emoji ID (Reaction ID) listed under [AVAILABLE GUILD RESOURCES].
 - REMEMBER (LENIENT): If you notice useful information, preferences, facts, or context, save it. When updating existing info, use the same key.
 - If nothing is needed, respond with:
   {"reasoning": "No action needed.", "interject": null, "reactions": [], "commands": []}
 
-ULTRA-STRICT SILENCE RULE: Most channel evaluations MUST result in no interjection ("interject": null). Keep quiet unless you have a high-impact, genuinely beneficial, or hilarious contribution. Set "interject" to null if you are unsure.
+ULTRA-STRICT SILENCE RULE: Most channel evaluations MUST result in no interjection ("interject": null). Remain completely silent unless you have an essential, high-impact, direct contribution. Set "interject" to null if you are unsure.
 MEMORY COMPLIANCE: Treat all entries in LONG-TERM MEMORY & ACTIVE RULES as absolute factual context or active behavioral instructions. If a 'behavior.*' or 'server.*' key specifies a specific style, emoji replacement, or rule, you MUST adhere to it strictly. If reacting, and an active rule specifies a custom emoji replacement, use that custom emoji instead of the standard ones.
 
 Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, 💀, 😭, 🦴, 💀, 💨, 💩, 🗿, 🙃, 😶‍🌫️, 🍌, 🧍.`
@@ -306,9 +310,14 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
       if (parsed && typeof parsed === 'object') {
         logger.info(`AgentLoop: Processed proactive decision. Reasoning: "${parsed.reasoning || 'None'}"`)
 
-        // Handle Interjection
+        // Handle Interjection with channel cooldown (1 hour minimum between autonomous chatter)
         const textEnabled = settings.proactive_text_enabled ?? settings.agent_enabled ?? true
-        if (parsed.interject && (parsed.interject.message || parsed.interject.gif) && textEnabled) {
+        const lastInterjectKey = `proactive.last_interject.${channel.id}`
+        const lastInterjectTime = agentMemory.get(lastInterjectKey, guildId)
+        const isCooldownActive = lastInterjectTime && (Date.now() - Number(lastInterjectTime) < 60 * 60 * 1000)
+
+        if (parsed.interject && (parsed.interject.message || parsed.interject.gif) && textEnabled && !isCooldownActive) {
+          agentMemory.set(lastInterjectKey, String(Date.now()), 1, guildId)
           let intercom = parsed.interject.message || ''
           const replyToId = parsed.interject.replyToId
           const gifQuery = parsed.interject.gif
