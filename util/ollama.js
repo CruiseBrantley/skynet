@@ -89,11 +89,14 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
         if (data.message.thinking) {
           logger.info(`Local Model [${localModel}] Thinking: ${data.message.thinking.substring(0, 150)}...`)
         }
-        if (typeof data.message.content === 'string') return data
-      } else if (data && data.response) {
+        if (typeof data.message.content === 'string' && data.message.content.trim().length > 0) return data
+        if (typeof data.message.content === 'string' && data.message.content.trim().length === 0) {
+          throw new Error(`Local Model ${localModel} produced empty content.`)
+        }
+      } else if (data && data.response && data.response.trim().length > 0) {
         return { message: { role: 'assistant', content: data.response } }
       }
-      return data
+      throw new Error(`Local Model ${localModel} returned malformed response.`)
     } catch (err) {
       logger.error(`Local Ollama fallback failed: ${err.message}. Dropping to Level 2 (Gemini).`)
       return queryOllama(endpoint, payload, 2)
@@ -186,18 +189,22 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       if (data.message.thinking) {
         logger.info(`Remote Model [${remoteModel}] Thinking from ${remoteHost}: ${data.message.thinking.substring(0, 150)}...`)
       }
-      if (typeof data.message.content === 'string') {
+      if (typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
         logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
         return data
       }
-    } else if (data && data.response) {
+      if (typeof data.message.content === 'string' && data.message.content.trim().length === 0) {
+        logger.warn(`Remote Model [${remoteModel}] returned empty content string. Falling back to Level 1.`)
+        throw new Error(`Remote Model ${remoteModel} produced empty content.`)
+      }
+    } else if (data && data.response && data.response.trim().length > 0) {
       logger.info(`queryOllama: Level 0 Legacy Success from ${remoteHost} (Mapped to Chat)`)
       return { message: { role: 'assistant', content: data.response } }
     }
 
-    throw new Error('Malformed Ollama response: Missing both message.content and response fields.')
+    throw new Error('Malformed Ollama response: Missing valid message.content or response fields.')
   } catch (err) {
-    logger.info(`Primary Ollama failed or malformed, falling back to Gemini: ${err.message}`)
+    logger.info(`Primary Ollama failed or returned empty, falling back to Level 1: ${err.message}`)
     return queryOllama(endpoint, payload, 1)
   }
 }
