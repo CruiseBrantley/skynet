@@ -330,6 +330,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
       think,
       options: {
         num_ctx: numCtx,
+        num_predict: 4096,
         temperature: 0.3,
         top_k: 40,
         top_p: 0.9
