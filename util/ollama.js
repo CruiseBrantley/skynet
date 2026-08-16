@@ -235,6 +235,9 @@ async function queryLocalOrRemote (endpoint, payload) {
     if (!payload.options.num_ctx || payload.options.num_ctx < numCtx) {
       payload.options.num_ctx = numCtx
     }
+    if (payload.options.num_predict === undefined) {
+      payload.options.num_predict = -1
+    }
   }
 
   if (remoteHost && remoteModel) {
@@ -330,7 +333,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
       think,
       options: {
         num_ctx: numCtx,
-        num_predict: 4096,
+        num_predict: -1, // -1 in Ollama = unlimited generation (runs until natural EOS)
         temperature: 0.3,
         top_k: 40,
         top_p: 0.9
