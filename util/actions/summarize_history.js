@@ -41,11 +41,14 @@ ${historyText}`
 
       if (result && result.message && result.message.content) {
         const summary = result.message.content.trim()
+        const { formatForEmbed } = require('../discordFormatter')
+        const cleanSummary = formatForEmbed(summary, 4000)
+
         // Send as an embed for better visual quality
         const { EmbedBuilder } = require('discord.js')
         const embed = new EmbedBuilder()
           .setTitle(`📝 Summary: Last ${count} Messages`)
-          .setDescription(summary)
+          .setDescription(cleanSummary)
           .setColor('#3498db')
           .setFooter({ text: `Focus: ${topic || 'General Context'}` })
 

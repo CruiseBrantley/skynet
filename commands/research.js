@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
+const { formatForEmbed } = require('../util/discordFormatter')
 const ActionExecutor = require('../util/ActionExecutor')
 const logger = require('../logger')
 
@@ -43,10 +44,14 @@ module.exports = {
         '1. Executive Summary & Overview\n' +
         '2. Technical Details & Key Specifications\n' +
         '3. Pros / Cons / Recommendations\n' +
-        '4. Key Sources / References'
+        '4. Key Sources / References\n\n' +
+        'CRITICAL DISCORD FORMATTING INSTRUCTIONS:\n' +
+        '- Keep total length under 3000 characters.\n' +
+        '- Use bullet lists (- **Item**: Details) instead of ASCII/Markdown tables.\n' +
+        '- Use ### or bold text for section titles (NEVER use large # titles).'
 
       const messages = [
-        { role: 'system', content: 'You are Skynet Autonomous Research Specialist. Provide objective, well-structured research reports.' },
+        { role: 'system', content: 'You are Skynet Autonomous Research Specialist. Provide objective, well-structured research reports formatted strictly for Discord.' },
         { role: 'user', content: prompt }
       ]
 
@@ -55,13 +60,15 @@ module.exports = {
         userId: interaction.user.id
       })
 
-      const reportText = result?.message?.content?.trim() || 'Failed to generate research report.'
+      const rawReportText = result?.message?.content?.trim() || 'Failed to generate research report.'
+      const cleanReport = formatForEmbed(rawReportText, 4000)
+
       const tierBadge = caps.tier === 'remote_5090' ? 'Qwen 3.8 27B (Deep Search)' : 'Gemma 4 Local (Quick Pass)'
 
       const embed = new EmbedBuilder()
         .setTitle(`🔍 Research Report: ${query.length > 50 ? query.substring(0, 50) + '...' : query}`)
         .setColor(0x3498db)
-        .setDescription(reportText.length > 4000 ? reportText.substring(0, 4000) + '\n...(truncated)' : reportText)
+        .setDescription(cleanReport)
         .setFooter({ text: `Engine: ${tierBadge}` })
         .setTimestamp()
 

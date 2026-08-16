@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
+const { formatForEmbed } = require('../util/discordFormatter')
 const logger = require('../logger')
 
 module.exports = {
@@ -53,10 +54,14 @@ module.exports = {
         '1. Key Topics & Discussion Highlights\n' +
         '2. Decisions & Action Items (if any)\n' +
         '3. Notable Links or Media Mentioned (if any)\n\n' +
+        'CRITICAL DISCORD FORMATTING INSTRUCTIONS:\n' +
+        '- Keep total length under 2500 characters.\n' +
+        '- Use bullet lists (- **Topic**: Details) instead of ASCII/Markdown tables.\n' +
+        '- Use ### or bold text for section titles (NEVER use large # titles).\n\n' +
         `Channel History (${rawMessages.length} messages):\n\`\`\`\n${formattedChat}\n\`\`\``
 
       const messages = [
-        { role: 'system', content: 'You are Skynet Channel Analyst. Produce structured, helpful summaries without fluff.' },
+        { role: 'system', content: 'You are Skynet Channel Analyst. Produce structured, helpful summaries strictly formatted for Discord without fluff.' },
         { role: 'user', content: prompt }
       ]
 
@@ -65,7 +70,8 @@ module.exports = {
         userId: interaction.user.id
       })
 
-      const summaryText = result?.message?.content?.trim() || 'Failed to generate channel summary.'
+      const rawSummaryText = result?.message?.content?.trim() || 'Failed to generate channel summary.'
+      const cleanSummary = formatForEmbed(rawSummaryText, 4000)
 
       const tierBadge = caps.tier === 'remote_5090'
         ? `Qwen 3.8 27B (${rawMessages.length} msgs analyzed)`
@@ -74,7 +80,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle(`📜 Channel Digest: #${interaction.channel.name}`)
         .setColor(0x00ae86)
-        .setDescription(summaryText.length > 4000 ? summaryText.substring(0, 4000) + '\n...(truncated)' : summaryText)
+        .setDescription(cleanSummary)
         .setFooter({ text: `Engine: ${tierBadge}` })
         .setTimestamp()
 

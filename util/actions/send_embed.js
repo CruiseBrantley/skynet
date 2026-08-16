@@ -1,4 +1,5 @@
 const { EmbedBuilder } = require('discord.js')
+const { formatForEmbed } = require('../discordFormatter')
 
 const COLOR_MAP = {
   blue: 0x5865F2,
@@ -35,9 +36,12 @@ module.exports = {
       ? (COLOR_MAP[params.color.toLowerCase()] ?? parseInt(params.color.replace('#', ''), 16) ?? 0x5865F2)
       : (params.color ?? 0x5865F2)
 
+    const rawDescription = params.description || params.content || ''
+    const cleanDescription = formatForEmbed(rawDescription, 4000)
+
     const embed = new EmbedBuilder()
       .setTitle((params.title || '').substring(0, 256) || 'Skynet Notification')
-      .setDescription((params.description || params.content || '').substring(0, 4096))
+      .setDescription(cleanDescription)
       .setColor(color)
       .setTimestamp()
 

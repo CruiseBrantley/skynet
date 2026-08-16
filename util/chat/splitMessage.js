@@ -1,10 +1,14 @@
+const { convertMarkdownTables } = require('../discordFormatter')
+
 function splitMessage (text) {
+  if (!text) return []
+  const sanitizedText = convertMarkdownTables(text)
   const chunks = []
   let currentChunk = ''
   let inCodeBlock = false
   let codeBlockLang = ''
 
-  const lines = text.split('\n')
+  const lines = sanitizedText.split('\n')
   for (const line of lines) {
     if (line.startsWith('```')) {
       inCodeBlock = !inCodeBlock
