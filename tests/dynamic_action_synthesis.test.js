@@ -72,7 +72,7 @@ describe('Dynamic Action Synthesis & Self-Healing Integration', () => {
       expect.arrayContaining([
         expect.objectContaining({
           role: 'system',
-          content: expect.stringContaining('Successfully created and registered dynamic action "flip_coin"')
+          content: expect.stringContaining('Successfully created and registered internal action "flip_coin"')
         })
       ])
     )
@@ -122,6 +122,72 @@ describe('Dynamic Action Synthesis & Self-Healing Integration', () => {
     expect(deleteSpy).toHaveBeenCalledWith('flip_coin')
 
     deleteSpy.mockRestore()
+  })
+
+  test('creates a top-level slash command via create_slash_command in chat', async () => {
+    const commandManager = require('../util/commandManager')
+    const createSpy = jest.spyOn(commandManager, 'createSlashCommand').mockResolvedValue({
+      success: true,
+      message: 'Created live on Discord'
+    })
+
+    const replyContent = '<<<RUN_COMMAND: {"command": "create_slash_command", "name": "roll", "description": "Roll dice", "code": "await interaction.reply(\'Rolled 20\');"}>>>'
+
+    await processor.process({
+      interaction: mockInteraction,
+      database: null,
+      channelHistory: mockChannelHistory,
+      replyContent,
+      sharedState: mockSharedState,
+      ollamaContext: mockOllamaContext
+    })
+
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'roll',
+      description: 'Roll dice',
+      code: "await interaction.reply('Rolled 20');"
+    }))
+    expect(mockChannelHistory.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('Successfully created and deployed top-level slash command "/roll"')
+        })
+      ])
+    )
+
+    createSpy.mockRestore()
+  })
+
+  test('lists registered slash commands via list_slash_commands in chat', async () => {
+    const commandManager = require('../util/commandManager')
+    const listSpy = jest.spyOn(commandManager, 'listSlashCommands').mockReturnValue([
+      { name: 'roll', enabled: true },
+      { name: 'vote', enabled: false }
+    ])
+
+    const replyContent = '<<<RUN_COMMAND: {"command": "list_slash_commands"}>>>'
+
+    await processor.process({
+      interaction: mockInteraction,
+      database: null,
+      channelHistory: mockChannelHistory,
+      replyContent,
+      sharedState: mockSharedState,
+      ollamaContext: mockOllamaContext
+    })
+
+    expect(listSpy).toHaveBeenCalled()
+    expect(mockChannelHistory.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('/roll')
+        })
+      ])
+    )
+
+    listSpy.mockRestore()
   })
 
   test('actionExecutor automatically invokes selfHealing on dynamic action failure and retries', async () => {

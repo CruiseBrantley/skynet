@@ -68,7 +68,12 @@ class AutonomousCommandProcessor {
 
         // Smart Budgeting: Prevent spam of major actions within a single user request turn.
         // Whitelist minor utility commands that can naturally be multi-fired.
-        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'search', 'web_search', 'create_action', 'modify_action', 'delete_action', 'manage_command']
+        const multiFireWhitelist = [
+          'add_reaction', 'remove_reaction', 'remember', 'forget', 'search', 'web_search',
+          'create_action', 'modify_action', 'delete_action',
+          'create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands',
+          'manage_command'
+        ]
         const highImpactCommands = ['send_embed', 'send_poll', 'summarize_history']
         const visualActions = ['send_embed', 'send_poll', 'summarize_history', 'add_reaction', 'remove_reaction']
 
@@ -107,7 +112,57 @@ class AutonomousCommandProcessor {
           params = rest
         }
 
-        // Special case: Dynamic tool synthesis (create_action, modify_action, delete_action)
+        // Special case: Top-Level Discord Slash Command Management
+        if (['create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands'].includes(rawCmdName)) {
+          const commandManager = require('../commandManager')
+          const cmdName = (cmdData.name || params.name || '').trim().toLowerCase().replace(/^\/+/, '')
+          const description = cmdData.description || params.description || ''
+          const code = cmdData.code || params.code || ''
+          const botClient = interaction.client
+
+          const isOwner = interaction.user?.id === process.env.OWNER_ID
+          const isDM = !interaction.guildId
+          if (!isOwner && !isDM) {
+            channelHistory.messages.push({ role: 'system', content: '[SYSTEM: Error - Slash command management is restricted to the bot creator.]' })
+            continue
+          }
+
+          let slashResult = ''
+          if (rawCmdName === 'create_slash_command') {
+            const res = await commandManager.createSlashCommand({ name: cmdName, description, code, bot: botClient })
+            if (res.success) {
+              slashResult = `[SYSTEM: Successfully created and deployed top-level slash command "/${cmdName}" live to Discord. It is now published in Discord's slash command menu.]`
+            } else {
+              slashResult = `[SYSTEM: Failed to create slash command "/${cmdName}": ${res.error}]`
+            }
+          } else if (rawCmdName === 'disable_slash_command') {
+            const res = await commandManager.disableSlashCommand(cmdName, botClient)
+            slashResult = res.success ? `[SYSTEM: Successfully disabled slash command "/${cmdName}" and removed from Discord UI.]` : `[SYSTEM: Failed to disable "/${cmdName}": ${res.error}]`
+          } else if (rawCmdName === 'enable_slash_command') {
+            const res = await commandManager.enableSlashCommand(cmdName, botClient)
+            slashResult = res.success ? `[SYSTEM: Successfully enabled slash command "/${cmdName}" and registered on Discord.]` : `[SYSTEM: Failed to enable "/${cmdName}": ${res.error}]`
+          } else if (rawCmdName === 'list_slash_commands') {
+            const list = commandManager.listSlashCommands()
+            const active = list.filter(c => c.enabled).map(c => `/${c.name}`).join(', ')
+            const disabled = list.filter(c => !c.enabled).map(c => `/${c.name} (disabled)`).join(', ')
+            slashResult = `[SYSTEM: Active Slash Commands on Discord: ${active || 'None'}. Disabled: ${disabled || 'None'}.]`
+          }
+
+          channelHistory.messages.push({ role: 'system', content: slashResult })
+
+          // If more commands in buffer, continue; otherwise follow up with LLM
+          if (replyContent.match(COMMAND_REGEX)) {
+            logger.info('AUTONOMOUS: More commands detected after slash command management, skipping intermediate followup.')
+            continue
+          }
+
+          const followup = await this.queryOllamaWithContext([...channelHistory.messages], ollamaContext, this.botName)
+          replyContent = (replyContent + '\n' + (followup.message.content || '')).trim()
+          channelHistory.messages.push(followup.message)
+          continue
+        }
+
+        // Special case: Dynamic internal action synthesis (create_action, modify_action, delete_action)
         if (['create_action', 'modify_action', 'delete_action'].includes(rawCmdName)) {
           const actionName = (cmdData.name || params.name || '').trim().toLowerCase()
           const description = cmdData.description || params.description || ''
@@ -118,7 +173,7 @@ class AutonomousCommandProcessor {
           if (rawCmdName === 'create_action') {
             const reg = this.ActionExecutor.registerAction(actionName, description, schema, code)
             if (reg.success) {
-              synthesisResult = `[SYSTEM: Successfully created and registered dynamic action "${actionName}". Description: "${description}". You may now execute <<<RUN_COMMAND: {"command": "${actionName}", ...}>>> immediately if needed.]`
+              synthesisResult = `[SYSTEM: Successfully created and registered internal action "${actionName}". Description: "${description}". You may now execute <<<RUN_COMMAND: {"command": "${actionName}", ...}>>> immediately if needed.]`
             } else {
               synthesisResult = `[SYSTEM: Failed to create action "${actionName}": ${reg.error}]`
             }
