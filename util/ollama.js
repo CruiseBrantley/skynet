@@ -222,23 +222,12 @@ async function queryLocalOrRemote (endpoint, payload) {
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
   const timeoutMs = 120_000 // 2 min — background tasks get less priority
 
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
-  const currentModel = (remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))) ? remoteModel : localModel
-  const isQwen = currentModel.toLowerCase().includes('qwen')
-  const isQwen3 = currentModel.toLowerCase().includes('qwen3')
-  const numCtx = isQwen3 ? 65536 : (isQwen ? 65536 : 8192)
-
-  // Inject enhancements
-  if (isQwen) {
-    if (isQwen3) payload.think = true
-    if (!payload.options) payload.options = {}
-    if (!payload.options.num_ctx || payload.options.num_ctx < numCtx) {
-      payload.options.num_ctx = numCtx
-    }
-    if (payload.options.num_predict === undefined) {
-      payload.options.num_predict = -1
-    }
-  }
+  // Background agent tasks are lightweight evaluations (maintenance / NOOP checks).
+  // Disable heavy chain-of-thought thinking and cap token prediction to avoid pegging GPU.
+  if (!payload.options) payload.options = {}
+  if (!payload.options.num_ctx) payload.options.num_ctx = 8192
+  if (payload.options.num_predict === undefined) payload.options.num_predict = 256
+  if (payload.think === undefined) payload.think = false
 
   if (remoteHost && remoteModel) {
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)

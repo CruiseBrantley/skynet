@@ -10,7 +10,8 @@ class InstanceGuardian {
     this.db = database
     this.hostname = os.hostname()
     this.pid = process.pid
-    this.instanceId = `${this.hostname}_${this.pid}`
+    const cleanHostname = this.hostname.replace(/[.#$[\]]/g, '_')
+    this.instanceId = `${cleanHostname}_${this.pid}`
     this.heartbeatInterval = null
     this.instancesRef = this.db.ref('instances')
     this.HEARTBEAT_MS = 60000 // 1 minute
