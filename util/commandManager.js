@@ -163,10 +163,98 @@ async function enableSlashCommand (name, bot) {
   }
 }
 
+/**
+ * Creates and deploys a new Discord application slash command.
+ * @param {object} options
+ * @param {string} options.name - 1-32 lowercase alphanumeric characters
+ * @param {string} [options.description] - 1-100 characters description
+ * @param {string} options.code - The execute function body or complete file module.exports
+ * @param {import('discord.js').Client} [options.bot]
+ * @returns {Promise<{ success: boolean, message?: string, error?: string }>}
+ */
+async function createSlashCommand ({ name, description, code, bot }) {
+  const cleanName = (name || '').trim().toLowerCase().replace(/^\/+/, '')
+  if (!cleanName || !/^[a-z0-9_-]{1,32}$/.test(cleanName)) {
+    return { success: false, error: 'Command name must be 1–32 lowercase alphanumeric characters/hyphens/underscores.' }
+  }
+
+  if (PROTECTED_COMMANDS.has(cleanName)) {
+    return { success: false, error: `Command "/${cleanName}" is a protected core command and cannot be overwritten.` }
+  }
+
+  if (!code || typeof code !== 'string') {
+    return { success: false, error: 'Executable code is required.' }
+  }
+
+  // Security pattern scan
+  const actionExecutor = require('./ActionExecutor')
+  const forbiddenPatterns = actionExecutor.FORBIDDEN_PATTERNS || []
+  for (const pattern of forbiddenPatterns) {
+    if (pattern.test(code)) {
+      const hit = code.match(pattern)?.[0]
+      logger.warn(`commandManager: Rejected new slash command "/${cleanName}" — forbidden pattern: "${hit}"`)
+      return { success: false, error: `Forbidden operation detected: "${hit}". Only Discord.js APIs are allowed.` }
+    }
+  }
+
+  let fileContent = code.trim()
+  // If code is just a function body, wrap it in a standard SlashCommand module
+  if (!fileContent.includes('SlashCommandBuilder') && !fileContent.includes('module.exports')) {
+    const desc = (description || `Execute ${cleanName}`).substring(0, 100)
+    fileContent = `// Auto-generated slash command: ${cleanName}
+// Created: ${new Date().toISOString()}
+
+const { SlashCommandBuilder } = require('discord.js')
+
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName(${JSON.stringify(cleanName)})
+    .setDescription(${JSON.stringify(desc)}),
+  execute: async (interaction) => {
+${code.split('\n').map(l => '    ' + l).join('\n')}
+  }
+}
+`
+  }
+
+  // Validate syntax
+  try {
+    new Function('require', 'module', 'exports', fileContent) // eslint-disable-line no-new-func, no-new
+  } catch (e) {
+    return { success: false, error: `Syntax error in slash command code: ${e.message}` }
+  }
+
+  const targetPath = path.join(COMMANDS_DIR, `${cleanName}.js`)
+
+  try {
+    fs.writeFileSync(targetPath, fileContent, 'utf8')
+    try {
+      delete require.cache[require.resolve(targetPath)]
+    } catch (_) {}
+
+    const command = require(targetPath)
+    if (bot && bot.commands && 'data' in command && 'execute' in command) {
+      bot.commands.set(command.data.name, command)
+    }
+
+    const deployResult = await deploySlashCommands()
+    if (!deployResult.success) {
+      return { success: false, error: `Command written to disk but Discord registration failed: ${deployResult.error}` }
+    }
+
+    logger.info(`commandManager: Successfully created and published new slash command "/${cleanName}" to Discord.`)
+    return { success: true, message: `Successfully created and deployed new slash command "/${cleanName}" live on Discord!` }
+  } catch (err) {
+    logger.error(`commandManager: Failed to write and publish command "/${cleanName}": ${err.message}`)
+    return { success: false, error: err.message }
+  }
+}
+
 module.exports = {
   deploySlashCommands,
   listSlashCommands,
   disableSlashCommand,
   enableSlashCommand,
+  createSlashCommand,
   PROTECTED_COMMANDS
 }

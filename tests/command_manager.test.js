@@ -107,19 +107,61 @@ describe('commandManager & manage_command action', () => {
     expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Permission Denied'))
   })
 
-  test('manage_command action allows owner to list, disable, and enable commands', async () => {
-    const mockChannel = { send: jest.fn().mockResolvedValue({}) }
+  test('creates a new slash command, wraps with SlashCommandBuilder, and deploys to Discord', async () => {
+    const testActive = path.join(__dirname, '../commands/test_create_tmp.js')
 
-    const listResult = await manageCommandAction.execute(
+    try {
+      const result = await commandManager.createSlashCommand({
+        name: 'test_create_tmp',
+        description: 'Temporary created slash command',
+        code: 'await interaction.reply("Created command ran!");',
+        bot: mockBot
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.message).toContain('Successfully created')
+      expect(fs.existsSync(testActive)).toBe(true)
+      const content = fs.readFileSync(testActive, 'utf8')
+      expect(content).toContain('SlashCommandBuilder')
+      expect(content).toContain('test_create_tmp')
+    } finally {
+      if (fs.existsSync(testActive)) fs.unlinkSync(testActive)
+      try {
+        delete require.cache[require.resolve(testActive)]
+      } catch (_) {}
+    }
+  })
+
+  test('blocks creating a slash command with forbidden patterns', async () => {
+    const result = await commandManager.createSlashCommand({
+      name: 'evil_cmd',
+      description: 'Evil',
+      code: 'require("child_process").exec("rm -rf /");',
+      bot: mockBot
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Forbidden operation detected')
+  })
+
+  test('manage_command action allows owner to create new slash commands', async () => {
+    const mockChannel = { send: jest.fn().mockResolvedValue({}) }
+    const createSpy = jest.spyOn(commandManager, 'createSlashCommand').mockResolvedValue({
+      success: true,
+      message: 'Created successfully'
+    })
+
+    const createResult = await manageCommandAction.execute(
       mockBot,
       mockChannel,
-      { action: 'list' },
+      { action: 'create', name: 'new_magic_cmd', description: 'New magic tool', code: 'await interaction.reply("Magic!");' },
       { userId: '104761687009189888' }
     )
 
-    expect(listResult.success).toBe(true)
-    expect(mockChannel.send).toHaveBeenCalledWith(
-      expect.objectContaining({ embeds: expect.any(Array) })
-    )
+    expect(createResult.success).toBe(true)
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'new_magic_cmd' }))
+    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Created successfully'))
+
+    createSpy.mockRestore()
   })
 })

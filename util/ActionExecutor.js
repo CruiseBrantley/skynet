@@ -529,4 +529,6 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
   }
 }
 
-module.exports = new ActionExecutor()
+const actionExecutorInstance = new ActionExecutor()
+actionExecutorInstance.FORBIDDEN_PATTERNS = FORBIDDEN_PATTERNS
+module.exports = actionExecutorInstance

@@ -51,6 +51,19 @@ module.exports = {
       return res
     }
 
+    if (actionType === 'create') {
+      if (!targetName) return { success: false, error: 'Command name is required for create.' }
+      const res = await commandManager.createSlashCommand({
+        name: targetName,
+        description: params.description,
+        code: params.code,
+        bot
+      })
+      const msg = res.success ? `✨ ${res.message}` : `❌ Failed to create /${targetName}: ${res.error}`
+      if (channel && typeof channel.send === 'function') await channel.send(msg).catch(() => {})
+      return res
+    }
+
     if (actionType === 'enable') {
       if (!targetName) return { success: false, error: 'Command name is required for enable.' }
       const res = await commandManager.enableSlashCommand(targetName, bot)
@@ -59,6 +72,6 @@ module.exports = {
       return res
     }
 
-    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "disable", or "enable".` }
+    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "disable", "enable", or "create".` }
   }
 }
