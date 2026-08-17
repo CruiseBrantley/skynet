@@ -224,8 +224,11 @@ async function queryLocalOrRemote (endpoint, payload) {
 
   // Background agent tasks are lightweight evaluations (maintenance / NOOP checks).
   // Disable heavy chain-of-thought thinking and cap token prediction to avoid pegging GPU.
+  const isQwen3 = (remoteModel || '').toLowerCase().includes('qwen3')
+  const defaultCtx = isQwen3 ? 65536 : 8192
+
   if (!payload.options) payload.options = {}
-  if (!payload.options.num_ctx) payload.options.num_ctx = 8192
+  if (!payload.options.num_ctx) payload.options.num_ctx = defaultCtx
   if (payload.options.num_predict === undefined) payload.options.num_predict = 256
   if (payload.think === undefined) payload.think = false
 
