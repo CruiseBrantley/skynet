@@ -68,7 +68,7 @@ class AutonomousCommandProcessor {
 
         // Smart Budgeting: Prevent spam of major actions within a single user request turn.
         // Whitelist minor utility commands that can naturally be multi-fired.
-        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'search', 'web_search', 'create_action', 'modify_action', 'delete_action']
+        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'search', 'web_search', 'create_action', 'modify_action', 'delete_action', 'manage_command']
         const highImpactCommands = ['send_embed', 'send_poll', 'summarize_history']
         const visualActions = ['send_embed', 'send_poll', 'summarize_history', 'add_reaction', 'remove_reaction']
 
