@@ -177,11 +177,27 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
   // Quick TCP pre-flight check (1s timeout)
   const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
   if (!isOnline) {
+    if (payload.isCodeTask) {
+      logger.info('Primary Ollama PC is unreachable via TCP and this is a code task. Skipping Level 1 (Local) -> Level 2 (Gemini).')
+      return queryOllama(endpoint, payload, 2)
+    }
     logger.info('Primary Ollama PC is unreachable via TCP. Skipping to Level 1 (Local).')
     return queryOllama(endpoint, payload, 1)
   }
   try {
-    const response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs })
+    let response
+    try {
+      response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs })
+    } catch (postErr) {
+      // If Ollama returned 500 while loading model into VRAM, retry once after 1.5s
+      if (postErr.response?.status === 500) {
+        logger.warn(`Remote Model [${remoteModel}] returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...`)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs })
+      } else {
+        throw postErr
+      }
+    }
 
     // NORMALIZATION LAYER: Ensure we always have a message.content structure
     const data = response.data
@@ -193,8 +209,31 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
         logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
         return data
       }
+      // If content is empty but thinking contains code or response, extract it
+      if (data.message.thinking && typeof data.message.thinking === 'string') {
+        const cmdMatch = data.message.thinking.match(/<<<RUN_COMMAND[\s\S]*?>>>/)
+        if (cmdMatch) {
+          logger.info(`queryOllama: Recovered command from thinking block on ${remoteHost}`)
+          return { message: { role: 'assistant', content: cmdMatch[0] } }
+        }
+        const codeMatch = data.message.thinking.match(/```[\s\S]*?```/)
+        if (codeMatch) {
+          logger.info(`queryOllama: Recovered code block from thinking block on ${remoteHost}`)
+          return { message: { role: 'assistant', content: codeMatch[0] } }
+        }
+      }
       if (typeof data.message.content === 'string' && data.message.content.trim().length === 0) {
-        logger.warn(`Remote Model [${remoteModel}] returned empty content string. Falling back to Level 1.`)
+        // If think was true and returned empty content, retry once on 5090 with think: false
+        if (payload.think) {
+          logger.warn(`Remote Model [${remoteModel}] produced empty content with think=true. Retrying on Level 0 with think=false...`)
+          const noThinkRes = await axios.post(remoteUrl, { ...payload, model: remoteModel, think: false, stream: false }, { timeout: timeoutMs })
+          const noThinkData = noThinkRes.data
+          if (noThinkData?.message?.content && noThinkData.message.content.trim().length > 0) {
+            logger.info(`queryOllama: Level 0 Success on think=false retry from ${remoteHost}`)
+            return noThinkData
+          }
+        }
+        logger.warn(`Remote Model [${remoteModel}] produced empty content string. Falling back to Level 2 (Gemini).`)
         throw new Error(`Remote Model ${remoteModel} produced empty content.`)
       }
     } else if (data && data.response && data.response.trim().length > 0) {
@@ -204,7 +243,12 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     throw new Error('Malformed Ollama response: Missing valid message.content or response fields.')
   } catch (err) {
-    logger.info(`Primary Ollama failed or returned empty, falling back to Level 1: ${err.message}`)
+    if (payload.isCodeTask) {
+      logger.info(`Primary Ollama failed on code task (${err.message}). Skipping Level 1 (Local) -> Level 2 (Gemini).`)
+      return queryOllama(endpoint, payload, 2)
+    }
+    // For general chatting tasks, fall back to Level 1 (Local Mac) first to conserve Gemini quota
+    logger.info(`Primary Ollama failed on general chat task (${err.message}). Falling back to Level 1 (Local Mac).`)
     return queryOllama(endpoint, payload, 1)
   }
 }
@@ -319,6 +363,22 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     return msg
   })
 
+  // If flagged as a code-heavy task, route directly to high-capability models (Remote 5090 -> Gemini, skipping Local Mac)
+  if (options.isCodeTask) {
+    logger.info('queryOllamaWithContext: Code-heavy task detected. Routing directly to Level 0 / Level 2 (bypassing Level 1 Local Mac).')
+    return queryCodeCapableModel('/api/chat', {
+      messages: processedMessages,
+      think,
+      options: {
+        num_ctx: numCtx,
+        num_predict: -1,
+        temperature: 0.2,
+        top_k: 40,
+        top_p: 0.9
+      }
+    })
+  }
+
   try {
     const result = await queryOllama('/api/chat', {
       messages: processedMessages,
@@ -397,13 +457,25 @@ async function queryCodeCapableModel (endpoint, payload) {
         stream: false,
         options: {
           num_ctx: 65536,
-          num_predict: 4096,
+          num_predict: -1,
           temperature: 0.2,
           ...(payload.options || {})
         }
       }
       const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
-      const response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+      let response
+      try {
+        response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+      } catch (postErr) {
+        if (postErr.response?.status === 500) {
+          logger.warn('queryCodeCapableModel: Remote PC returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...')
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+        } else {
+          throw postErr
+        }
+      }
+
       const data = response.data
       if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
         return data

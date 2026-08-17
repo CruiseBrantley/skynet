@@ -12,16 +12,15 @@ module.exports = {
     const userId = context.userId || context.user?.id
     const isOwner = userId === process.env.OWNER_ID
     const isDM = !context.guildId
-
-    // Security Gate: Only bot owner or direct DMs with owner
-    if (!isOwner && !isDM) {
-      const deniedMsg = '⛔ **Permission Denied:** Slash command management is restricted to the bot creator.'
-      if (channel && typeof channel.send === 'function') await channel.send(deniedMsg).catch(() => {})
-      return { success: false, error: 'Permission denied: owner only.' }
-    }
-
     const actionType = (params.action || 'list').toLowerCase().trim()
     const targetName = (params.name || '').toLowerCase().trim().replace(/^\/+/, '')
+
+    // Security Gate: Disabling and enabling slash commands is restricted to the bot owner
+    if (['disable', 'enable'].includes(actionType) && !isOwner && !isDM) {
+      const deniedMsg = '⛔ **Permission Denied:** Disabling or removing slash commands is restricted to the bot creator.'
+      if (channel && typeof channel.send === 'function') await channel.send(deniedMsg).catch(() => {})
+      return { success: false, error: 'Permission denied: Disabling/removing slash commands is restricted to the bot creator.' }
+    }
 
     if (actionType === 'list') {
       const commands = commandManager.listSlashCommands()
@@ -53,11 +52,31 @@ module.exports = {
 
     if (actionType === 'create') {
       if (!targetName) return { success: false, error: 'Command name is required for create.' }
+
+      const { PermissionFlagsBits } = require('discord.js')
+      const isAdmin = isOwner || isDM || Boolean(
+        context.memberPermissions?.has?.(PermissionFlagsBits.Administrator) ||
+        context.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild) ||
+        context.member?.permissions?.has?.(PermissionFlagsBits.Administrator)
+      )
+
+      if (!isAdmin && !isDM) {
+        const deniedMsg = '⛔ **Permission Denied:** Creating slash commands in a server requires Administrator or Manage Server permissions.'
+        if (channel && typeof channel.send === 'function') await channel.send(deniedMsg).catch(() => {})
+        return { success: false, error: 'Permission denied: Administrator or Manage Server permissions required.' }
+      }
+
+      const isGlobal = isOwner && (isDM || Boolean(params.global))
+      const targetGuild = isGlobal ? null : context.guildId
       const res = await commandManager.createSlashCommand({
         name: targetName,
         description: params.description,
+        options: params.options,
         code: params.code,
-        bot
+        bot,
+        guildId: targetGuild,
+        isGlobal,
+        userId
       })
       const msg = res.success ? `✨ ${res.message}` : `❌ Failed to create /${targetName}: ${res.error}`
       if (channel && typeof channel.send === 'function') await channel.send(msg).catch(() => {})

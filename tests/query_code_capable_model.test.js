@@ -53,7 +53,7 @@ describe('queryCodeCapableModel Routing', () => {
         think: true,
         options: expect.objectContaining({
           num_ctx: 65536,
-          num_predict: 4096
+          num_predict: -1
         })
       }),
       expect.any(Object)
@@ -130,5 +130,40 @@ describe('queryCodeCapableModel Routing', () => {
     })
 
     expect(result.message.content).toBe('{"fixed_code": "fallback fixed code"}')
+  })
+
+  test('queryOllamaWithContext routes via queryCodeCapableModel when isCodeTask is true', async () => {
+    const { queryOllamaWithContext } = require('../util/ollama')
+
+    // Mock Remote PC online
+    net.Socket.prototype.connect = jest.fn(function (port, host, callback) {
+      callback()
+    })
+    net.Socket.prototype.unref = jest.fn()
+    net.Socket.prototype.destroy = jest.fn()
+    net.Socket.prototype.setTimeout = jest.fn()
+    net.Socket.prototype.once = jest.fn()
+
+    axios.post.mockResolvedValueOnce({
+      data: {
+        message: { role: 'assistant', content: '<<<RUN_COMMAND: {"command": "create_slash_command", "name": "roll"}>>>' }
+      }
+    })
+
+    const result = await queryOllamaWithContext(
+      [{ role: 'system', content: 'system' }, { role: 'user', content: 'create slash command roll' }],
+      { isCodeTask: true },
+      'Skynet'
+    )
+
+    expect(axios.post).toHaveBeenCalledWith(
+      'http://192.168.50.182:11434/api/chat',
+      expect.objectContaining({
+        model: 'qwen3.8:27b-5090',
+        think: true
+      }),
+      expect.any(Object)
+    )
+    expect(result.message.content).toContain('create_slash_command')
   })
 })

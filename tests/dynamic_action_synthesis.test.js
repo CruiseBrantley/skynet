@@ -151,7 +151,7 @@ describe('Dynamic Action Synthesis & Self-Healing Integration', () => {
       expect.arrayContaining([
         expect.objectContaining({
           role: 'system',
-          content: expect.stringContaining('Successfully created and deployed top-level slash command "/roll"')
+          content: expect.stringContaining('Successfully created and deployed slash command "/roll"')
         })
       ])
     )

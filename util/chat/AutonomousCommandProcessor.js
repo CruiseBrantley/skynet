@@ -59,7 +59,7 @@ class AutonomousCommandProcessor {
         replyContent = replyContent.replace(fullMatchString, '').trim()
         const lastMsg = channelHistory.messages[channelHistory.messages.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content = lastMsg.content.replace(fullMatchString, '[Command Executed]').trim()
+          lastMsg.content = lastMsg.content.replace(fullMatchString, '').trim()
         }
 
         const rawCmdName = (cmdData.command || '').trim().replace(/^\/+/, '').toLowerCase()
@@ -71,7 +71,7 @@ class AutonomousCommandProcessor {
         const multiFireWhitelist = [
           'add_reaction', 'remove_reaction', 'remember', 'forget', 'search', 'web_search',
           'create_action', 'modify_action', 'delete_action',
-          'create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands',
+          'create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands', 'inspect_slash_command',
           'manage_command'
         ]
         const highImpactCommands = ['send_embed', 'send_poll', 'summarize_history']
@@ -113,27 +113,49 @@ class AutonomousCommandProcessor {
         }
 
         // Special case: Top-Level Discord Slash Command Management
-        if (['create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands'].includes(rawCmdName)) {
+        if (['create_slash_command', 'disable_slash_command', 'enable_slash_command', 'list_slash_commands', 'inspect_slash_command'].includes(rawCmdName)) {
           const commandManager = require('../commandManager')
           const cmdName = (cmdData.name || params.name || '').trim().toLowerCase().replace(/^\/+/, '')
           const description = cmdData.description || params.description || ''
           const code = cmdData.code || params.code || ''
           const botClient = interaction.client
 
+          const { PermissionFlagsBits } = require('discord.js')
           const isOwner = interaction.user?.id === process.env.OWNER_ID
           const isDM = !interaction.guildId
-          if (!isOwner && !isDM) {
-            channelHistory.messages.push({ role: 'system', content: '[SYSTEM: Error - Slash command management is restricted to the bot creator.]' })
-            continue
-          }
+          const isAdmin = isOwner || isDM || Boolean(
+            interaction.memberPermissions?.has?.(PermissionFlagsBits.Administrator) ||
+            interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild) ||
+            interaction.member?.permissions?.has?.(PermissionFlagsBits.Administrator)
+          )
+          const isRestricted = ['disable_slash_command', 'enable_slash_command'].includes(rawCmdName)
 
           let slashResult = ''
-          if (rawCmdName === 'create_slash_command') {
-            const res = await commandManager.createSlashCommand({ name: cmdName, description, code, bot: botClient })
-            if (res.success) {
-              slashResult = `[SYSTEM: Successfully created and deployed top-level slash command "/${cmdName}" live to Discord. It is now published in Discord's slash command menu.]`
+          if (isRestricted && !isOwner && !isDM) {
+            slashResult = '[SYSTEM: Error - Removing or disabling slash commands is restricted to the bot creator.]'
+          } else if (rawCmdName === 'create_slash_command') {
+            if (!isAdmin && !isDM) {
+              slashResult = '[SYSTEM: Error - Creating slash commands in a server requires Administrator or Manage Server permissions.]'
             } else {
-              slashResult = `[SYSTEM: Failed to create slash command "/${cmdName}": ${res.error}]`
+              const options = cmdData.options || params.options || null
+              const isGlobal = isOwner && (isDM || Boolean(cmdData.global || params.global))
+              const targetGuild = isGlobal ? null : interaction.guildId
+              const res = await commandManager.createSlashCommand({
+                name: cmdName,
+                description,
+                options,
+                code,
+                bot: botClient,
+                guildId: targetGuild,
+                isGlobal,
+                userId: interaction.user?.id
+              })
+              if (res.success) {
+                const scopeMsg = targetGuild ? `scoped to this server (Guild ID: ${targetGuild})` : 'globally across all servers'
+                slashResult = `[SYSTEM: Successfully created and deployed slash command "/${cmdName}" ${scopeMsg} live on Discord.]`
+              } else {
+                slashResult = `[SYSTEM: Failed to create slash command "/${cmdName}": ${res.error}]`
+              }
             }
           } else if (rawCmdName === 'disable_slash_command') {
             const res = await commandManager.disableSlashCommand(cmdName, botClient)
@@ -146,6 +168,9 @@ class AutonomousCommandProcessor {
             const active = list.filter(c => c.enabled).map(c => `/${c.name}`).join(', ')
             const disabled = list.filter(c => !c.enabled).map(c => `/${c.name} (disabled)`).join(', ')
             slashResult = `[SYSTEM: Active Slash Commands on Discord: ${active || 'None'}. Disabled: ${disabled || 'None'}.]`
+          } else if (rawCmdName === 'inspect_slash_command') {
+            const res = commandManager.inspectSlashCommand(cmdName)
+            slashResult = res.success ? `[SYSTEM: Source Code for "/${cmdName}" (${res.enabled ? 'active' : 'disabled'}):\n\`\`\`javascript\n${res.content}\n\`\`\`]` : `[SYSTEM: Failed to inspect "/${cmdName}": ${res.error}]`
           }
 
           channelHistory.messages.push({ role: 'system', content: slashResult })
@@ -156,7 +181,7 @@ class AutonomousCommandProcessor {
             continue
           }
 
-          const followup = await this.queryOllamaWithContext([...channelHistory.messages], ollamaContext, this.botName)
+          const followup = await this.queryOllamaWithContext([...channelHistory.messages], { ...ollamaContext, isCodeTask: true }, this.botName)
           replyContent = (replyContent + '\n' + (followup.message.content || '')).trim()
           channelHistory.messages.push(followup.message)
           continue
@@ -185,11 +210,17 @@ class AutonomousCommandProcessor {
               synthesisResult = `[SYSTEM: Failed to modify action "${actionName}": ${mod.error}]`
             }
           } else if (rawCmdName === 'delete_action') {
-            const del = this.ActionExecutor.deleteAction(actionName)
-            if (del.success) {
-              synthesisResult = `[SYSTEM: Successfully deleted custom action "${actionName}".]`
+            const isOwner = interaction.user?.id === process.env.OWNER_ID
+            const isDM = !interaction.guildId
+            if (!isOwner && !isDM) {
+              synthesisResult = '[SYSTEM: Error - Deleting custom actions is restricted to the bot creator.]'
             } else {
-              synthesisResult = `[SYSTEM: Failed to delete action "${actionName}": ${del.error}]`
+              const del = this.ActionExecutor.deleteAction(actionName)
+              if (del.success) {
+                synthesisResult = `[SYSTEM: Successfully deleted custom action "${actionName}".]`
+              } else {
+                synthesisResult = `[SYSTEM: Failed to delete action "${actionName}": ${del.error}]`
+              }
             }
           }
 
@@ -201,7 +232,7 @@ class AutonomousCommandProcessor {
             continue
           }
 
-          const followup = await this.queryOllamaWithContext([...channelHistory.messages], ollamaContext, this.botName)
+          const followup = await this.queryOllamaWithContext([...channelHistory.messages], { ...ollamaContext, isCodeTask: true }, this.botName)
           replyContent = (replyContent + '\n' + (followup.message.content || '')).trim()
           channelHistory.messages.push(followup.message)
           continue

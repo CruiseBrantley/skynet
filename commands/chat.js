@@ -286,9 +286,14 @@ async function execute (interaction, database) {
       const contextPrefix = channelContext + (resourcesContext ? `\n${resourcesContext}` : '')
       const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
 
-      logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available.`)
+      // Detect code-heavy intent across recent conversation history or current message
+      const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|roll command|dice command|custom command|bot command)\b/i
+      const isCodeTask = codeRegex.test(messageText) || finalPromptMessages.slice(-6).some(m => codeRegex.test(m.content || ''))
+
+      logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available. isCodeTask=${isCodeTask}`)
       const ollamaContext = {
         isBackup: currentIsBackup,
+        isCodeTask,
         commandsContext,
         logsContext,
         guildId: interaction.guildId,
@@ -299,10 +304,10 @@ async function execute (interaction, database) {
       if (responseData && responseData.message) {
         const rawAIContent = responseData.message.content || ''
         logger.info(`AI Raw Response: "${rawAIContent.substring(0, 300)}${rawAIContent.length > 300 ? '...' : ''}"`)
-        channelHistories[channelId].messages.push(responseData.message) // store assistant reply
+        channelHistories[channelId].messages.push({ role: 'assistant', content: rawAIContent }) // store clean assistant reply
 
         // Discord message max length is 2000. Chunk intelligently.
-        let replyContent = responseData.message.content || ''
+        let replyContent = rawAIContent
 
         // Resolve @mentions back to <@ID> using the persistent resolver
         replyContent = mentionResolver.resolve(replyContent, interaction.guildId)
