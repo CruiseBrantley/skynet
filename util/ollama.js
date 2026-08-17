@@ -372,10 +372,62 @@ async function getActiveModelCapabilities () {
   }
 }
 
+/**
+ * Queries a high-capability model specifically suited for code synthesis, debugging,
+ * and self-healing error reflection.
+ * Routing: Level 0 (Remote RTX 5090) -> Level 2 (Gemini API), completely skipping Level 1 (Local Mac Mini).
+ * @param {string} endpoint e.g. '/api/chat'
+ * @param {object} payload
+ * @returns {Promise<object>}
+ */
+async function queryCodeCapableModel (endpoint, payload) {
+  const remoteHost = process.env.OLLAMA_REMOTE_HOST
+  const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
+  const remoteModel = process.env.OLLAMA_REMOTE_MODEL
+
+  const isRemoteOnline = remoteHost && remoteModel && (await checkPortOpen(remoteHost, remotePort, 1000))
+
+  if (isRemoteOnline) {
+    try {
+      logger.info(`queryCodeCapableModel: Routing code task to Remote PC (${remoteModel})`)
+      const enhancedPayload = {
+        ...payload,
+        model: remoteModel,
+        think: true,
+        stream: false,
+        options: {
+          num_ctx: 65536,
+          num_predict: 4096,
+          temperature: 0.2,
+          ...(payload.options || {})
+        }
+      }
+      const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
+      const response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+      const data = response.data
+      if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+        return data
+      }
+      if (data && data.response && data.response.trim().length > 0) {
+        return { message: { role: 'assistant', content: data.response } }
+      }
+      throw new Error(`Remote Model ${remoteModel} returned empty or invalid response.`)
+    } catch (err) {
+      logger.warn(`queryCodeCapableModel: Remote PC code generation failed (${err.message}). Bypassing local Mac and falling straight to Gemini.`)
+    }
+  } else {
+    logger.info('queryCodeCapableModel: Remote PC is offline. Bypassing local Mac and routing code task directly to Gemini.')
+  }
+
+  // Level 2: Gemini API
+  return queryOllama(endpoint, payload, 2)
+}
+
 module.exports = {
   queryOllama,
   queryOllamaWithContext,
   checkOllamaOnline,
   queryLocalOrRemote,
+  queryCodeCapableModel,
   getActiveModelCapabilities
 }

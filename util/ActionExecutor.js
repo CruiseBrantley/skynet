@@ -492,6 +492,38 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
       return { success: true, output }
     } catch (err) {
       logger.error(`ActionExecutor: Action "${name}" failed: ${err.message}`)
+
+      // If it's a custom dynamic action, attempt self-healing reflection via high-capability model
+      const customFilePath = path.join(CUSTOM_DIR, `${name}.js`)
+      if (fs.existsSync(customFilePath)) {
+        try {
+          const selfHealing = require('./chat/SelfHealingEngine')
+          const rawCode = fs.readFileSync(customFilePath, 'utf8')
+          const match = rawCode.match(/execute:\s*async\s*\(bot,\s*channel,\s*params(?:,\s*context)?\)\s*=>\s*\{([\s\S]*?)\n {4}\}\n\};/)
+          const codeBody = match ? match[1].trim() : rawCode
+
+          const healResult = await selfHealing.healAction({
+            actionName: name,
+            description: action.description,
+            schema: action.schema,
+            code: codeBody,
+            error: err,
+            params
+          })
+
+          if (healResult.success) {
+            logger.info(`ActionExecutor: Action "${name}" healed successfully. Re-attempting execution...`)
+            const reloadedAction = this._actions[name]
+            if (reloadedAction) {
+              const retryOutput = await reloadedAction.execute(bot, channel, params || {}, context)
+              return { success: true, output: retryOutput, healed: true, reasoning: healResult.reasoning }
+            }
+          }
+        } catch (healErr) {
+          logger.error(`ActionExecutor: Self-healing attempt failed for "${name}": ${healErr.message}`)
+        }
+      }
+
       return { success: false, error: err.message }
     }
   }

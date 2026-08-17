@@ -68,7 +68,7 @@ class AutonomousCommandProcessor {
 
         // Smart Budgeting: Prevent spam of major actions within a single user request turn.
         // Whitelist minor utility commands that can naturally be multi-fired.
-        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search', 'web_search']
+        const multiFireWhitelist = ['add_reaction', 'remove_reaction', 'remember', 'forget', 'set_note', 'search', 'web_search', 'create_action', 'modify_action', 'delete_action']
         const highImpactCommands = ['send_embed', 'send_poll', 'summarize_history']
         const visualActions = ['send_embed', 'send_poll', 'summarize_history', 'add_reaction', 'remove_reaction']
 
@@ -105,6 +105,51 @@ class AutonomousCommandProcessor {
         if (!params || typeof params !== 'object') {
           const { command, ...rest } = cmdData
           params = rest
+        }
+
+        // Special case: Dynamic tool synthesis (create_action, modify_action, delete_action)
+        if (['create_action', 'modify_action', 'delete_action'].includes(rawCmdName)) {
+          const actionName = (cmdData.name || params.name || '').trim().toLowerCase()
+          const description = cmdData.description || params.description || ''
+          const schema = cmdData.schema || params.schema || {}
+          const code = cmdData.code || params.code || ''
+
+          let synthesisResult = ''
+          if (rawCmdName === 'create_action') {
+            const reg = this.ActionExecutor.registerAction(actionName, description, schema, code)
+            if (reg.success) {
+              synthesisResult = `[SYSTEM: Successfully created and registered dynamic action "${actionName}". Description: "${description}". You may now execute <<<RUN_COMMAND: {"command": "${actionName}", ...}>>> immediately if needed.]`
+            } else {
+              synthesisResult = `[SYSTEM: Failed to create action "${actionName}": ${reg.error}]`
+            }
+          } else if (rawCmdName === 'modify_action') {
+            const mod = this.ActionExecutor.modifyAction(actionName, { description, schema, code })
+            if (mod.success) {
+              synthesisResult = `[SYSTEM: Successfully modified dynamic action "${actionName}".]`
+            } else {
+              synthesisResult = `[SYSTEM: Failed to modify action "${actionName}": ${mod.error}]`
+            }
+          } else if (rawCmdName === 'delete_action') {
+            const del = this.ActionExecutor.deleteAction(actionName)
+            if (del.success) {
+              synthesisResult = `[SYSTEM: Successfully deleted custom action "${actionName}".]`
+            } else {
+              synthesisResult = `[SYSTEM: Failed to delete action "${actionName}": ${del.error}]`
+            }
+          }
+
+          channelHistory.messages.push({ role: 'system', content: synthesisResult })
+
+          // If more commands in buffer, continue; otherwise follow up with LLM
+          if (replyContent.match(COMMAND_REGEX)) {
+            logger.info('AUTONOMOUS: More commands detected after dynamic action synthesis, skipping intermediate followup.')
+            continue
+          }
+
+          const followup = await this.queryOllamaWithContext([...channelHistory.messages], ollamaContext, this.botName)
+          replyContent = (replyContent + '\n' + (followup.message.content || '')).trim()
+          channelHistory.messages.push(followup.message)
+          continue
         }
 
         // Special case: natural language "memories" handled locally
