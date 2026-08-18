@@ -111,7 +111,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
 
-    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
+    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.7-flash'
     logger.info(`Triggering Level 2 fallback: ${geminiModel} for ${endpoint}`)
 
     let geminiContents = []

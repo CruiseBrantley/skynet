@@ -18,7 +18,7 @@ describe('queryCodeCapableModel Routing', () => {
       OLLAMA_REMOTE_MODEL: 'qwen3.8:27b-5090',
       OLLAMA_LOCAL_MODEL: 'gemma4:e4b',
       GEMINI_API_KEY: 'test-gemini-key',
-      GEMINI_MODEL: 'gemini-3.6-flash'
+      GEMINI_MODEL: 'gemini-3.7-flash'
     }
   })
 
@@ -94,7 +94,7 @@ describe('queryCodeCapableModel Routing', () => {
 
     // MUST call Gemini API
     expect(axios.post).toHaveBeenCalledWith(
-      expect.stringContaining('https://generativelanguage.googleapis.com/v1/models/gemini-3.6-flash:generateContent'),
+      expect.stringContaining('https://generativelanguage.googleapis.com/v1/models/gemini-3.7-flash:generateContent'),
       expect.anything(),
       expect.anything()
     )

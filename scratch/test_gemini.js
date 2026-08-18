@@ -7,7 +7,7 @@ async function testGemini () {
   try {
     const result = await queryOllama('/api/chat', {
       messages: [{ role: 'user', content: 'Say HELLO if you receive this.' }]
-    }, 1) // Level 1 is Gemini
+    }, 2) // Level 2 is Gemini (Cloud Fallback)
     logger.info('Gemini Result: ' + JSON.stringify(result))
   } catch (e) {
     logger.error('Gemini Test Failed: ' + e.message)
