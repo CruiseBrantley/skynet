@@ -111,8 +111,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
 
-    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.7-flash'
-    logger.info(`Triggering Level 2 fallback: ${geminiModel} for ${endpoint}`)
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.7-flash'
+    const candidateModels = [primaryModel]
+    if (!candidateModels.includes('gemini-2.5-flash')) candidateModels.push('gemini-2.5-flash')
+    if (!candidateModels.includes('gemini-2.0-flash')) candidateModels.push('gemini-2.0-flash')
 
     let geminiContents = []
     if (payload.messages) {
@@ -137,30 +139,43 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       geminiContents = [{ role: 'user', parts: [{ text: payload.prompt }] }]
     }
 
-    try {
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1/models/${geminiModel}:generateContent?key=${apiKey}`,
-        {
-          contents: geminiContents
-        },
-        {
-          timeout: timeoutMs
-        }
-      )
+    let lastError = null
+    for (const modelName of candidateModels) {
+      try {
+        logger.info(`Triggering Level 2 fallback: ${modelName} for ${endpoint}`)
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`,
+          {
+            contents: geminiContents
+          },
+          {
+            timeout: timeoutMs
+          }
+        )
 
-      if (response.data.candidates && response.data.candidates[0]?.content?.parts?.[0]) {
-        const content = response.data.candidates[0].content.parts[0].text
-        if (endpoint === '/api/generate') {
-          return { response: content }
+        if (response.data.candidates && response.data.candidates[0]?.content?.parts?.[0]) {
+          const content = response.data.candidates[0].content.parts[0].text
+          if (endpoint === '/api/generate') {
+            return { response: content }
+          }
+          return { message: { role: 'assistant', content } }
         }
-        return { message: { role: 'assistant', content } }
+        throw new Error(`Invalid response structure from Gemini API (${modelName})`)
+      } catch (err) {
+        lastError = err
+        const errMsg = err.response?.data?.error?.message || err.message
+        const statusCode = err.response?.status
+        logger.warn(`Gemini model ${modelName} failed (HTTP ${statusCode || 'ERR'}): ${errMsg}. Trying next candidate...`)
+        if (statusCode && statusCode !== 503 && statusCode !== 429 && statusCode !== 404 && statusCode !== 500) {
+          // Non-transient errors (e.g. 400 Bad Request, 403 Forbidden) shouldn't be blindly retried across all models
+          break
+        }
       }
-      throw new Error('Invalid response structure from Gemini API')
-    } catch (err) {
-      const errMsg = err.response?.data?.error?.message || err.message
-      logger.error(`Final Gemini fallback failed: ${errMsg}`)
-      throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
+
+    const finalErrMsg = lastError?.response?.data?.error?.message || lastError?.message || 'Unknown error'
+    logger.error(`Final Gemini fallback failed across all candidate models: ${finalErrMsg}`)
+    throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
   }
 
   // Level 0: Primary Remote Workstation
@@ -477,6 +492,29 @@ async function queryCodeCapableModel (endpoint, payload) {
       }
 
       const data = response.data
+      const content = data?.message?.content
+
+      // If content is empty but thinking was returned and contains command/code, extract it
+      if ((!content || content.length === 0) && data?.message?.thinking) {
+        const thinkText = data.message.thinking
+        const cmdMatch = thinkText.match(/<<<RUN_COMMAND:\s*\{[\s\S]*?\}>>>/) || thinkText.match(/\{[\s\S]*"command"[\s\S]*\}/)
+        if (cmdMatch) {
+          logger.info('queryCodeCapableModel: Extracted valid command from thinking block when content was empty.')
+          return { message: { role: 'assistant', content: cmdMatch[0] } }
+        }
+      }
+
+      // If think: true produced empty content, retry once with think: false
+      if ((!content || content.length === 0) && enhancedPayload.think !== false) {
+        logger.warn(`queryCodeCapableModel: Remote Model [${remoteModel}] produced empty content with think: true. Retrying with think: false...`)
+        const noThinkPayload = { ...enhancedPayload, think: false }
+        const retryResp = await axios.post(remoteUrl, noThinkPayload, { timeout: 180000 })
+        const retryData = retryResp.data
+        if (retryData && retryData.message && typeof retryData.message.content === 'string' && retryData.message.content.trim().length > 0) {
+          return retryData
+        }
+      }
+
       if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
         return data
       }
