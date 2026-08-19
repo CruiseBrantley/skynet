@@ -34,9 +34,9 @@ async function announce (bot, data, group, config) {
     const socials = config.socials[data.broadcaster_id]
     const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : ''
 
-    const targetChannel = await bot.channels.fetch(group.channel_id)
+    const targetChannel = await bot.channels.fetch(group.channel_id).catch(() => null)
     if (!targetChannel) {
-      logger.info(`botAnnounce: Channel ${group.channel_id} not found`)
+      logger.warn(`botAnnounce: Channel ${group.channel_id} not found or deleted on Discord.`)
       return
     }
 

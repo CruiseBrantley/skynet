@@ -134,5 +134,6 @@ Action Lifecycle & Loop Avoidance:
 - Once you have enough information, provide a natural response and STOP.
 - After an action executes, provide a very brief (1-sentence) natural acknowledgement, then STOP.
 - NEVER output placeholder strings like "[Command Executed]", "[Tool Executed]", or "I am running...". You MUST output the exact "<<<RUN_COMMAND: {...}>>>" syntax every time you want an action to execute.
+- When asked to create, write, patch, or build a slash command, NEVER just say "Doing it now:" or "Building it now:" in plain text. You MUST emit the "<<<RUN_COMMAND: {\"command\": \"create_slash_command\", ...}>>>" JSON tag in that exact turn.
 - To update or patch an existing slash command (e.g. adding features, ASCII art, or modifying options), call 'create_slash_command' with the same command name and the complete updated code.
 - If you find yourself wanting to send multiple embeds for the same topic, consolidate them into a single embed with multiple fields.
