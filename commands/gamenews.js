@@ -1,33 +1,97 @@
 // Auto-generated slash command: gamenews
-// Created: 2026-08-19T02:26:13.341Z
+// Updated: 2026-08-19
 
-const { SlashCommandBuilder } = require('discord.js')
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
+const axios = require('axios')
 
 module.exports = {
   guildId: '579210338352889867',
   data: new SlashCommandBuilder()
     .setName('gamenews')
     .setDescription('Fetch latest patch notes, hotfixes, and news for a tracked game')
-    .addStringOption(opt => opt.setName('game').setDescription('Game to look up (e.g. Diablo 4, Monster Hunter, Project Zomboid, Helldivers 2, Path of Exile)').setRequired(true))
+    .addStringOption(opt => opt.setName('game').setDescription('Game to look up (e.g. Diablo 4, Monster Hunter, Helldivers 2, PoE, WoW, etc.)').setRequired(true))
     .addChannelOption(opt => opt.setName('channel').setDescription('Target channel for the digest (defaults to current channel)').setRequired(false))
     .addBooleanOption(opt => opt.setName('brief').setDescription('Short 3-bullet TL;DR instead of full breakdown').setRequired(false)),
   execute: async (interaction) => {
-    const game = interaction.options.getString('game', true)
+    const game = interaction.options.getString('game', true).trim()
     const target = interaction.options.getChannel('channel', false) || interaction.channel
     const brief = interaction.options.getBoolean('brief', false) || false
 
     await interaction.deferReply()
 
-    const embed = {
-      title: `\u{1F4F0} ${game} \u2014 News Digest`,
-      description: brief
-        ? `**TL;DR mode** \u2014 pulling top 3 items for **${game}**...`
-        : `**Full breakdown** \u2014 compiling patch notes, hotfixes, and announcements for **${game}**...`,
-      color: 0x2ecc71,
-      footer: { text: `Requested by ${interaction.user.username} \u2022 ${new Date().toISOString().slice(0, 10)}` }
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      await interaction.editReply('Error: GEMINI_API_KEY is not configured on the bot.')
+      return
     }
 
-    await target.send({ embeds: [embed] })
-    await interaction.editReply(`Digest frame posted to **${target.name ? '#' + target.name : 'this channel'}**. Research incoming.`)
+    try {
+      const prompt = `Provide the latest patch notes, hotfixes, updates, and current news for the video game "${game}". ${
+        brief
+          ? 'Provide a concise 3-to-4 bullet point TL;DR of the most recent patch and balance changes.'
+          : 'Provide the latest patch version, release date, main features, balance adjustments, and bug fixes.'
+      } Format clearly with readable markdown bullet points.`
+
+      let content = null
+      let sources = []
+
+      const candidateModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.0-flash']
+      for (const model of candidateModels) {
+        try {
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              contents: [{ parts: [{ text: prompt }] }],
+              tools: [{ googleSearch: {} }]
+            },
+            { timeout: 25000 }
+          )
+
+          const candidate = res.data.candidates?.[0]
+          const text = candidate?.content?.parts?.[0]?.text
+          if (text && text.trim().length > 0) {
+            content = text.trim()
+            const chunks = candidate.groundingMetadata?.groundingChunks || []
+            sources = chunks
+              .filter(c => c.web?.uri)
+              .map(c => `[${c.web.title || 'Source'}](${c.web.uri})`)
+              .slice(0, 4)
+            break
+          }
+        } catch (apiErr) {
+          // Cascade to next model
+        }
+      }
+
+      if (!content) {
+        await interaction.editReply(`Could not retrieve recent patch notes or news for **${game}**.`)
+        return
+      }
+
+      // Truncate description to fit Discord embed limit (4096 chars)
+      if (content.length > 3800) {
+        content = content.substring(0, 3750) + '...\n\n*(Summary truncated for length)*'
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`📰 ${game} — Latest News & Patch Notes`)
+        .setDescription(content)
+        .setColor(0x2ecc71)
+        .setTimestamp()
+        .setFooter({ text: `Requested by ${interaction.user.username}` })
+
+      if (sources.length > 0) {
+        embed.addFields({ name: '🔗 Sources & Official Notes', value: sources.join(' • '), inline: false })
+      }
+
+      if (target.id !== interaction.channelId) {
+        await target.send({ embeds: [embed] })
+        await interaction.editReply(`Digest posted to **<#${target.id}>**.`)
+      } else {
+        await interaction.editReply({ embeds: [embed] })
+      }
+    } catch (err) {
+      await interaction.editReply(`Error fetching news for **${game}**: ${err.message}`)
+    }
   }
 }
