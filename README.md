@@ -89,7 +89,7 @@ Skynet operates on a **Mention-First** model. Instead of slash commands, simply 
 - **Image Generation** — SwarmUI/ComfyUI integration with model selection
 - **Text-to-Speech** — Local Piper TTS with voice channel support
 - **Twitch Announcements** — Automatic stream notifications with deduplication
-- **Web Search** — Google → DuckDuckGo → Wikipedia fallback chain
+- **Web Search** — Google Search Grounding → Wikipedia → Puppeteer fallback chain
 - **URL Summarization** — Automatic link summarization in configured channels
 
 ## Testing

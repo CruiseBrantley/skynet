@@ -1,19 +1,18 @@
 const chat = require('../commands/chat')
 const executor = require('../util/ActionExecutor')
 const { queryOllamaWithContext } = require('../util/ollama')
-const { fetchPageText } = require('../util/summarize')
-const googleIt = require('google-it')
+const axios = require('axios')
 
 // Mock external dependencies
 jest.mock('../util/ollama')
-jest.mock('../util/summarize')
-jest.mock('google-it')
+jest.mock('axios')
 
 describe('Weather Search E2E Flow', () => {
   let mockInteraction
 
   beforeEach(() => {
     jest.clearAllMocks()
+    process.env.GEMINI_API_KEY = 'test-gemini-key'
 
     mockInteraction = {
       guildId: '123',
@@ -50,15 +49,21 @@ describe('Weather Search E2E Flow', () => {
       message: { content: '<<<RUN_COMMAND: {"command": "web_search", "params": {"query": "weather Fayetteville AR"}}>>>' }
     })
 
-    // 2. Google-it finds results
-    googleIt.mockResolvedValueOnce([
-      { title: 'Local Weather', link: 'https://weather.com/local', snippet: 'Sunny and 75F' }
-    ])
+    // 2. Google Search Grounding returns weather results
+    axios.post.mockResolvedValueOnce({
+      data: {
+        candidates: [{
+          content: {
+            parts: [{ text: 'The weather today in Fayetteville is sunny with a high of 75F and low of 50F.' }]
+          },
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: 'https://weather.com/local', title: 'Local Weather' } }]
+          }
+        }]
+      }
+    })
 
-    // 3. Scraper extracts "body" text
-    fetchPageText.mockResolvedValueOnce('The weather today in Fayetteville is sunny with a high of 75F and low of 50F.')
-
-    // 4. AI provides final summary
+    // 3. AI provides final summary
     queryOllamaWithContext.mockResolvedValueOnce({
       message: { content: 'The weather in Fayetteville is currently sunny and 75F.' }
     })
@@ -71,11 +76,12 @@ describe('Weather Search E2E Flow', () => {
     // Should have called Ollama twice (Thought then Report)
     expect(queryOllamaWithContext).toHaveBeenCalledTimes(2)
 
-    // Should have called google-it
-    expect(googleIt).toHaveBeenCalled()
-
-    // Should have called fetchPageText for the found link
-    expect(fetchPageText).toHaveBeenCalledWith('https://weather.com/local', expect.any(Number))
+    // Should have called axios for Google Search Grounding
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('generativelanguage.googleapis.com'),
+      expect.anything(),
+      expect.anything()
+    )
 
     // Should have OVERWRITTEN the thinking status in editReply with the final summary
     expect(mockInteraction.editReply).toHaveBeenCalled()
