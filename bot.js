@@ -268,16 +268,26 @@ bot.on('interactionCreate', async (interaction) => {
     await command.execute(interaction, database)
   } catch (error) {
     logger.error(`Slash command error: ${error.stack || error.message}`)
+
+    // Trigger autonomous self-healing in background for custom/dynamic commands
+    const SelfHealingEngine = require('./util/chat/SelfHealingEngine')
+    SelfHealingEngine.healSlashCommand({
+      commandName: interaction.commandName,
+      error,
+      interaction
+    }).catch(e => logger.warn(`Slash command self-healing failed: ${e.message}`))
+
+    const responseMsg = `⚠️ Command \`/${interaction.commandName}\` encountered an error and is being automatically self-healed. Please try again in a moment!`
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
-        content: 'There was an error while executing this command!',
+        content: responseMsg,
         ephemeral: true
-      })
+      }).catch(() => {})
     } else {
       await interaction.reply({
-        content: 'There was an error while executing this command!',
+        content: responseMsg,
         ephemeral: true
-      })
+      }).catch(() => {})
     }
   }
 })

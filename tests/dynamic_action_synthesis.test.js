@@ -242,4 +242,47 @@ describe('Dynamic Action Synthesis & Self-Healing Integration', () => {
     readSpy.mockRestore()
     delete actionExecutor._actions.test_fail_action
   })
+
+  test('SelfHealingEngine.healSlashCommand repairs broken slash commands using LLM reflection', async () => {
+    const SelfHealingEngine = require('../util/chat/SelfHealingEngine')
+    const commandManager = require('../util/commandManager')
+    const ollama = require('../util/ollama')
+
+    const inspectSpy = jest.spyOn(commandManager, 'inspectSlashCommand').mockReturnValue({
+      success: true,
+      content: 'module.exports = { execute: async () => { throw new Error("bad syntax") } }'
+    })
+
+    const createSpy = jest.spyOn(commandManager, 'createSlashCommand').mockResolvedValue({
+      success: true,
+      message: 'Created live on Discord'
+    })
+
+    const querySpy = jest.spyOn(ollama, 'queryCodeCapableModel').mockResolvedValueOnce({
+      message: {
+        content: JSON.stringify({
+          reasoning: 'Fixed syntax error in execute handler',
+          fixed_code: 'module.exports = { execute: async (interaction) => { await interaction.reply("Fixed!"); } }'
+        })
+      }
+    })
+
+    const result = await SelfHealingEngine.healSlashCommand({
+      commandName: 'broken_cmd',
+      error: new Error('bad syntax'),
+      interaction: mockInteraction
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.reasoning).toContain('Fixed syntax error')
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'broken_cmd',
+      code: expect.stringContaining('Fixed!')
+    }))
+
+    inspectSpy.mockRestore()
+    createSpy.mockRestore()
+    querySpy.mockRestore()
+  })
 })
+

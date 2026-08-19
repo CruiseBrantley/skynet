@@ -420,7 +420,10 @@ async function createSlashCommand ({ name, description, options, code, bot, guil
     fileContent = `// Auto-generated slash command: ${cleanName}
 // Created: ${new Date().toISOString()}
 
-const { SlashCommandBuilder } = require('discord.js')
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, AttachmentBuilder, ComponentType } = require('discord.js')
+const axios = require('axios')
+const { searchViaGoogleGrounding } = require('../util/actions/web_search')
+const agentMemory = require('../util/AgentMemory')
 
 module.exports = {
   guildId: ${JSON.stringify(targetGuildId || null)},
