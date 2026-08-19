@@ -78,7 +78,10 @@ Dynamic Tool & Slash Command Synthesis (Self-Extension):
      - Rules & Capabilities:
        - Must be executable Node.js code receiving `interaction`.
        - For async network/API operations, ALWAYS call `await interaction.deferReply()` first, then `await interaction.editReply(...)` (or pass `{ embeds: [embed] }`).
-       - External Data / APIs: You can use `fetch(...)`, `require('axios')`, `require('discord.js')` (like `EmbedBuilder`), or Google Search Grounding with `process.env.GEMINI_API_KEY` for live real-time lookups.
+       - Real-Time Web Search & Live Data in Commands:
+         - Option A (Direct Search Helper): `const { searchViaGoogleGrounding } = require('../util/actions/web_search'); const result = await searchViaGoogleGrounding('query');`
+         - Option B (Google Grounding via Axios): `const res = await axios.post('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY, { contents: [{ parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }] });`
+         - Option C: `fetch(...)` or public REST APIs.
        - Forbidden: `require('fs')`, `require('child_process')`, `process.exit`, `eval`. Do not attempt filesystem manipulation or spawning host processes.
   2. Inspect / List / Disable / Enable Slash Commands:
      - Inspect source code of any command (Open to all): <<<RUN_COMMAND: {"command": "inspect_slash_command", "name": "command_name"}>>>

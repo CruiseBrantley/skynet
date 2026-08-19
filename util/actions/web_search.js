@@ -133,5 +133,6 @@ module.exports = {
       logger.error(`web_search action failed: ${err.message}`)
       return `[SYSTEM: Error performing web search: ${err.message}]`
     }
-  }
+  },
+  searchViaGoogleGrounding
 }
