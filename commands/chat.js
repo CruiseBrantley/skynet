@@ -287,8 +287,13 @@ async function execute (interaction, database) {
       const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
 
       // Detect code-heavy intent across recent conversation history or current message
-      const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|roll command|dice command|custom command|bot command)\b/i
+      const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|fix the command|fix command|rebuild the command|rebuild command|custom command|bot command|\/roll|\/gamenews|\/weather|\/anime|new command|add command|make command|build command|update command|change command|patch command)\b|\b(make|build|create|write|implement|fix|update|rebuild|code)\b.*\b(command|action|feature|endpoint|function|slash)\b/i
       const isCodeTask = codeRegex.test(messageText) || finalPromptMessages.slice(-6).some(m => codeRegex.test(m.content || ''))
+
+      let effectiveSystemPrompt = enhancedSystemPrompt
+      if (isCodeTask) {
+        effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE / COMMAND SYNTHESIS]\nThe user wants you to create, modify, fix, or update a Discord slash command or internal action. You MUST emit the command tag in your response:\nFor slash commands: <<<RUN_COMMAND: {"command": "create_slash_command", "name": "command_name", "description": "...", "code": "..."}>>>\nNEVER say "I am doing it now" or "Building it now" in plain text without emitting the executable <<<RUN_COMMAND: {...}>>> tag in that same response.'
+      }
 
       logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available. isCodeTask=${isCodeTask}`)
       const ollamaContext = {
@@ -298,7 +303,7 @@ async function execute (interaction, database) {
         logsContext,
         guildId: interaction.guildId,
         userId: interaction.user?.id || null,
-        systemPrompt: enhancedSystemPrompt
+        systemPrompt: effectiveSystemPrompt
       }
       const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName)
       if (responseData && responseData.message) {

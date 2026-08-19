@@ -392,14 +392,24 @@ async function createSlashCommand ({ name, description, options, code, bot, guil
     fileContent = fileContent.replace(/^```(?:javascript|js)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
   }
 
-  // Security pattern scan
-  const actionExecutor = require('./ActionExecutor')
-  const forbiddenPatterns = actionExecutor.FORBIDDEN_PATTERNS || []
+  // Security pattern scan (block filesystem destruction and process exit/spawning)
+  const forbiddenPatterns = [
+    /require\s*\(\s*['"`]fs['"`]\s*\)/,
+    /require\s*\(\s*['"`]child_process['"`]\s*\)/,
+    /require\s*\(\s*['"`]os['"`]\s*\)/,
+    /require\s*\(\s*['"`]net['"`]\s*\)/,
+    /process\s*\.\s*(exit|kill|binding)/,
+    /\beval\s*\(/,
+    /\bnew\s+Function\s*\(/,
+    /\.exec\s*\(/,
+    /\.spawn\s*\(/,
+    /\.execSync\s*\(/
+  ]
   for (const pattern of forbiddenPatterns) {
     if (pattern.test(fileContent)) {
       const hit = fileContent.match(pattern)?.[0]
       logger.warn(`commandManager: Rejected new slash command "/${cleanName}" — forbidden pattern: "${hit}"`)
-      return { success: false, error: `Forbidden operation detected: "${hit}". Only Discord.js APIs are allowed.` }
+      return { success: false, error: `Forbidden operation detected: "${hit}". Only safe Discord.js and network APIs are allowed.` }
     }
   }
 

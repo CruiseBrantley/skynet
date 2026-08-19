@@ -75,8 +75,11 @@ Dynamic Tool & Slash Command Synthesis (Self-Extension):
      - Permissions & Scope:
        - In a server: Server Admins (Administrator or Manage Server) can create or update slash commands. Commands created in a server are automatically scoped to that specific server.
        - In DMs: The bot creator (Sirian) can create global commands (or specify `"global": true`) visible across all servers.
-     - Options Schema: `options` can be an array of objects `[{"name": "...", "description": "...", "type": "string"|"integer"|"number"|"boolean"|"user"|"channel", "required": true|false}]`. If omitted, option parameters will be inferred automatically from `interaction.options.get<Type>('name', isRequired)` calls in your code.
-     - Rules: Uses `interaction` (e.g. `await interaction.reply(...)` or `await interaction.deferReply()`). No `fs`, `child_process`, `eval`, or `process.env`.
+     - Rules & Capabilities:
+       - Must be executable Node.js code receiving `interaction`.
+       - For async network/API operations, ALWAYS call `await interaction.deferReply()` first, then `await interaction.editReply(...)` (or pass `{ embeds: [embed] }`).
+       - External Data / APIs: You can use `fetch(...)`, `require('axios')`, `require('discord.js')` (like `EmbedBuilder`), or Google Search Grounding with `process.env.GEMINI_API_KEY` for live real-time lookups.
+       - Forbidden: `require('fs')`, `require('child_process')`, `process.exit`, `eval`. Do not attempt filesystem manipulation or spawning host processes.
   2. Inspect / List / Disable / Enable Slash Commands:
      - Inspect source code of any command (Open to all): <<<RUN_COMMAND: {"command": "inspect_slash_command", "name": "command_name"}>>>
      - Check live registered slash commands (Open to all): <<<RUN_COMMAND: {"command": "list_slash_commands"}>>>

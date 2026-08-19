@@ -49,7 +49,25 @@ class AutonomousCommandProcessor {
         }
       }
 
-      if (!jsonStr) break
+      if (!jsonStr) {
+        if (loopCount === 0 && ollamaContext?.isCodeTask) {
+          const stallRegex = /\b(doing it now|building it|rebuilding it|working on it|doing that now|fixing it now|making it now|writing it now|actually doing it|no more talk)\b/i
+          if (stallRegex.test(replyContent)) {
+            logger.warn('AUTONOMOUS: Detected conversational stall on code task. Forcing code synthesis query...')
+            const forcedMessages = [
+              ...channelHistory.messages,
+              { role: 'user', content: 'Generate the complete <<<RUN_COMMAND: {"command": "create_slash_command", "name": "...", "description": "...", "code": "..."}>>> JSON block now. Output ONLY the RUN_COMMAND tag.' }
+            ]
+            const forcedResp = await this.queryOllamaWithContext(forcedMessages, { ...ollamaContext, isCodeTask: true })
+            if (forcedResp && forcedResp.message?.content) {
+              replyContent = forcedResp.message.content
+              loopCount++
+              continue
+            }
+          }
+        }
+        break
+      }
 
       loopCount++
       try {
