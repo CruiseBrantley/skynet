@@ -132,11 +132,62 @@ function formatForMessage (text, maxChars = 2000) {
   return smartTruncate(formatted, maxChars)
 }
 
+const { EmbedBuilder } = require('discord.js')
+
+/**
+ * SafeEmbedBuilder wraps Discord.js EmbedBuilder to guarantee that all text,
+ * descriptions, headers, and fields strictly stay within Discord API limits:
+ * - Description <= 4096 chars (auto-formats markdown tables and headers)
+ * - Title <= 256 chars
+ * - Field Name <= 256 chars, Field Value <= 1024 chars
+ * - Footer <= 2048 chars, Author <= 256 chars
+ */
+class SafeEmbedBuilder extends EmbedBuilder {
+  setTitle (title) {
+    if (typeof title === 'string') {
+      return super.setTitle(title.substring(0, 256))
+    }
+    return super.setTitle(title)
+  }
+
+  setDescription (description) {
+    if (typeof description === 'string') {
+      return super.setDescription(formatForEmbed(description, 4000))
+    }
+    return super.setDescription(description)
+  }
+
+  addFields (...fields) {
+    const sanitized = fields.flat().map(field => {
+      if (!field || typeof field !== 'object') return field
+      const name = typeof field.name === 'string' ? field.name.substring(0, 256) : field.name
+      const value = typeof field.value === 'string' ? smartTruncate(field.value, 1000, '...') : field.value
+      return { ...field, name, value }
+    })
+    return super.addFields(sanitized)
+  }
+
+  setFooter (footer) {
+    if (footer && typeof footer === 'object' && typeof footer.text === 'string') {
+      return super.setFooter({ ...footer, text: footer.text.substring(0, 2048) })
+    }
+    return super.setFooter(footer)
+  }
+
+  setAuthor (author) {
+    if (author && typeof author === 'object' && typeof author.name === 'string') {
+      return super.setAuthor({ ...author, name: author.name.substring(0, 256) })
+    }
+    return super.setAuthor(author)
+  }
+}
+
 module.exports = {
   convertMarkdownTables,
   demoteLargeHeaders,
   balanceMarkdownTags,
   smartTruncate,
   formatForEmbed,
-  formatForMessage
+  formatForMessage,
+  SafeEmbedBuilder
 }
