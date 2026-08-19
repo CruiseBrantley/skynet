@@ -202,6 +202,11 @@ Expected JSON Schema:
         }, 30)
       } catch (_) {}
 
+      // Notify the channel where the error happened that the command was auto-healed
+      if (interaction?.channel?.send) {
+        interaction.channel.send(`🔧 **Auto-Repair**: Command \`/${commandName}\` encountered an error and was automatically patched by Skynet: *${reasoning}*. The updated command is now live on Discord!`).catch(() => {})
+      }
+
       logger.info(`SelfHealingEngine: Successfully healed slash command "/${commandName}". Reasoning: "${reasoning}"`)
       return { success: true, fixedCode, reasoning }
     } catch (err) {

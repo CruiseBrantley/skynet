@@ -293,6 +293,27 @@ async function execute (interaction, database) {
       let effectiveSystemPrompt = enhancedSystemPrompt
       if (isCodeTask) {
         effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE / COMMAND SYNTHESIS]\nThe user wants you to create, modify, fix, or update a Discord slash command or internal action. You MUST emit the command tag in your response:\nFor slash commands: <<<RUN_COMMAND: {"command": "create_slash_command", "name": "command_name", "description": "...", "code": "..."}>>>\nNEVER say "I am doing it now" or "Building it now" in plain text without emitting the executable <<<RUN_COMMAND: {...}>>> tag in that same response.'
+
+        // Auto-inject existing source code of any command or action mentioned in conversation
+        try {
+          const commandManager = require('../util/commandManager')
+          const allRegistered = commandManager.listSlashCommands()
+          let inspectedContext = ''
+          for (const cmd of allRegistered) {
+            const cmdPattern = new RegExp(`\\b(\\/?${cmd.name})\\b`, 'i')
+            if (cmdPattern.test(messageText) || finalPromptMessages.slice(-4).some(m => cmdPattern.test(m.content || ''))) {
+              const inspectRes = commandManager.inspectSlashCommand(cmd.name)
+              if (inspectRes.success && inspectRes.content) {
+                inspectedContext += `\n\n[EXISTING SOURCE CODE FOR SLASH COMMAND "/${cmd.name}"]:\n\`\`\`javascript\n${inspectRes.content}\n\`\`\`\nTo fix, patch, or enhance this command, output create_slash_command with name "${cmd.name}" and the complete updated JavaScript code.`
+              }
+            }
+          }
+          if (inspectedContext) {
+            effectiveSystemPrompt += inspectedContext
+          }
+        } catch (inspectErr) {
+          logger.warn(`Failed to auto-inspect commands for chat context: ${inspectErr.message}`)
+        }
       }
 
       logger.info(`Chat Context: Sending prompt with ${finalPromptMessages.length} messages. Commands: ${ActionExecutor.listActions().length} available. isCodeTask=${isCodeTask}`)
