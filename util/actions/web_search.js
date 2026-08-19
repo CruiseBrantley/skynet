@@ -12,40 +12,47 @@ async function searchViaGoogleGrounding (query) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return null
 
-  const candidateModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.0-flash']
+  const candidateModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-3.5-flash']
   for (const model of candidateModels) {
-    try {
-      logger.info(`web_search: Attempting Google Search Grounding via ${model}...`)
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          contents: [{ parts: [{ text: `Search the web for real-time information: ${query}\nProvide a factual breakdown and include specific details, dates, and sources.` }] }],
-          tools: [{ googleSearch: {} }]
-        },
-        { timeout: 60000 }
-      )
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        logger.info(`web_search: Attempting Google Search Grounding via ${model} (attempt ${attempt})...`)
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            contents: [{ parts: [{ text: `Search the web for real-time information: ${query}\nProvide a factual breakdown and include specific details, dates, and sources.` }] }],
+            tools: [{ googleSearch: {} }]
+          },
+          { timeout: 60000 }
+        )
 
-      const candidate = res.data.candidates?.[0]
-      const text = candidate?.content?.parts?.[0]?.text
-      if (text && text.trim().length > 0) {
-        const chunks = candidate.groundingMetadata?.groundingChunks || []
-        const sources = chunks
-          .filter(c => c.web?.uri)
-          .map(c => `- [${c.web.title || 'Source'}](${c.web.uri})`)
-          .slice(0, 5)
+        const candidate = res.data.candidates?.[0]
+        const text = candidate?.content?.parts?.[0]?.text
+        if (text && text.trim().length > 0) {
+          const chunks = candidate.groundingMetadata?.groundingChunks || []
+          const sources = chunks
+            .filter(c => c.web?.uri)
+            .map(c => `- [${c.web.title || 'Source'}](${c.web.uri})`)
+            .slice(0, 5)
 
-        let result = text
-        if (sources.length > 0) {
-          result += '\n\n**Sources:**\n' + sources.join('\n')
+          let result = text
+          if (sources.length > 0) {
+            result += '\n\n**Sources:**\n' + sources.join('\n')
+          }
+          logger.info(`web_search: Successfully retrieved grounded results via ${model}`)
+          return result
         }
-        logger.info(`web_search: Successfully retrieved grounded results via ${model}`)
-        return result
-      }
-    } catch (err) {
-      const status = err.response?.status
-      logger.warn(`web_search: Google Search Grounding via ${model} failed (HTTP ${status || 'ERR'}): ${err.message}`)
-      if (status && status !== 503 && status !== 429 && status !== 404 && status !== 500) {
-        break
+      } catch (err) {
+        const status = err.response?.status
+        logger.warn(`web_search: Google Search Grounding via ${model} (attempt ${attempt}) failed (HTTP ${status || 'ERR'}): ${err.message}`)
+        if (status === 503 && attempt === 1) {
+          // Transient demand spike on Google servers; wait 1.5s and retry
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          continue
+        }
+        if (status && status !== 503 && status !== 429 && status !== 404 && status !== 500) {
+          break
+        }
       }
     }
   }
