@@ -44,7 +44,7 @@ module.exports = {
               contents: [{ parts: [{ text: prompt }] }],
               tools: [{ googleSearch: {} }]
             },
-            { timeout: 25000 }
+            { timeout: 60000 }
           )
 
           const candidate = res.data.candidates?.[0]
@@ -69,19 +69,27 @@ module.exports = {
       }
 
       // Truncate description to fit Discord embed limit (4096 chars)
-      if (content.length > 3800) {
-        content = content.substring(0, 3750) + '...\n\n*(Summary truncated for length)*'
+      let desc = content
+      if (desc.length > 3500) {
+        desc = desc.substring(0, 3450) + '...\n\n*(Summary truncated for length)*'
       }
 
       const embed = new EmbedBuilder()
         .setTitle(`📰 ${game} — Latest News & Patch Notes`)
-        .setDescription(content)
+        .setDescription(desc)
         .setColor(0x2ecc71)
         .setTimestamp()
         .setFooter({ text: `Requested by ${interaction.user.username}` })
 
       if (sources.length > 0) {
-        embed.addFields({ name: '🔗 Sources & Official Notes', value: sources.join(' • '), inline: false })
+        let sourceText = sources.join(' • ')
+        if (sourceText.length > 1000) {
+          sourceText = sources.slice(0, 2).join(' • ')
+        }
+        if (sourceText.length > 1000) {
+          sourceText = sourceText.substring(0, 990) + '...'
+        }
+        embed.addFields({ name: '🔗 Sources & Official Notes', value: sourceText, inline: false })
       }
 
       if (target.id !== interaction.channelId) {

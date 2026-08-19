@@ -22,7 +22,7 @@ async function searchViaGoogleGrounding (query) {
           contents: [{ parts: [{ text: `Search the web for real-time information: ${query}\nProvide a factual breakdown and include specific details, dates, and sources.` }] }],
           tools: [{ googleSearch: {} }]
         },
-        { timeout: 25000 }
+        { timeout: 60000 }
       )
 
       const candidate = res.data.candidates?.[0]
