@@ -81,7 +81,17 @@ class AgentLoop {
       // 1. Evaluate internal state (maintenance, schedules, etc.)
       await this._evaluate(0)
 
-      // 2. Proactive "Interjection" check for whitelisted guilds
+      // 2. Periodic Twitch Webhook & Ingress Health Check (Every ~6 hours / 72 ticks)
+      if (this._tickCount % 72 === 0) {
+        try {
+          const { checkTwitchHealth } = require('../server/server')
+          await checkTwitchHealth(this._bot)
+        } catch (twitchErr) {
+          logger.warn(`AgentLoop: Periodic Twitch health check error: ${twitchErr.message}`)
+        }
+      }
+
+      // 3. Proactive "Interjection" check for whitelisted guilds
       await this._checkProactiveGuilds()
     } catch (err) {
       logger.error(`AgentLoop: Uncaught exception in tick: ${err.stack || err.message}`)

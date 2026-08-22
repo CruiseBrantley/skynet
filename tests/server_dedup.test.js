@@ -67,4 +67,42 @@ describe('Server Webhook Deduplication', () => {
     // Still only 1 call to botAnnounce
     expect(botAnnounce).toHaveBeenCalledTimes(1)
   })
+
+  test('checkTwitchHealth detects failed subscriptions and alerts owner via DM', async () => {
+    process.env.OWNER_ID = 'owner_123'
+    const { checkTwitchHealth } = require('../server/server')
+
+    const mockSend = jest.fn().mockResolvedValue({})
+    const botWithUsers = {
+      users: {
+        fetch: jest.fn().mockResolvedValue({ id: 'owner_123', send: mockSend })
+      }
+    }
+
+    // Mock getSubscriptions returning a failed subscription
+    axios.get.mockResolvedValueOnce({
+      data: {
+        total: 2,
+        data: [
+          {
+            id: 'sub_fail_1',
+            status: 'webhook_callback_verification_failed',
+            condition: { broadcaster_user_id: '123' },
+            transport: { callback: 'https://sirian.ddns.net/twitch' }
+          },
+          {
+            id: 'sub_ok_2',
+            status: 'enabled',
+            condition: { broadcaster_user_id: '456' },
+            transport: { callback: 'https://sirian.ddns.net/twitch' }
+          }
+        ]
+      }
+    })
+
+    const result = await checkTwitchHealth(botWithUsers)
+    expect(result.healthy).toBe(false)
+    expect(result.failedSubs.length).toBe(1)
+    expect(mockSend).toHaveBeenCalledWith(expect.stringContaining('Twitch Ingress Alert'))
+  })
 })

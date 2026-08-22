@@ -229,8 +229,54 @@ function setupServer (bot) {
     subscribeAll().catch(err => logger.error('Error during subscription refresh:', err))
   })
 
+  // Perform a delayed health check after startup (give Twitch 10s to verify webhooks)
+  setTimeout(() => {
+    checkTwitchHealth(bot).catch(err => logger.warn(`Initial Twitch health check failed: ${err.message}`))
+  }, 10_000).unref()
+
   // Return the express app for tests/introspection; callers don't use the return today.
   return server
+}
+
+/**
+ * Checks the health of all active Twitch EventSub subscriptions and alerts the bot owner via Discord DM if issues are found.
+ * @param {import('discord.js').Client} bot
+ * @returns {Promise<{ healthy: boolean, failedSubs: object[], total: number }>}
+ */
+async function checkTwitchHealth (bot) {
+  try {
+    const token = oauthToken || await oauth()
+    const subs = await getSubscriptions(token)
+    if (!subs || !subs.data) {
+      return { healthy: false, failedSubs: [], total: 0 }
+    }
+
+    const failedSubs = subs.data.filter(s => s.status === 'webhook_callback_verification_failed' || s.status.includes('failed'))
+    const healthy = failedSubs.length === 0
+
+    if (!healthy && bot && process.env.OWNER_ID) {
+      try {
+        const owner = await bot.users.fetch(process.env.OWNER_ID).catch(() => null)
+        if (owner) {
+          const sampleFailure = failedSubs[0]
+          const alertMsg = `⚠️ **Twitch Ingress Alert**: ${failedSubs.length}/${subs.data.length} Twitch EventSub subscriptions failed webhook callback verification.\n` +
+            `**Target Callback**: \`${sampleFailure.transport?.callback || 'unknown'}\`\n` +
+            `**Status**: \`${sampleFailure.status}\`\n\n` +
+            '💡 **Likely Cause**: The SSL/TLS certificate for your DDNS domain expired or the port forwarding/reverse proxy is unreachable.\n' +
+            'Use `/twitch-notify sync` once resolved, or comment out `TWITCH_CALLBACK_URL` in `.env` to fallback to Ngrok.'
+          await owner.send(alertMsg).catch(e => logger.warn(`Could not send DM alert to owner: ${e.message}`))
+        }
+      } catch (alertErr) {
+        logger.warn(`Failed to dispatch Twitch health alert DM: ${alertErr.message}`)
+      }
+    }
+
+    logger.info(`Twitch Health Check: ${subs.data.length - failedSubs.length}/${subs.data.length} subscriptions healthy.`)
+    return { healthy, failedSubs, total: subs.data.length }
+  } catch (err) {
+    logger.error(`Error in checkTwitchHealth: ${err.message}`)
+    return { healthy: false, failedSubs: [], total: 0 }
+  }
 }
 
 module.exports.setupServer = setupServer
@@ -238,3 +284,4 @@ module.exports.getSubscriptions = getSubscriptions
 module.exports.deleteSubscription = deleteSubscription
 module.exports.twitchSubscribe = twitchSubscribe
 module.exports.subscribeAll = subscribeAll
+module.exports.checkTwitchHealth = checkTwitchHealth
