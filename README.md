@@ -103,6 +103,7 @@ The test suite includes extensive mocks for Discord.js, YouTube, and LLM tiers f
 ## Deployment
 
 The bot can be deployed as a macOS Launch Agent. See [MACOS_MANAGEMENT.md](MACOS_MANAGEMENT.md) for details.
+For the complete network topology, reverse proxy routing, and Twitch EventSub ingress architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```bash
 # Restart the service
