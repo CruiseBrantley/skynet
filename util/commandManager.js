@@ -4,7 +4,7 @@ const { REST, Routes } = require('discord.js')
 const logger = require('../logger')
 
 const COMMANDS_DIR = path.join(__dirname, '../commands')
-const PROTECTED_COMMANDS = new Set(['server', 'config', 'chat', 'ping'])
+const PROTECTED_COMMANDS = new Set(['server', 'config', 'chat', 'ping', 'restart'])
 
 /**
  * Reusable helper to deploy slash commands to Discord REST API.
@@ -26,17 +26,21 @@ async function deploySlashCommands (targetGuildId) {
 
     for (const file of commandFiles) {
       const fullPath = path.join(COMMANDS_DIR, file)
-      delete require.cache[require.resolve(fullPath)]
-      const command = require(fullPath)
-      if ('data' in command && 'execute' in command) {
-        const cmdData = command.data.toJSON()
-        const cmdGuildId = command.guildId || null
-        if (cmdGuildId && cmdGuildId !== 'global') {
-          if (!guildCommandsMap.has(cmdGuildId)) guildCommandsMap.set(cmdGuildId, [])
-          guildCommandsMap.get(cmdGuildId).push(cmdData)
-        } else {
-          globalCommands.push(cmdData)
+      try {
+        delete require.cache[require.resolve(fullPath)]
+        const command = require(fullPath)
+        if ('data' in command && 'execute' in command) {
+          const cmdData = command.data.toJSON()
+          const cmdGuildId = command.guildId || null
+          if (cmdGuildId && cmdGuildId !== 'global') {
+            if (!guildCommandsMap.has(cmdGuildId)) guildCommandsMap.set(cmdGuildId, [])
+            guildCommandsMap.get(cmdGuildId).push(cmdData)
+          } else {
+            globalCommands.push(cmdData)
+          }
         }
+      } catch (err) {
+        logger.warn(`commandManager: Could not load command file ${file} for deployment: ${err.message}`)
       }
     }
 
@@ -105,10 +109,10 @@ function listSlashCommands () {
         const cmd = require(path.join(COMMANDS_DIR, file))
         guildId = cmd.guildId || null
       } catch (_) {}
-      result.push({ name, file, enabled: true, protected: PROTECTED_COMMANDS.has(name), guildId })
+      result.push({ name, file, enabled: true, protected: PROTECTED_COMMANDS.has(name), scope: guildId ? 'guild' : 'global', guildId })
     } else if (file.endsWith('.js.disabled')) {
       const name = file.replace(/\.js\.disabled$/, '')
-      result.push({ name, file, enabled: false, protected: false, guildId: null })
+      result.push({ name, file, enabled: false, protected: false, scope: 'disabled', guildId: null })
     }
   }
 
@@ -472,6 +476,68 @@ ${fileContent.split('\n').map(l => '    ' + l).join('\n')}
   }
 }
 
+/**
+ * Changes the registration scope of a slash command (global vs guild-specific) and redeploys.
+ * @param {object} options
+ * @param {string} options.name
+ * @param {string|null} options.guildId - 'global' or guild ID string
+ * @param {import('discord.js').Client} [options.bot]
+ * @returns {Promise<{ success: boolean, message?: string, scope?: string, error?: string }>}
+ */
+async function setCommandScope ({ name, guildId, bot }) {
+  const cleanName = (name || '').trim().toLowerCase().replace(/^\/+/, '')
+  if (!cleanName) return { success: false, error: 'Command name is required.' }
+
+  if (PROTECTED_COMMANDS.has(cleanName)) {
+    return { success: false, error: `Command "/${cleanName}" is protected and its scope cannot be changed.` }
+  }
+
+  const activePath = path.join(COMMANDS_DIR, `${cleanName}.js`)
+  if (!fs.existsSync(activePath)) {
+    return { success: false, error: `Active command file "/commands/${cleanName}.js" not found.` }
+  }
+
+  try {
+    let content = fs.readFileSync(activePath, 'utf8')
+    const isGlobal = !guildId || guildId === 'global'
+    const targetGuildId = isGlobal ? null : String(guildId).trim()
+
+    // Replace or insert guildId in module.exports
+    if (isGlobal) {
+      content = content.replace(/\bguildId:\s*['"`][^'"`]+['"`],?\s*/g, '')
+    } else {
+      if (/guildId:\s*['"`][^'"`]+['"`]/.test(content)) {
+        content = content.replace(/guildId:\s*['"`][^'"`]+['"`]/, `guildId: '${targetGuildId}'`)
+      } else {
+        content = content.replace(/module\.exports\s*=\s*{/, `module.exports = {\n  guildId: '${targetGuildId}',`)
+      }
+    }
+
+    fs.writeFileSync(activePath, content, 'utf8')
+    delete require.cache[require.resolve(activePath)]
+
+    if (bot && bot.commands) {
+      const reloaded = require(activePath)
+      bot.commands.set(cleanName, reloaded)
+    }
+
+    // Redeploy to Discord REST
+    await module.exports.deploySlashCommands()
+
+    const scopeLabel = isGlobal ? 'Global (All Servers & DMs)' : `Guild (${targetGuildId})`
+    logger.info(`commandManager: Updated scope for "/${cleanName}" to ${scopeLabel}`)
+    return {
+      success: true,
+      name: cleanName,
+      scope: isGlobal ? 'global' : targetGuildId,
+      message: `Successfully set "/${cleanName}" scope to ${scopeLabel}.`
+    }
+  } catch (err) {
+    logger.error(`commandManager: Failed to set scope for "/${cleanName}": ${err.message}`)
+    return { success: false, error: err.message }
+  }
+}
+
 module.exports = {
   deploySlashCommands,
   listSlashCommands,
@@ -479,5 +545,6 @@ module.exports = {
   disableSlashCommand,
   enableSlashCommand,
   createSlashCommand,
+  setCommandScope,
   PROTECTED_COMMANDS
 }

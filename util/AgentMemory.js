@@ -30,8 +30,78 @@ function scopeFor (key) {
  */
 class AgentMemory {
   constructor () {
+    this._database = null
+    this._syncTimer = null
     this._ensureDataDir()
     this._data = this._load()
+  }
+
+  /**
+   * Initializes Firebase cloud sync for long-term agent memories.
+   */
+  init (database) {
+    this._database = database
+    if (!this._database || typeof this._database.ref !== 'function') return
+
+    try {
+      const memRef = this._database.ref('agent_memory')
+      memRef.once('value').then(snapshot => {
+        if (snapshot && typeof snapshot.exists === 'function' && snapshot.exists()) {
+          const remoteMem = snapshot.val()
+          if (Array.isArray(remoteMem)) {
+            for (const item of remoteMem) {
+              if (item && item.key && !this._data[item.key]) {
+                const { key, ...rest } = item
+                this._data[key] = {
+                  ...rest,
+                  guildId: rest.guildId !== undefined ? rest.guildId : null
+                }
+              }
+            }
+            this._saveLocalOnly()
+            logger.info(`AgentMemory: Hydrated ${remoteMem.length} memories from Firebase.`)
+          } else if (remoteMem && typeof remoteMem === 'object') {
+            for (const [k, v] of Object.entries(remoteMem)) {
+              if (!this._data[k]) {
+                this._data[k] = {
+                  ...v,
+                  guildId: v.guildId !== undefined ? v.guildId : null
+                }
+              }
+            }
+            this._saveLocalOnly()
+            logger.info(`AgentMemory: Hydrated ${Object.keys(remoteMem).length} memories from Firebase.`)
+          }
+        } else if (Object.keys(this._data).length > 0) {
+          this._syncRemote()
+          logger.info('AgentMemory: Seeded Firebase with initial local memories.')
+        }
+      }).catch(err => {
+        logger.warn(`AgentMemory: Firebase initial sync warning: ${err.message}`)
+      })
+    } catch (err) {
+      logger.warn(`AgentMemory: Failed to setup Firebase sync: ${err.message}`)
+    }
+  }
+
+  _syncRemote () {
+    if (!this._database || typeof this._database.ref !== 'function') return
+    if (this._syncTimer) clearTimeout(this._syncTimer)
+
+    this._syncTimer = setTimeout(() => {
+      try {
+        const list = []
+        for (const [k, v] of Object.entries(this._data)) {
+          list.push({ key: k, ...v })
+        }
+        this._database.ref('agent_memory').set(list)
+          .then(() => logger.debug('AgentMemory: Successfully synced memories to Firebase.'))
+          .catch(e => logger.warn(`AgentMemory: Firebase sync error: ${e.message}`))
+      } catch (err) {
+        logger.warn(`AgentMemory: Failed to dispatch Firebase sync: ${err.message}`)
+      }
+    }, 500)
+    if (this._syncTimer.unref) this._syncTimer.unref()
   }
 
   _ensureDataDir () {
@@ -52,12 +122,17 @@ class AgentMemory {
     return {}
   }
 
-  _save () {
+  _saveLocalOnly () {
     try {
       fs.writeFileSync(MEMORY_FILE, JSON.stringify(this._data, null, 2))
     } catch (e) {
       logger.error(`AgentMemory: Failed to save memory: ${e.message}`)
     }
+  }
+
+  _save () {
+    this._saveLocalOnly()
+    this._syncRemote()
   }
 
   /**

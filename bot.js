@@ -125,6 +125,17 @@ guardian.init()
 const musicManager = require('./util/MusicManager')
 const agentScheduler = require('./util/AgentScheduler')
 const agentLoop = require('./util/AgentLoop')
+const telemetry = require('./util/telemetry')
+telemetry.init(database)
+const stateStore = require('./util/StateStore')
+stateStore.init(database)
+const workflowEngine = require('./util/WorkflowEngine')
+workflowEngine.init(database)
+const agentMemory = require('./util/AgentMemory')
+agentMemory.init(database)
+const triggerEngine = require('./util/TriggerEngine')
+triggerEngine.init({ telemetry, client: bot, database })
+triggerEngine.startWatchdog(bot)
 const botUpdate = require('./events/botUpdate')
 const botDelete = require('./events/botDelete')
 const { fetchAndFormatContext } = require('./util/chat/contextHelper')
@@ -252,6 +263,78 @@ bot.on('interactionCreate', async (interaction) => {
       return
     }
 
+    // 3. Self-Healing Code Repair Approval & Rollback Buttons
+    if (interaction.customId.startsWith('repair_approve_') || interaction.customId.startsWith('repair_reject_') || interaction.customId.startsWith('repair_rollback_')) {
+      const isApprove = interaction.customId.startsWith('repair_approve_')
+      const isRollback = interaction.customId.startsWith('repair_rollback_')
+      const SelfHealingEngine = require('./util/chat/SelfHealingEngine')
+
+      if (interaction.user.id !== process.env.OWNER_ID) {
+        await interaction.reply({
+          content: '⛔ Only the bot owner can manage code repairs.',
+          ephemeral: true
+        }).catch(() => {})
+        return
+      }
+
+      if (isRollback) {
+        const backupId = interaction.customId.replace(/^repair_rollback_/, '')
+        await interaction.deferUpdate().catch(() => {})
+        const res = await SelfHealingEngine.rollbackRepair(backupId, interaction.user.id, interaction.client)
+        if (res.success) {
+          await interaction.editReply({
+            content: `⏪ **Rollback Complete**: \`${res.targetType === 'slash' ? `/${res.name}` : res.name}\` has been reverted to its previous version and reloaded on Discord.`,
+            components: []
+          }).catch(() => {})
+        } else {
+          await interaction.editReply({
+            content: `❌ **Failed to roll back**: ${res.error}`,
+            components: []
+          }).catch(() => {})
+        }
+        return
+      }
+
+      const proposalId = interaction.customId.replace(/^repair_(approve|reject)_/, '')
+      if (isApprove) {
+        await interaction.deferUpdate().catch(() => {})
+        const result = await SelfHealingEngine.applyPendingRepair(proposalId, interaction.user.id, interaction.client)
+        if (result.success) {
+          const components = []
+          if (result.backupId) {
+            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js')
+            components.push(
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`repair_rollback_${result.backupId}`)
+                  .setLabel('Rollback to Previous Version')
+                  .setStyle(ButtonStyle.Secondary)
+                  .setEmoji('⏪')
+              )
+            )
+          }
+
+          await interaction.editReply({
+            content: `✅ **Code Repair Approved & Applied**: \`${result.targetType === 'slash' ? `/${result.name}` : result.name}\` has been updated and reloaded on Discord.\n*${result.reasoning}*`,
+            components
+          }).catch(() => {})
+        } else {
+          await interaction.editReply({
+            content: `❌ **Failed to apply repair**: ${result.error}`,
+            components: []
+          }).catch(() => {})
+        }
+      } else {
+        await interaction.deferUpdate().catch(() => {})
+        await SelfHealingEngine.rejectPendingRepair(proposalId, interaction.user.id)
+        await interaction.editReply({
+          content: '🚫 **Code Repair Rejected**: Proposal has been cancelled and will not be applied.',
+          components: []
+        }).catch(() => {})
+      }
+      return
+    }
+
     return
   }
 
@@ -264,20 +347,45 @@ bot.on('interactionCreate', async (interaction) => {
     return
   }
 
+  const startEpoch = Date.now()
   try {
     await command.execute(interaction, database)
+    telemetry.trackCommandExecution({
+      commandName: interaction.commandName,
+      type: 'slash',
+      guildId: interaction.guildId || 'DM',
+      guildName: interaction.guild?.name || (interaction.guildId ? 'Server' : 'Direct Message'),
+      channelId: interaction.channelId,
+      userId: interaction.user.id,
+      username: interaction.user.tag || interaction.user.username,
+      success: true,
+      durationMs: Date.now() - startEpoch
+    }).catch(() => {})
   } catch (error) {
     logger.error(`Slash command error: ${error.stack || error.message}`)
 
-    // Trigger autonomous self-healing in background for custom/dynamic commands
+    telemetry.trackCommandExecution({
+      commandName: interaction.commandName,
+      type: 'slash',
+      guildId: interaction.guildId || 'DM',
+      guildName: interaction.guild?.name || (interaction.guildId ? 'Server' : 'Direct Message'),
+      channelId: interaction.channelId,
+      userId: interaction.user.id,
+      username: interaction.user.tag || interaction.user.username,
+      success: false,
+      error,
+      durationMs: Date.now() - startEpoch
+    }).catch(() => {})
+
+    // Trigger diagnostic repair proposal for owner approval
     const SelfHealingEngine = require('./util/chat/SelfHealingEngine')
-    SelfHealingEngine.healSlashCommand({
+    SelfHealingEngine.proposeSlashCommandFix({
       commandName: interaction.commandName,
       error,
       interaction
-    }).catch(e => logger.warn(`Slash command self-healing failed: ${e.message}`))
+    }).catch(e => logger.warn(`Slash command repair proposal failed: ${e.message}`))
 
-    const responseMsg = `⚠️ Command \`/${interaction.commandName}\` encountered an error and is being automatically self-healed. Please try again in a moment!`
+    const responseMsg = `⚠️ Command \`/${interaction.commandName}\` encountered an error. A diagnostic repair proposal has been formulated for owner review.`
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
         content: responseMsg,
@@ -574,7 +682,11 @@ bot.on('messageCreate', async (message) => {
           fetchReply: async () => responseMessage,
           reply: replyFunc,
           editReply: editFunc,
-          followUp: replyFunc,
+          followUp: async (content) => {
+            stopTyping()
+            const payload = typeof content === 'string' ? { content } : content
+            return await message.channel.send(payload)
+          },
           recentMessages: preFetchedHistory
         }
 

@@ -229,6 +229,22 @@ function setupServer (bot) {
     subscribeAll().catch(err => logger.error('Error during subscription refresh:', err))
   })
 
+  // Generic Webhook Receiver for external services (e.g. POST /api/webhook/github_alerts)
+  server.post('/api/webhook/:id', async (req, res) => {
+    const webhookId = req.params.id
+    const payload = req.body || {}
+    logger.info(`Server: Received external webhook POST on /api/webhook/${webhookId}`)
+
+    try {
+      const triggerEngine = require('../util/TriggerEngine')
+      const result = await triggerEngine.evaluateWebhook(webhookId, payload, bot)
+      res.status(200).json({ success: true, webhookId, matchedTriggers: result?.matched || 0 })
+    } catch (err) {
+      logger.error(`Server: Error processing webhook /api/webhook/${webhookId}: ${err.message}`)
+      res.status(500).json({ success: false, error: err.message })
+    }
+  })
+
   // Perform a delayed health check after startup (give Twitch 10s to verify webhooks)
   setTimeout(() => {
     checkTwitchHealth(bot).catch(err => logger.warn(`Initial Twitch health check failed: ${err.message}`))

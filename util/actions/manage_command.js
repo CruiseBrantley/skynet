@@ -3,10 +3,11 @@ const commandManager = require('../commandManager')
 
 module.exports = {
   name: 'manage_command',
-  description: 'Enables, disables, or lists registered Discord application slash commands (Creator / Admin only)',
+  description: 'Enables, disables, lists, creates, or changes registration scope (Global vs Guild ID) for Discord application slash commands (Creator / Admin only)',
   schema: {
-    action: 'string — "disable", "enable", or "list"',
-    name: 'string — command name (e.g. "catfact", "music") (required for disable/enable)'
+    action: 'string — "list", "disable", "enable", "create", or "set_scope"',
+    name: 'string — command name (e.g. "catfact", "music", "netstats")',
+    guild_id: 'string — target guild ID or "global" (required for set_scope)'
   },
   execute: async (bot, channel, params, context = {}) => {
     const userId = context.userId || context.user?.id
@@ -15,31 +16,47 @@ module.exports = {
     const actionType = (params.action || 'list').toLowerCase().trim()
     const targetName = (params.name || '').toLowerCase().trim().replace(/^\/+/, '')
 
-    // Security Gate: Disabling and enabling slash commands is restricted to the bot owner
-    if (['disable', 'enable'].includes(actionType) && !isOwner && !isDM) {
-      const deniedMsg = '⛔ **Permission Denied:** Disabling or removing slash commands is restricted to the bot creator.'
+    // Security Gate: Disabling, enabling, and scoping slash commands is restricted to the bot owner
+    if (['disable', 'enable', 'set_scope'].includes(actionType) && !isOwner && !isDM) {
+      const deniedMsg = '⛔ **Permission Denied:** Modifying slash commands is restricted to the bot creator.'
       if (channel && typeof channel.send === 'function') await channel.send(deniedMsg).catch(() => {})
-      return { success: false, error: 'Permission denied: Disabling/removing slash commands is restricted to the bot creator.' }
+      return { success: false, error: 'Permission denied: Modifying slash commands is restricted to the bot creator.' }
     }
 
     if (actionType === 'list') {
       const commands = commandManager.listSlashCommands()
-      const activeList = commands.filter(c => c.enabled).map(c => `• **/${c.name}**${c.protected ? ' *(protected)*' : ''}`).join('\n') || 'None'
-      const disabledList = commands.filter(c => !c.enabled).map(c => `• ~~/${c.name}~~ *(disabled)*`).join('\n') || 'None'
+      const activeList = commands
+        .filter(c => c.enabled)
+        .map(c => `• **/${c.name}** — \`${c.scope === 'global' ? 'Global' : `Guild: ${c.guildId}`}\`${c.protected ? ' *(protected)*' : ''}`)
+        .join('\n') || 'None'
+
+      const disabledList = commands
+        .filter(c => !c.enabled)
+        .map(c => `• ~~/${c.name}~~ *(disabled)*`)
+        .join('\n') || 'None'
 
       const embed = new EmbedBuilder()
-        .setTitle('⚙️ Slash Command Registry')
+        .setTitle('⚙️ Slash Command Registry & Scopes')
         .setColor(0x00AEEF)
         .addFields(
           { name: `Active Commands (${commands.filter(c => c.enabled).length})`, value: activeList, inline: false },
           { name: `Disabled Commands (${commands.filter(c => !c.enabled).length})`, value: disabledList, inline: false }
         )
-        .setFooter({ text: 'Use <<<RUN_COMMAND: {"command": "manage_command", "action": "disable", "name": "command_name"}>>>' })
+        .setFooter({ text: 'Use <<<RUN_COMMAND: {"command": "manage_command", "action": "set_scope", "name": "command_name", "guild_id": "global"}>>>' })
 
       if (channel && typeof channel.send === 'function') {
         await channel.send({ embeds: [embed] }).catch(() => {})
       }
       return { success: true, count: commands.length, commands }
+    }
+
+    if (actionType === 'set_scope') {
+      if (!targetName) return { success: false, error: 'Command name is required for set_scope.' }
+      const targetGuildId = params.guild_id || params.guildId || 'global'
+      const res = await commandManager.setCommandScope({ name: targetName, guildId: targetGuildId, bot })
+      const msg = res.success ? `🌐 ${res.message}` : `❌ Failed to set scope for /${targetName}: ${res.error}`
+      if (channel && typeof channel.send === 'function') await channel.send(msg).catch(() => {})
+      return res
     }
 
     if (actionType === 'disable') {
@@ -91,6 +108,6 @@ module.exports = {
       return res
     }
 
-    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "disable", "enable", or "create".` }
+    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "set_scope", "disable", "enable", or "create".` }
   }
 }

@@ -4,6 +4,8 @@ const logger = require('../../logger')
 
 const { COMMAND_REGEX } = require('./constants')
 const { createMockInteraction } = require('./createMockInteraction')
+const telemetry = require('../telemetry')
+const SelfHealingEngine = require('./SelfHealingEngine')
 
 class AutonomousCommandProcessor {
   constructor ({ botName, ActionExecutor, agentMemory, queryOllamaWithContext, getParam }) {
@@ -50,15 +52,20 @@ class AutonomousCommandProcessor {
       }
 
       if (!jsonStr) {
-        if (loopCount === 0 && ollamaContext?.isCodeTask) {
-          const stallRegex = /\b(doing it now|building it|rebuilding it|working on it|doing that now|fixing it now|making it now|writing it now|actually doing it|no more talk)\b/i
+        if (loopCount === 0) {
+          const stallRegex = /\b(doing it now|running it now|building it|rebuilding it|working on it|doing that now|fixing it now|making it now|writing it now|actually doing it|no more talk|executing it now|setting that up now|creating it now|fetching it now|checking that now|posted the narration|narration instead of the execution|let me run that|on it now|I'll do that now|I am doing that now|I will execute)\b/i
           if (stallRegex.test(replyContent)) {
-            logger.warn('AUTONOMOUS: Detected conversational stall on code task. Forcing code synthesis query...')
+            logger.warn(`AUTONOMOUS: Detected conversational stall ("${replyContent.substring(0, 80)}..."). Forcing command execution query...`)
+            const isCode = Boolean(ollamaContext?.isCodeTask)
+            const promptText = isCode
+              ? 'Generate the complete <<<RUN_COMMAND: {"command": "create_slash_command", "name": "...", "description": "...", "code": "..."}>>> JSON block now. Output ONLY the RUN_COMMAND tag.'
+              : 'You stated you are running or performing an action, but did not emit the <<<RUN_COMMAND: {...}>>> tag. Output the exact <<<RUN_COMMAND: {"command": "...", "params": {...}}>>> block NOW. Do not output conversational stall text.'
+
             const forcedMessages = [
               ...channelHistory.messages,
-              { role: 'user', content: 'Generate the complete <<<RUN_COMMAND: {"command": "create_slash_command", "name": "...", "description": "...", "code": "..."}>>> JSON block now. Output ONLY the RUN_COMMAND tag.' }
+              { role: 'user', content: promptText }
             ]
-            const forcedResp = await this.queryOllamaWithContext(forcedMessages, { ...ollamaContext, isCodeTask: true })
+            const forcedResp = await this.queryOllamaWithContext(forcedMessages, { ...ollamaContext, isCodeTask: isCode }, this.botName)
             if (forcedResp && forcedResp.message?.content) {
               replyContent = forcedResp.message.content
               loopCount++
@@ -282,7 +289,7 @@ class AutonomousCommandProcessor {
             }
           }
 
-          channelHistory.messages.push({ role: 'system', content: '[SYSTEM: Operations complete. The user has been notified. Provide a 1-sentence final acknowledgement, then stop.]' })
+          channelHistory.messages.push({ role: 'system', content: '[SYSTEM: Memory operation completed. If you have finished fulfilling all of the user\'s requests, provide a complete response. If further tools or steps are needed, continue executing them.]' })
 
           // BATCH DRAIN: If more tags are pending, don't query back yet
           if (replyContent.match(COMMAND_REGEX)) {
@@ -310,6 +317,7 @@ class AutonomousCommandProcessor {
             channel: targetChannel
           }, null, sharedState)
 
+          const startEpoch = Date.now()
           if (isAction) {
             const actionContext = {
               interaction: mock, // Use the MOCK to capture state
@@ -326,6 +334,35 @@ class AutonomousCommandProcessor {
             if (result.success) sharedState.primaryResponseUsed = true
             const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output)
             actionResult = result.success ? (outputStr || '[SYSTEM: Action executed successfully.]') : `[SYSTEM: Action failed: ${result.error}]`
+
+            telemetry.trackCommandExecution({
+              commandName: rawCmdName,
+              type: 'action',
+              guildId: interaction.guildId || 'DM',
+              guildName: interaction.guild?.name || (interaction.guildId ? 'Server' : 'Direct Message'),
+              channelId: targetChannel?.id,
+              userId: interaction.user?.id,
+              username: interaction.user?.tag || interaction.user?.username,
+              success: result.success,
+              error: result.error,
+              durationMs: Date.now() - startEpoch
+            }).catch(() => {})
+
+            if (!result.success) {
+              const actionObj = this.ActionExecutor._actions?.[rawCmdName]
+              if (actionObj) {
+                SelfHealingEngine.proposeActionFix({
+                  actionName: rawCmdName,
+                  description: actionObj.description,
+                  schema: actionObj.schema,
+                  code: actionObj.execute?.toString() || '',
+                  error: result.error,
+                  params,
+                  interaction,
+                  client: interaction.client
+                }).catch(e => logger.warn(`Action repair proposal failed: ${e.message}`))
+              }
+            }
           } else {
             mock.options = {
               getString: (n) => String(params[n] ?? this.getParam(cmdData, n) ?? ''),
@@ -345,12 +382,52 @@ class AutonomousCommandProcessor {
               sharedState.primaryResponseUsed = true
               const output = await targetCmd.execute(mock, database)
               actionResult = typeof output === 'string' ? output : `[SYSTEM: Command /${rawCmdName} completed.]`
+
+              telemetry.trackCommandExecution({
+                commandName: rawCmdName,
+                type: 'autonomous',
+                guildId: interaction.guildId || 'DM',
+                guildName: interaction.guild?.name || (interaction.guildId ? 'Server' : 'Direct Message'),
+                channelId: targetChannel?.id,
+                userId: interaction.user?.id,
+                username: interaction.user?.tag || interaction.user?.username,
+                success: true,
+                durationMs: Date.now() - startEpoch
+              }).catch(() => {})
             } catch (err) {
               actionResult = `[SYSTEM: Error executing /${rawCmdName}: ${err.message}]`
+
+              telemetry.trackCommandExecution({
+                commandName: rawCmdName,
+                type: 'autonomous',
+                guildId: interaction.guildId || 'DM',
+                guildName: interaction.guild?.name || (interaction.guildId ? 'Server' : 'Direct Message'),
+                channelId: targetChannel?.id,
+                userId: interaction.user?.id,
+                username: interaction.user?.tag || interaction.user?.username,
+                success: false,
+                error: err,
+                durationMs: Date.now() - startEpoch
+              }).catch(() => {})
+
+              SelfHealingEngine.proposeSlashCommandFix({
+                commandName: rawCmdName,
+                error: err,
+                interaction,
+                client: interaction.client
+              }).catch(e => logger.warn(`Autonomous slash command repair proposal failed: ${e.message}`))
             }
           }
 
-          channelHistory.messages.push({ role: 'system', content: `[SYSTEM: Action Result: ${actionResult}. The result is visible to the user. Do NOT repeat the command. Provide a 1-sentence acknowledgement, then stop.]` })
+          const isVisual = visualActions.includes(rawCmdName)
+          const visibilityGuidance = isVisual
+            ? 'This visual action was sent directly to Discord.'
+            : 'The user has NOT seen this raw data output yet. You must present, explain, or synthesize the key information in your response.'
+
+          channelHistory.messages.push({
+            role: 'system',
+            content: `[SYSTEM: Tool Output for "${rawCmdName}":\n${actionResult}\n\nNote: ${visibilityGuidance}\nReview the result. If more actions/tools are needed to completely address the user's prompt, execute the next tool now. If all tasks are done, formulate a complete and helpful final response directly answering the user.]`
+          })
 
           // BATCH DRAIN: If there are still more commands to run in the CURRENT replyContent,
           // we do NOT query back yet. We just continue the loop to process them.
@@ -370,6 +447,31 @@ class AutonomousCommandProcessor {
         // wedge the entire turn. Log and continue to allow the model to still reply.
         logger.warn(`AUTONOMOUS: Loop error (skipping command tag): ${err.message}`)
         continue
+      }
+    }
+
+    // ----------------------------------------------------
+    // 🛡️ Verification & Completeness Check
+    // If tools were executed, verify that we provide a complete, non-empty final response to the user.
+    // ----------------------------------------------------
+    const cleanedReply = replyContent.replace(COMMAND_REGEX, '').trim()
+    if ((!cleanedReply || cleanedReply.length === 0) && executedCommands.size > 0 && !sharedState.visualActionExecuted) {
+      logger.info('AUTONOMOUS: Loop exited with empty response after tool executions. Requesting final comprehensive summary...')
+      const verificationMessages = [
+        ...channelHistory.messages,
+        {
+          role: 'system',
+          content: '[SYSTEM: All tool executions have completed. Please formulate your final, complete, and helpful response to the user summarizing your actions, findings, or answering their question directly.]'
+        }
+      ]
+      try {
+        const finalCheckResp = await this.queryOllamaWithContext(verificationMessages, ollamaContext, this.botName)
+        if (finalCheckResp && finalCheckResp.message?.content) {
+          replyContent = finalCheckResp.message.content.trim()
+          channelHistory.messages.push(finalCheckResp.message)
+        }
+      } catch (checkErr) {
+        logger.warn(`AUTONOMOUS: Completion verification failed: ${checkErr.message}`)
       }
     }
 

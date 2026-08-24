@@ -14,6 +14,8 @@ jest.mock('fs', () => ({
   existsSync: jest.fn().mockReturnValue(false),
   readdirSync: jest.fn().mockReturnValue([]),
   readFileSync: jest.fn().mockReturnValue('{}'),
+  mkdirSync: jest.fn(),
+  writeFileSync: jest.fn(),
   unlinkSync: jest.fn()
 }))
 jest.mock('../server/server', () => ({ setupServer: jest.fn() }))

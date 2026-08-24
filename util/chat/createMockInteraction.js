@@ -57,7 +57,7 @@ function createMockInteraction (interaction, optionsOverrides = {}, onOutput = n
       ...optionsOverrides
     },
     reply: capture,
-    deferReply: async () => {},
+    deferReply: async () => ({ createdTimestamp: Date.now() }),
     editReply: capture,
     followUp: capture,
     deleteReply: async () => {
