@@ -118,10 +118,14 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     let geminiContents = []
     if (payload.messages) {
-      geminiContents = payload.messages.map(msg => {
+      const sanitized = []
+      for (const msg of payload.messages) {
         const role = msg.role === 'assistant' ? 'model' : 'user'
+        const text = msg.content || ''
+        if (!text && (!msg.images || msg.images.length === 0)) continue
+
         if (msg.images && msg.images.length > 0) {
-          const parts = [{ text: msg.content || '' }]
+          const parts = [{ text }]
           msg.images.forEach(img => {
             const base64Data = img.startsWith('data:') ? img.split(',')[1] : img
             parts.push({
@@ -131,10 +135,21 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
               }
             })
           })
-          return { role, parts }
+          sanitized.push({ role, parts })
+        } else if (sanitized.length > 0 && sanitized[sanitized.length - 1].role === role) {
+          // Merge consecutive turns of identical role
+          sanitized[sanitized.length - 1].parts[0].text += `\n\n${text}`
+        } else {
+          sanitized.push({ role, parts: [{ text }] })
         }
-        return { role, parts: [{ text: msg.content || '' }] }
-      })
+      }
+
+      // Gemini requires multi-turn contents to not end with a model turn
+      if (sanitized.length > 0 && sanitized[sanitized.length - 1].role === 'model') {
+        sanitized.push({ role: 'user', parts: [{ text: '[SYSTEM: Please continue your analysis or tool execution.]' }] })
+      }
+
+      geminiContents = sanitized.length > 0 ? sanitized : [{ role: 'user', parts: [{ text: 'Hello' }] }]
     } else if (payload.prompt) {
       geminiContents = [{ role: 'user', parts: [{ text: payload.prompt }] }]
     }
@@ -247,6 +262,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
             logger.info(`queryOllama: Level 0 Success on think=false retry from ${remoteHost}`)
             return noThinkData
           }
+        }
+        if (data.message.thinking && typeof data.message.thinking === 'string' && data.message.thinking.trim().length > 0) {
+          logger.info(`queryOllama: Recovered thinking text as response from ${remoteHost}`)
+          return { message: { role: 'assistant', content: data.message.thinking.trim() } }
         }
         logger.warn(`Remote Model [${remoteModel}] produced empty content string. Falling back to Level 2 (Gemini).`)
         throw new Error(`Remote Model ${remoteModel} produced empty content.`)

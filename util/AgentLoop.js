@@ -420,9 +420,61 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
 
     const taskList = tasks.length > 0
       ? tasks.map(t =>
-                `  - [${t.id}] "${t.description.substring(0, 80)}" → ${new Date(t.scheduledAt).toLocaleString()}${t.repeat ? ` (repeats ${t.repeat})` : ''} | target: ${t.channelId}`
+        `  - [${t.id}] "${t.description.substring(0, 80)}" → ${new Date(t.scheduledAt).toLocaleString()}${t.repeat ? ` (repeats ${t.repeat})` : ''} | target: ${t.channelId}`
       ).join('\n')
       : '  None'
+
+    let hostMetricsSummary = 'Normal'
+    try {
+      const os = require('os')
+      const totalMem = os.totalmem()
+      const freeMem = os.freemem()
+      const usedMemPercent = (((totalMem - freeMem) / totalMem) * 100).toFixed(1)
+      const loadAvg = os.loadavg().map(l => l.toFixed(2)).join(', ')
+      const processMemMb = (process.memoryUsage().rss / (1024 * 1024)).toFixed(1)
+      hostMetricsSummary = `Host RAM Usage: ${usedMemPercent}% | CPU Load: [${loadAvg}] | Bot RSS: ${processMemMb} MB`
+    } catch (_) {}
+
+    let telemetrySummary = 'No recent command errors.'
+    try {
+      const telemetry = require('./telemetry')
+      const errors = telemetry.getRecentLogs({ limit: 6, status: 'error' })
+      if (errors && errors.length > 0) {
+        telemetrySummary = errors.map(e => `  - [${e.timestamp}] ${e.type} "${e.commandName}": ${e.error || 'Failed'}`).join('\n')
+      }
+    } catch (_) {}
+
+    let triggersSummary = 'No active watchdog triggers.'
+    try {
+      const triggerEngine = require('./TriggerEngine')
+      const trigs = triggerEngine.listTriggers()
+      if (trigs && trigs.length > 0) {
+        triggersSummary = trigs.map(t => `  - [${t.id}] ${t.conditionType} (${t.target || 'system'}, threshold: ${t.threshold}, status: ${t.enabled !== false ? 'ENABLED' : 'DISABLED'}) -> ${t.actionType}`).join('\n')
+      }
+    } catch (_) {}
+
+    let pendingRepairsSummary = 'No pending code repairs.'
+    try {
+      const selfHealing = require('./chat/SelfHealingEngine')
+      const proposals = selfHealing.getPendingProposals()
+      if (proposals && proposals.length > 0) {
+        pendingRepairsSummary = proposals.map(p => `  - [${p.proposalId}] ${p.targetType === 'slash' ? '/' : ''}${p.name}: Error: "${String(p.error).substring(0, 60)}" (Awaiting owner approval)`).join('\n')
+      }
+    } catch (_) {}
+
+    let recentFixesSummary = 'None'
+    try {
+      const allMem = agentMemory.getAll(null)
+      const fixKeys = Object.keys(allMem).filter(k => k.startsWith('self_improvement.fixes.'))
+      if (fixKeys.length > 0) {
+        recentFixesSummary = fixKeys.map(k => {
+          const name = k.replace('self_improvement.fixes.', '')
+          const fix = allMem[k]
+          const fixObj = typeof fix === 'string' ? JSON.parse(fix) : fix
+          return `  - "${name}" fixed at ${fixObj.fixedAt || 'recently'}: ${fixObj.reasoning ? fixObj.reasoning.substring(0, 60) : 'patched'}`
+        }).join('\n')
+      }
+    } catch (_) {}
 
     const actionExecutor = require('./ActionExecutor')
     const actionList = actionExecutor.listActions()
@@ -432,7 +484,22 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
     const systemPrompt = `You are Skynet's autonomous background daemon agent.
 Current time: ${now}
 
-Your objective is to evaluate the current state and decide if any PROACTIVE action is needed.
+Your objective is to evaluate system health, active triggers, recent errors, and scheduled workflows to decide if any PROACTIVE or REMEDIAL action is needed.
+
+[SYSTEM HEALTH & HOST METRICS]
+${hostMetricsSummary}
+
+[RECENT COMMAND & ACTION ERRORS]
+${telemetrySummary}
+
+[ACTIVE WATCHDOG TRIGGERS]
+${triggersSummary}
+
+[PENDING SELF-HEALING REPAIRS AWAITING APPROVAL]
+${pendingRepairsSummary}
+
+[RECENT AUTOMATED CODE FIXES]
+${recentFixesSummary}
 
 [LONG-TERM MEMORY]
 ${memorySummary}
@@ -443,39 +510,33 @@ ${taskList}
 [RECENT AGENT ACTIONS]
 ${recentActions}
 
-[AVAILABLE DISCORD ACTIONS]
-These are the actions the scheduler can execute when tasks fire. You can create new ones.
+[AVAILABLE ACTIONS & REMEDIATION TOOLS]
 ${actionList}
 
 Rules:
-- If nothing requires action right now, respond with exactly: NOOP
-- Only act if you have a clear, specific reason derived from the above data.
-- Available commands: remember, forget, recall, schedule, cancel_task, create_action, delete_action
+- If all systems are healthy and no maintenance, remediation, or task scheduling is needed, respond with exactly: NOOP
+- If you notice repetitive errors, misconfigured triggers, or system issues, proactively remediate using available actions (e.g. manage_triggers, trigger_self_healing, modify_action, remember, schedule).
+- DO NOT delete or overwrite actions that currently have an active proposal in [PENDING SELF-HEALING REPAIRS].
 - Format: <<<RUN_COMMAND: {"command": "...", ...}>>>
-- DO NOT attempt to search the web, play music, generate images, or send arbitrary messages.
-- DO NOT schedule tasks speculatively — only if there is explicit context to do so.
-- MEMORY UPDATE RULE: When storing information, check the LONG-TERM MEMORY section first. If you see an existing key that relates to what you're about to remember, use the SAME key with the updated value instead of creating a new one. This keeps memory compact and accurate.
+- DO NOT attempt to search the web, play music, or generate images speculatively.
+- MEMORY UPDATE RULE: When storing information, check the LONG-TERM MEMORY section first. If you see an existing key that relates to what you're about to remember, use the SAME key with the updated value instead of creating a new one.
 
-create_action schema:
-<<<RUN_COMMAND: {"command": "create_action", "name": "snake_case_name", "description": "What it does", "schema": {"param": "type — description"}, "code": "// discord.js code here\\nawait channel.send(params.content);"}>>>
-- Only discord.js APIs allowed. No require('fs'), require('child_process'), process.env, or eval.
-- Built-in actions (send_message, send_poll, send_embed, send_thread) cannot be overwritten.
-
-delete_action schema:
-<<<RUN_COMMAND: {"command": "delete_action", "name": "action_name"}>>>
-- Only custom (AI-generated) actions can be deleted.
-
-modify_action schema (all fields optional except name):
-<<<RUN_COMMAND: {"command": "modify_action", "name": "existing_name", "description": "updated description", "code": "// new code"}>>>
-- Only custom actions can be modified. Omit any field you don't want to change.
+Available Core Commands:
+- manage_triggers: Enable, disable, create, or delete watchdog triggers.
+  Schema: <<<RUN_COMMAND: {"command": "manage_triggers", "action": "disable", "trigger_id": "host_ram"}>>>
+- trigger_self_healing: Formulate a code repair proposal for a broken command or action.
+  Schema: <<<RUN_COMMAND: {"command": "trigger_self_healing", "target_type": "action", "name": "action_name", "error": "details"}>>>
+- remember / forget / recall / recall_keys: Manage key-value long-term memory.
+- schedule / cancel_task: Manage timed background jobs.
+- create_action / modify_action / delete_action: Manage dynamic Discord actions.
 
 After your tool call, briefly explain WHY (one sentence). Example:
-<<<RUN_COMMAND: {"command": "remember", "key": "server.last_health_check", "value": "2026-04-18", "ttl_days": 7}>>>
+<<<RUN_COMMAND: {"command": "remember", "key": "server.last_health_check", "value": "2026-08-24", "ttl_days": 7}>>>
 Reason: Recording health check timestamp for diagnostics.`
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: 'Evaluate the current state. NOOP if nothing is needed.' }
+      { role: 'user', content: 'Evaluate system state, errors, and triggers. Remediate if necessary, otherwise output NOOP.' }
     ]
 
     logger.info(`AgentLoop: Querying Ollama for evaluation (depth: ${loopDepth})...`)
@@ -659,6 +720,60 @@ Reason: Recording health check timestamp for diagnostics.`
         return `delete_action: "${name}" removed`
       } else {
         logger.warn(`AgentLoop: [delete_action] Failed: ${result.error}`)
+        return null
+      }
+    }
+
+    if (cmd === 'trigger_self_healing') {
+      const selfHealing = require('./chat/SelfHealingEngine')
+      const targetType = getParam(cmdData, 'target_type') || 'action'
+      const name = getParam(cmdData, 'name')
+      const error = getParam(cmdData, 'error') || 'Runtime failure detected during background evaluation.'
+      if (!name) return null
+
+      const actionExecutor = require('./ActionExecutor')
+      if (targetType === 'action') {
+        const actionObj = actionExecutor._actions?.[name]
+        if (actionObj) {
+          await selfHealing.proposeActionFix({
+            actionName: name,
+            description: actionObj.description,
+            schema: actionObj.schema,
+            code: actionObj.execute?.toString() || '',
+            error,
+            params: {},
+            client: this._bot
+          })
+          return `trigger_self_healing: Dispatched repair proposal for action "${name}"`
+        }
+      } else if (targetType === 'slash') {
+        await selfHealing.proposeSlashCommandFix({
+          commandName: name,
+          error,
+          client: this._bot
+        })
+        return `trigger_self_healing: Dispatched repair proposal for slash command "/${name}"`
+      }
+      return null
+    }
+
+    // Dynamic execution of any registered ActionExecutor action (manage_triggers, manage_workflows, etc.)
+    const actionExecutor = require('./ActionExecutor')
+    const allActions = actionExecutor.listActions()
+    const matchingAction = allActions.find(a => a.name === cmd)
+    if (matchingAction) {
+      const params = cmdData.params || { ...cmdData }
+      delete params.command
+      const res = await actionExecutor.executeAction(cmd, params, {
+        client: this._bot,
+        userId: 'agent_loop',
+        guildId
+      })
+      if (res.success) {
+        logger.info(`AgentLoop: [${cmd}] executed successfully`)
+        return `${cmd}: ${typeof res.output === 'string' ? res.output.substring(0, 60) : 'success'}`
+      } else {
+        logger.warn(`AgentLoop: [${cmd}] Failed: ${res.error}`)
         return null
       }
     }

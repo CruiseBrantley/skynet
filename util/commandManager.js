@@ -30,7 +30,7 @@ async function deploySlashCommands (targetGuildId) {
         delete require.cache[require.resolve(fullPath)]
         const command = require(fullPath)
         if ('data' in command && 'execute' in command) {
-          const cmdData = command.data.toJSON()
+          const cmdData = typeof command.data?.toJSON === 'function' ? command.data.toJSON() : command.data
           const cmdGuildId = command.guildId || null
           if (cmdGuildId && cmdGuildId !== 'global') {
             if (!guildCommandsMap.has(cmdGuildId)) guildCommandsMap.set(cmdGuildId, [])
@@ -442,11 +442,12 @@ ${fileContent.split('\n').map(l => '    ' + l).join('\n')}
 `
   }
 
-  // Validate syntax
-  try {
-    new Function('require', 'module', 'exports', fileContent) // eslint-disable-line no-new-func, no-new
-  } catch (e) {
-    return { success: false, error: `Syntax error in slash command code: ${e.message}` }
+  // ─── TDD Validation Gate ──────────────────────────────────────────────────
+  const tddVerifier = require('./chat/TddCommandVerifier')
+  const tddResult = await tddVerifier.dryRunSlashCommand(cleanName, fileContent)
+  if (!tddResult.passed) {
+    logger.warn(`commandManager: TDD dry-run verification failed for "/${cleanName}": ${tddResult.error}`)
+    return { success: false, error: `TDD Validation Failed: ${tddResult.error}` }
   }
 
   const targetPath = path.join(COMMANDS_DIR, `${cleanName}.js`)
@@ -456,6 +457,9 @@ ${fileContent.split('\n').map(l => '    ' + l).join('\n')}
     try {
       delete require.cache[require.resolve(targetPath)]
     } catch (_) {}
+
+    // Generate automated Jest test suite for the new command
+    tddVerifier.writeAutomatedUnitTest(cleanName)
 
     const command = require(targetPath)
     if (bot && bot.commands && 'data' in command && 'execute' in command) {
@@ -468,8 +472,8 @@ ${fileContent.split('\n').map(l => '    ' + l).join('\n')}
     }
 
     const scopeLabel = targetGuildId ? `scoped to server ${targetGuildId}` : 'globally across all servers'
-    logger.info(`commandManager: Successfully created and published new slash command "/${cleanName}" ${scopeLabel} to Discord.`)
-    return { success: true, message: `Successfully created and deployed new slash command "/${cleanName}" ${scopeLabel} live on Discord!` }
+    logger.info(`commandManager: Successfully created, verified with TDD, and published new slash command "/${cleanName}" ${scopeLabel} to Discord.`)
+    return { success: true, message: `Successfully created, verified with TDD, and deployed new slash command "/${cleanName}" ${scopeLabel} live on Discord!` }
   } catch (err) {
     logger.error(`commandManager: Failed to write and publish command "/${cleanName}": ${err.message}`)
     return { success: false, error: err.message }

@@ -3,13 +3,38 @@ const commandManager = require('../commandManager')
 
 module.exports = {
   name: 'manage_command',
-  description: 'Enables, disables, lists, creates, or changes registration scope (Global vs Guild ID) for Discord application slash commands (Creator / Admin only)',
+  description: 'Enables, disables, lists, inspects, creates, or changes registration scope (Global vs Guild ID) for Discord application slash commands (Creator / Admin only)',
   schema: {
-    action: 'string — "list", "disable", "enable", "create", or "set_scope"',
-    name: 'string — command name (e.g. "catfact", "music", "netstats")',
-    guild_id: 'string — target guild ID or "global" (required for set_scope)'
+    action: {
+      type: 'string',
+      description: 'Action to perform: "list", "create", "disable", "enable", "inspect", or "set_scope".'
+    },
+    name: {
+      type: 'string',
+      description: 'Command name (e.g. "soundboard", "catfact", "netstats").'
+    },
+    description: {
+      type: 'string',
+      description: 'Description of what the command does (for create action).'
+    },
+    code: {
+      type: 'string',
+      description: 'JavaScript execution code for the slash command (for create action).'
+    },
+    options: {
+      type: 'array',
+      description: 'Parameter options array (for create action).'
+    },
+    guild_id: {
+      type: 'string',
+      description: 'Target guild ID or "global" (for set_scope action).'
+    },
+    global: {
+      type: 'boolean',
+      description: 'Whether command is registered globally (for create action).'
+    }
   },
-  execute: async (bot, channel, params, context = {}) => {
+  execute: async (bot, channel, params = {}, context = {}) => {
     const userId = context.userId || context.user?.id
     const isOwner = userId === process.env.OWNER_ID
     const isDM = !context.guildId
@@ -48,6 +73,12 @@ module.exports = {
         await channel.send({ embeds: [embed] }).catch(() => {})
       }
       return { success: true, count: commands.length, commands }
+    }
+
+    if (actionType === 'inspect') {
+      if (!targetName) return { success: false, error: 'Command name is required for inspect.' }
+      const res = commandManager.inspectSlashCommand(targetName)
+      return res
     }
 
     if (actionType === 'set_scope') {
@@ -108,6 +139,6 @@ module.exports = {
       return res
     }
 
-    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "set_scope", "disable", "enable", or "create".` }
+    return { success: false, error: `Unknown manage_command action: "${actionType}". Expected "list", "inspect", "set_scope", "disable", "enable", or "create".` }
   }
 }

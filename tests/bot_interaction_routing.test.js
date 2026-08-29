@@ -88,6 +88,8 @@ describe('bot.js Interaction Routing', () => {
       isAutocomplete: () => false,
       isChatInputCommand: () => false,
       isButton: () => true,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
       customId: 'music_pause',
       client: { commands: bot.commands }
     }
@@ -96,5 +98,26 @@ describe('bot.js Interaction Routing', () => {
     await interactionHandler(mockInteraction)
 
     expect(mockMusicManager.handleInteraction).toHaveBeenCalledWith(mockInteraction)
+  })
+
+  test('dynamically routes custom command buttons by prefix to handleButton or buttonHandler', async () => {
+    const mockButtonHandler = jest.fn().mockResolvedValue()
+    const mockSoundboardCommand = { buttonHandler: mockButtonHandler }
+    bot.commands.set('soundboard', mockSoundboardCommand)
+
+    const mockInteraction = {
+      isAutocomplete: () => false,
+      isChatInputCommand: () => false,
+      isButton: () => true,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      customId: 'soundboard_play_attack',
+      client: { commands: bot.commands }
+    }
+
+    const interactionHandler = bot.listeners('interactionCreate')[0]
+    await interactionHandler(mockInteraction)
+
+    expect(mockButtonHandler).toHaveBeenCalledWith(mockInteraction, expect.anything())
   })
 })

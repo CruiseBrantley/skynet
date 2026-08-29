@@ -2,15 +2,15 @@ const triggerEngine = require('../TriggerEngine')
 
 module.exports = {
   name: 'manage_triggers',
-  description: 'Creates, lists, deletes, or tests automated reactive watchdog triggers (e.g. auto-heal on 3 consecutive errors, auto-rollback, resource threshold alerts).',
+  description: 'Creates, lists, enables, disables, deletes, or tests automated reactive watchdog triggers (e.g. auto-heal on 3 consecutive errors, auto-rollback, resource threshold alerts like host_ram, host_cpu).',
   schema: {
     action: {
       type: 'string',
-      description: 'Action to perform: "list", "create", "delete", or "test".'
+      description: 'Action to perform: "list", "create", "disable", "enable", "delete", or "test".'
     },
     condition_type: {
       type: 'string',
-      description: 'Condition type for create: "command_error_streak", "command_error_rate", "host_cpu", "host_ram", "bot_memory".'
+      description: 'Condition type for create/disable: "command_error_streak", "command_error_rate", "host_cpu", "host_ram", "bot_memory".'
     },
     target: {
       type: 'string',
@@ -30,7 +30,7 @@ module.exports = {
     },
     trigger_id: {
       type: 'string',
-      description: 'Trigger ID to delete or test (required for delete and test).'
+      description: 'Trigger ID or condition name to enable, disable, delete, or test (e.g. "host_ram", "trig_12345").'
     },
     description: {
       type: 'string',
@@ -46,12 +46,13 @@ module.exports = {
         return '[SYSTEM: Watchdog Triggers: No active conditional triggers registered. Use action="create" to add one.]'
       }
 
-      let out = `🛡️ **Active Reactive Watchdog Triggers (${triggers.length})**:\n`
+      let out = `🛡️ **Reactive Watchdog Triggers (${triggers.length})**:\n`
       for (const t of triggers) {
-        out += `• **[${t.id}]** \`${t.conditionType}\` (Target: \`${t.target || 'system'}\`, Threshold: \`${t.threshold}\`)\n`
+        const statusIcon = t.enabled !== false ? '🟢 Enabled' : '🔴 Disabled'
+        out += `• **[${t.id}]** \`${t.conditionType}\` (Target: \`${t.target || 'system'}\`, Threshold: \`${t.threshold}\`, Status: ${statusIcon})\n`
         out += `   ↳ **Action**: \`${t.actionType}\` | **Cooldown**: ${t.cooldownMinutes}m | **Desc**: *${t.description}*\n`
       }
-      return `[SYSTEM: Active Watchdog Triggers:\n${out}]`
+      return `[SYSTEM: Watchdog Triggers:\n${out}]`
     }
 
     if (action === 'create') {
@@ -79,32 +80,48 @@ module.exports = {
       }
     }
 
-    if (action === 'delete') {
-      const triggerId = params.trigger_id || params.id
-      if (!triggerId) return '[SYSTEM: Error: "trigger_id" is required for delete.]'
+    if (action === 'disable' || action === 'enable') {
+      const identifier = params.trigger_id || params.id || params.condition_type || params.target || params.name
+      if (!identifier) return `[SYSTEM: Error: "trigger_id" or "condition_type" is required for ${action}.]`
 
-      const ok = triggerEngine.deleteTrigger(triggerId)
-      if (ok) {
-        return `[SYSTEM: Successfully deleted trigger "${triggerId}".]`
+      const enabled = action === 'enable'
+      const updated = triggerEngine.setTriggerEnabled(identifier, enabled)
+      if (updated) {
+        return `[SYSTEM: Successfully ${enabled ? 'enabled' : 'disabled'} watchdog trigger "${updated.id}" (${updated.description}).]`
       }
-      return `[SYSTEM: Error: Trigger "${triggerId}" was not found.]`
+      return `[SYSTEM: Error: No matching trigger found for identifier "${identifier}".]`
+    }
+
+    if (action === 'delete' || action === 'remove') {
+      const identifier = params.trigger_id || params.id || params.condition_type || params.target || params.name
+      if (!identifier) return '[SYSTEM: Error: "trigger_id" or "condition_type" is required for delete.]'
+
+      const ok = triggerEngine.deleteTrigger(identifier)
+      if (ok) {
+        return `[SYSTEM: Successfully deleted trigger matching "${identifier}".]`
+      }
+      return `[SYSTEM: Error: No matching trigger found for identifier "${identifier}".]`
     }
 
     if (action === 'test') {
-      const triggerId = params.trigger_id || params.id
-      if (!triggerId) return '[SYSTEM: Error: "trigger_id" is required for test.]'
+      const identifier = params.trigger_id || params.id || params.condition_type || params.target
+      if (!identifier) return '[SYSTEM: Error: "trigger_id" is required for test.]'
 
-      const trigger = triggerEngine.listTriggers().find(t => t.id === triggerId)
-      if (!trigger) return `[SYSTEM: Error: Trigger "${triggerId}" was not found.]`
+      const trigger = triggerEngine.listTriggers().find(t =>
+        t.id === identifier ||
+        t.conditionType === identifier ||
+        t.target === identifier
+      )
+      if (!trigger) return `[SYSTEM: Error: Trigger "${identifier}" was not found.]`
 
       try {
         await triggerEngine._dispatchTriggerAction(trigger, { simulated: true, reason: 'Manual Test Invocation' }, bot)
-        return `[SYSTEM: Dispatched simulated test execution for trigger "${triggerId}" (${trigger.actionType}).]`
+        return `[SYSTEM: Dispatched simulated test execution for trigger "${trigger.id}" (${trigger.actionType}).]`
       } catch (err) {
         return `[SYSTEM: Error testing trigger: ${err.message}]`
       }
     }
 
-    return `[SYSTEM: Unknown manage_triggers action: "${action}". Expected "list", "create", "delete", or "test".]`
+    return `[SYSTEM: Unknown manage_triggers action: "${action}". Expected "list", "create", "disable", "enable", "delete", or "test".]`
   }
 }

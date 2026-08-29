@@ -494,6 +494,10 @@ Expected JSON Schema:
     }
   }
 
+  getPendingProposals () {
+    return Array.from(this.pendingProposals.values())
+  }
+
   // ─── Aliases ────────────────────────────────────────────────────────────────
 
   async healAction (options) {

@@ -75,4 +75,35 @@ describe('AgentLoop Proactive Presence', () => {
     expect(setSpy).toHaveBeenCalledWith('user.test', 'hello', 1.1875, 'guild123')
     setSpy.mockRestore()
   })
+
+  test('_executeCommand dynamically executes registered ActionExecutor actions', async () => {
+    const actionExecutor = require('../util/ActionExecutor')
+    const execSpy = jest.spyOn(actionExecutor, 'executeAction').mockResolvedValue({ success: true, output: 'Triggers updated' })
+
+    const res = await agentLoop._executeCommand({
+      command: 'manage_triggers',
+      action: 'disable',
+      trigger_id: 'host_ram'
+    })
+
+    expect(execSpy).toHaveBeenCalledWith('manage_triggers', expect.objectContaining({ action: 'disable', trigger_id: 'host_ram' }), expect.anything())
+    expect(res).toContain('manage_triggers: Triggers updated')
+    execSpy.mockRestore()
+  })
+
+  test('_executeCommand dispatches trigger_self_healing to SelfHealingEngine', async () => {
+    const selfHealing = require('../util/chat/SelfHealingEngine')
+    const healSpy = jest.spyOn(selfHealing, 'proposeSlashCommandFix').mockResolvedValue({ success: true })
+
+    const res = await agentLoop._executeCommand({
+      command: 'trigger_self_healing',
+      target_type: 'slash',
+      name: 'netstats',
+      error: 'Cannot read property of undefined'
+    })
+
+    expect(healSpy).toHaveBeenCalledWith(expect.objectContaining({ commandName: 'netstats', error: 'Cannot read property of undefined' }))
+    expect(res).toContain('trigger_self_healing: Dispatched repair proposal for slash command "/netstats"')
+    healSpy.mockRestore()
+  })
 })

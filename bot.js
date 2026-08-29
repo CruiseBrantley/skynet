@@ -335,6 +335,31 @@ bot.on('interactionCreate', async (interaction) => {
       return
     }
 
+    // 4. Dynamic Command Component Dispatch (Buttons, Select Menus, Modals)
+    // Matches prefix before first '_' or ':' (e.g. "soundboard_attack" -> "soundboard")
+    const [cmdPrefix] = (interaction.customId || '').split(/[_:]/)
+    const dynamicCommand = interaction.client?.commands?.get ? interaction.client.commands.get(cmdPrefix) : null
+    const handler = dynamicCommand && (
+      dynamicCommand.handleButton ||
+      dynamicCommand.buttonHandler ||
+      dynamicCommand.executeButton ||
+      dynamicCommand.handleInteraction ||
+      dynamicCommand.handleSelectMenu ||
+      dynamicCommand.handleModal
+    )
+
+    if (handler) {
+      try {
+        await handler.call(dynamicCommand, interaction, database)
+      } catch (error) {
+        logger.error(`Dynamic component error for "${cmdPrefix}": ${error.stack || error.message}`)
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: `Component interaction failed: ${error.message}`, ephemeral: true }).catch(() => {})
+        }
+      }
+      return
+    }
+
     return
   }
 

@@ -39,12 +39,7 @@ class TriggerEngine {
         if (snapshot && typeof snapshot.exists === 'function' && snapshot.exists()) {
           const remoteTrigs = snapshot.val()
           if (Array.isArray(remoteTrigs)) {
-            const existingIds = new Set(this._triggers.map(t => t.id))
-            for (const rt of remoteTrigs) {
-              if (!existingIds.has(rt.id)) {
-                this._triggers.push(rt)
-              }
-            }
+            this._triggers = remoteTrigs
             this._saveLocalOnly()
             logger.info(`TriggerEngine: Hydrated ${remoteTrigs.length} triggers from Firebase.`)
           }
@@ -158,12 +153,35 @@ class TriggerEngine {
     return newTrigger
   }
 
-  deleteTrigger (triggerId) {
-    const index = this._triggers.findIndex(t => t.id === triggerId)
+  setTriggerEnabled (identifier, enabled = true) {
+    const cleanId = String(identifier || '').toLowerCase().trim()
+    const trigger = this._triggers.find(t =>
+      t.id.toLowerCase() === cleanId ||
+      t.conditionType.toLowerCase() === cleanId ||
+      (t.target && t.target.toLowerCase() === cleanId) ||
+      (t.description && t.description.toLowerCase().includes(cleanId))
+    )
+
+    if (!trigger) return null
+    trigger.enabled = Boolean(enabled)
+    this._save()
+    logger.info(`TriggerEngine: Trigger "${trigger.id}" (${trigger.description}) enabled=${trigger.enabled}`)
+    return trigger
+  }
+
+  deleteTrigger (identifier) {
+    const cleanId = String(identifier || '').toLowerCase().trim()
+    const index = this._triggers.findIndex(t =>
+      t.id.toLowerCase() === cleanId ||
+      t.conditionType.toLowerCase() === cleanId ||
+      (t.target && t.target.toLowerCase() === cleanId) ||
+      (t.description && t.description.toLowerCase().includes(cleanId))
+    )
+
     if (index === -1) return false
     const removed = this._triggers.splice(index, 1)[0]
     this._save()
-    logger.info(`TriggerEngine: Removed trigger "${triggerId}" (${removed.description})`)
+    logger.info(`TriggerEngine: Removed trigger "${removed.id}" (${removed.description})`)
     return true
   }
 

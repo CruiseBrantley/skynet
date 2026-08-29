@@ -53,7 +53,7 @@ class AutonomousCommandProcessor {
 
       if (!jsonStr) {
         if (loopCount === 0) {
-          const stallRegex = /\b(doing it now|running it now|building it|rebuilding it|working on it|doing that now|fixing it now|making it now|writing it now|actually doing it|no more talk|executing it now|setting that up now|creating it now|fetching it now|checking that now|posted the narration|narration instead of the execution|let me run that|on it now|I'll do that now|I am doing that now|I will execute)\b/i
+          const stallRegex = /\b(doing it now|running it now|building it|rebuilding it|working on it|doing that now|fixing it now|making it now|writing it now|actually doing it|no more talk|executing it now|setting that up now|creating it now|fetching it now|checking that now|posted the narration|narration instead of the execution|let me run that|on it now|I'll do that now|I am doing that now|I will execute|rewriting|re-writing|match the working pattern|matching the pattern|refactoring|modifying|adjusting|updating|patching|let me fix|let me update|let me create|let me rewrite)\b/i
           if (stallRegex.test(replyContent)) {
             logger.warn(`AUTONOMOUS: Detected conversational stall ("${replyContent.substring(0, 80)}..."). Forcing command execution query...`)
             const isCode = Boolean(ollamaContext?.isCodeTask)

@@ -6,17 +6,27 @@ module.exports = {
   description: 'Summarizes the recent conversation history in the current channel',
   schema: {
     count: 'number — the number of recent messages to summarize (default 20, max 100)',
+    all_days: 'boolean — include messages from prior days (default: false, current day only)',
     topic: 'string (optional) — a specific focus for the summary (e.g. "D&D plans")'
   },
-  execute: async (bot, channel, params, context) => {
-    let { count, topic } = params
+  execute: async (bot, channel, params = {}, context) => {
+    let { count, topic, all_days: allDays } = params
     count = Math.min(Math.max(parseInt(count) || 20, 5), 100)
 
     try {
       logger.info(`ActionExecutor: Summarizing last ${count} messages in ${channel.id}${topic ? ` for topic: ${topic}` : ''}`)
 
       // Fetch messages
-      const messages = await channel.messages.fetch({ limit: count })
+      const fetched = await channel.messages.fetch({ limit: count })
+      let messages = Array.from(fetched && typeof fetched.values === 'function' ? fetched.values() : (Array.isArray(fetched) ? fetched : []))
+      if (!allDays) {
+        const startOfDay = new Date().setHours(0, 0, 0, 0)
+        messages = messages.filter(m => {
+          const ts = m.createdTimestamp ?? (typeof m.createdAt?.getTime === 'function' ? m.createdAt.getTime() : null)
+          return ts !== null ? ts >= startOfDay : true
+        })
+      }
+
       const historyText = messages
         .reverse()
         .map(m => `${m.member?.displayName || m.author.username}: ${m.content}`)

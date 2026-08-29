@@ -15,6 +15,12 @@ module.exports = {
         .setMinValue(5)
         .setMaxValue(100)
     )
+    .addBooleanOption(option =>
+      option
+        .setName('all_days')
+        .setDescription('Include messages from previous days (default: false, current day only)')
+        .setRequired(false)
+    )
     .addStringOption(option =>
       option
         .setName('topic')
@@ -30,14 +36,21 @@ module.exports = {
       const caps = await getActiveModelCapabilities()
       const requestedCount = interaction.options.getInteger('count')
       const topicFilter = interaction.options.getString('topic')
+      const allDays = interaction.options.getBoolean('all_days') || false
 
       // Adaptively cap fetch count based on active model tier
       const maxAllowed = caps.maxDigestMessages || 25
       const fetchCount = requestedCount ? Math.min(requestedCount, maxAllowed) : Math.min(50, maxAllowed)
 
-      logger.info(`tldr: Fetching ${fetchCount} messages for #${interaction.channel.name} (Tier: ${caps.tier})`)
+      logger.info(`tldr: Fetching ${fetchCount} messages for #${interaction.channel.name} (Tier: ${caps.tier}, allDays: ${allDays})`)
       const fetched = await interaction.channel.messages.fetch({ limit: fetchCount })
-      const rawMessages = Array.from(fetched.values()).reverse()
+      let rawMessages = Array.from(fetched.values()).reverse()
+
+      // Default: limit to messages sent during the current day unless all_days is explicitly true
+      if (!allDays) {
+        const startOfDay = new Date().setHours(0, 0, 0, 0)
+        rawMessages = rawMessages.filter(m => (m.createdTimestamp || m.createdAt?.getTime?.() || 0) >= startOfDay)
+      }
 
       const formattedChat = rawMessages
         .filter(m => !m.author.bot || m.author.id === interaction.client.user.id)
@@ -45,7 +58,10 @@ module.exports = {
         .join('\n')
 
       if (!formattedChat.trim()) {
-        return interaction.editReply({ content: 'No recent messages found to summarize.' })
+        const emptyMsg = allDays
+          ? 'No recent messages found to summarize.'
+          : 'No messages found from today in this channel to summarize. Use `/tldr all_days:true` to include prior days.'
+        return interaction.editReply({ content: emptyMsg })
       }
 
       const promptTopic = topicFilter ? ` Focus specifically on discussions related to: "${topicFilter}".` : ''

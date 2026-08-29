@@ -49,13 +49,28 @@ DATABASE_URL=https://my-secret-db.firebaseio.com
     expect(res).toContain('OWNER_ID=')
   })
 
+  test('reads and inspects logic files in util, commands, server, and root markdown', async () => {
+    const resUtil = await readSystemFile.execute({}, {}, { file_path: 'commands/twitch-notify.js' })
+    expect(resUtil).toContain('[SYSTEM: File Content for "commands/twitch-notify.js"')
+    expect(resUtil).toContain('twitch-notify')
+
+    const resServer = await readSystemFile.execute({}, {}, { file_path: 'server/server.js' })
+    expect(resServer).toContain('[SYSTEM: File Content for "server/server.js"')
+
+    const resBot = await readSystemFile.execute({}, {}, { file_path: 'bot.js' })
+    expect(resBot).toContain('[SYSTEM: File Content for "bot.js"')
+
+    const resDoc = await readSystemFile.execute({}, {}, { file_path: 'AGENTS.md' })
+    expect(resDoc).toContain('[SYSTEM: File Content for "AGENTS.md"')
+  })
+
   test('strictly rejects path traversal attempts', async () => {
     const res = await readSystemFile.execute({}, {}, { file_path: '../../etc/passwd' })
     expect(res).toContain('Access Denied. Path traversal')
   })
 
-  test('strictly rejects non-whitelisted paths', async () => {
-    const res = await readSystemFile.execute({}, {}, { file_path: 'bot.js' })
+  test('strictly rejects non-whitelisted paths and node_modules', async () => {
+    const res = await readSystemFile.execute({}, {}, { file_path: 'node_modules/express/index.js' })
     expect(res).toContain('not in the allowed file whitelist')
   })
 })

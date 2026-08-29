@@ -21,19 +21,27 @@ const NON_SENSITIVE_ENV_KEYS = new Set([
 function isPathWhitelisted (relativeFilePath) {
   const normalized = relativeFilePath.replace(/\\/g, '/').replace(/^\/+/, '')
 
-  if (normalized === '.env' || normalized === '.env.example' || normalized === 'package.json') {
+  if (normalized.includes('..')) {
+    return false
+  }
+
+  if (normalized.startsWith('node_modules/') || normalized.startsWith('.git/') || normalized.startsWith('coverage/')) {
+    return false
+  }
+
+  if (normalized === '.env' || normalized === '.env.example' || normalized === 'package.json' || normalized === 'README.md' || normalized === 'AGENTS.md') {
     return true
   }
 
-  if (normalized.startsWith('config/') && !normalized.includes('..')) {
+  if (normalized.startsWith('config/') || normalized.startsWith('data/') || normalized.startsWith('docs/')) {
     return true
   }
 
-  if (normalized.startsWith('logs/') && normalized.endsWith('.log') && !normalized.includes('..')) {
+  if (normalized.startsWith('logs/') && normalized.endsWith('.log')) {
     return true
   }
 
-  if (normalized.startsWith('data/') && normalized.endsWith('.json') && !normalized.includes('..')) {
+  if (normalized.endsWith('.js') || normalized.endsWith('.json') || normalized.endsWith('.md')) {
     return true
   }
 
@@ -69,11 +77,11 @@ function sanitizeEnvContent (rawEnv) {
 
 module.exports = {
   name: 'read_system_file',
-  description: 'Reads and inspects whitelisted configuration files, environment definitions (with secret redaction), or tails recent log files.',
+  description: 'Reads and inspects codebase logic files (util/*, commands/*, routes/*), configuration files (config/*), environment definitions (.env with secrets redacted), or tails recent log files.',
   schema: {
     file_path: {
       type: 'string',
-      description: 'Relative path to inspect (e.g. "config/steam_apps.json", "logs/combined.log", ".env", "data/telemetry_commands.json", "package.json").'
+      description: 'Relative path to inspect (e.g. "util/twitch_notify.js", "commands/announcements.js", "config/announcements.json", "logs/combined.log", ".env").'
     },
     lines: {
       type: 'integer',
@@ -96,7 +104,7 @@ module.exports = {
 
     // Security Gate 2: Check strict whitelist
     if (!isPathWhitelisted(relativePath)) {
-      return `[SYSTEM: Error: Access Denied. "${relativePath}" is not in the allowed file whitelist (allowed: config/*, logs/*.log, .env, data/*.json, package.json).]`
+      return `[SYSTEM: Error: Access Denied. "${relativePath}" is not in the allowed file whitelist (allowed: util/*.js, commands/*.js, routes/*.js, config/*, logs/*.log, data/*.json, .env, package.json, README.md, AGENTS.md).]`
     }
 
     if (!fs.existsSync(fullPath)) {

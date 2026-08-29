@@ -34,14 +34,21 @@ describe('manage_triggers Action', () => {
 
     // 3. List active
     const listRes = await manageTriggers.execute({}, {}, { action: 'list' })
-    expect(listRes).toContain('Active Reactive Watchdog Triggers')
+    expect(listRes).toContain('Reactive Watchdog Triggers')
     expect(listRes).toContain(triggerId)
 
-    // 4. Test trigger dispatch
+    // 4. Disable and Enable
+    const disableRes = await manageTriggers.execute({}, {}, { action: 'disable', condition_type: 'command_error_streak' })
+    expect(disableRes).toContain('Successfully disabled watchdog trigger')
+
+    const enableRes = await manageTriggers.execute({}, {}, { action: 'enable', trigger_id: triggerId })
+    expect(enableRes).toContain('Successfully enabled watchdog trigger')
+
+    // 5. Test trigger dispatch
     const testRes = await manageTriggers.execute({}, {}, { action: 'test', trigger_id: triggerId })
     expect(testRes).toContain('Dispatched simulated test execution')
 
-    // 5. Delete trigger
+    // 6. Delete trigger
     const deleteRes = await manageTriggers.execute({}, {}, { action: 'delete', trigger_id: triggerId })
     expect(deleteRes).toContain('Successfully deleted trigger')
   })

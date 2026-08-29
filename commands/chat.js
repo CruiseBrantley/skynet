@@ -3,7 +3,6 @@ const axios = require('axios')
 const fs = require('fs')
 const path = require('path')
 const botName = process.env.BOT_NAME || 'Bot'
-const { queryOllamaWithContext } = require('../util/ollama')
 const logger = require('../logger')
 const agentMemory = require('../util/AgentMemory')
 const ActionExecutor = require('../util/ActionExecutor')
@@ -12,10 +11,8 @@ const { extractKeyframes, isVideoOrGif } = require('../util/videoFrameExtractor'
 const { COMMAND_REGEX, SCRUB_REGEX } = require('../util/chat/constants')
 const { scrubTags } = require('../util/chat/scrubTags')
 const { fetchAndFormatContext } = require('../util/chat/contextHelper')
-const AutonomousCommandProcessor = require('../util/chat/AutonomousCommandProcessor')
-const DiscordResponder = require('../util/chat/DiscordResponder')
+const AgentTurnManager = require('../util/chat/AgentTurnManager')
 const mentionResolver = require('../util/MentionResolver')
-const { getParam } = require('../util/commandHelper')
 
 const { getBasePrompt } = require('../util/systemPrompt')
 const { markChannelInFlight, clearChannelInFlight } = require('../util/inFlightChannels')
@@ -62,12 +59,6 @@ async function execute (interaction, database) {
     }
 
     try {
-      const sharedState = {
-        primaryResponseUsed: false,
-        primaryContent: null,
-        highImpactCount: 0
-      }
-
       logger.info(`Chat command execution started for user: ${interaction.user.username}`)
       const rawInput = interaction.options.getString('message')
       const messageText = rawInput.replace(new RegExp(`<@!?${interaction.client.user.id}>`, 'g'), '').trim()
@@ -169,7 +160,11 @@ async function execute (interaction, database) {
       // Inject dynamic system context
       let commandsContext = 'Available Commands & Actions:\n'
       if (interaction.client.commands) {
-        commandsContext += interaction.client.commands.map(c => {
+        const cmdValues = typeof interaction.client.commands.map === 'function'
+          ? interaction.client.commands.map(c => c)
+          : Array.from(interaction.client.commands.values ? interaction.client.commands.values() : [])
+
+        commandsContext += cmdValues.map(c => {
           let paramStr = ''
           if (c.data && c.data.options && c.data.options.length > 0) {
             const params = c.data.options.map(o => {
@@ -181,7 +176,7 @@ async function execute (interaction, database) {
             }).join(', ')
             paramStr = ` (JSON Params: {${params}})`
           }
-          return `- ${c.data.name}: ${c.data.description}${paramStr}`
+          return `- ${c.data?.name || c.name}: ${c.data?.description || c.description}${paramStr}`
         }).join('\n')
       } else {
         commandsContext += 'Unknown'
@@ -286,28 +281,47 @@ async function execute (interaction, database) {
       const contextPrefix = channelContext + (resourcesContext ? `\n${resourcesContext}` : '')
       const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
 
-      // Detect code-heavy intent across recent conversation history or current message
+      // Detect code-heavy intent or error remediation across recent conversation history or current message
       const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|fix the command|fix command|rebuild the command|rebuild command|custom command|bot command|\/roll|\/gamenews|\/weather|\/anime|new command|add command|make command|build command|update command|change command|patch command)\b|\b(make|build|create|write|implement|fix|update|rebuild|code)\b.*\b(command|action|feature|endpoint|function|slash)\b/i
-      const isCodeTask = codeRegex.test(messageText) || finalPromptMessages.slice(-6).some(m => codeRegex.test(m.content || ''))
+      const errorReportRegex = /\b(download failed|audio failed|failed|not working|broke|broken|crash|crashing|error|threw|exception|bug|issue|fix this|fix it|why did it fail|remedy)\b/i
+
+      const isExplicitCode = codeRegex.test(messageText) || finalPromptMessages.slice(-6).some(m => codeRegex.test(m.content || ''))
+      const isErrorReport = errorReportRegex.test(messageText) || finalPromptMessages.slice(-4).some(m => errorReportRegex.test(m.content || ''))
+      const isCodeTask = isExplicitCode || isErrorReport
 
       let effectiveSystemPrompt = enhancedSystemPrompt
       if (isCodeTask) {
-        effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE / COMMAND SYNTHESIS]\nThe user wants you to create, modify, fix, or update a Discord slash command or internal action. You MUST emit the command tag in your response:\nFor slash commands: <<<RUN_COMMAND: {"command": "create_slash_command", "name": "command_name", "description": "...", "code": "..."}>>>\nNEVER say "I am doing it now" or "Building it now" in plain text without emitting the executable <<<RUN_COMMAND: {...}>>> tag in that same response.'
+        effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE & ERROR REMEDIATION SYNTHESIS]\nIf creating, fixing, or patching a Discord slash command or internal action, you MUST emit the executable tool tag in your response:\nFor slash commands: <<<RUN_COMMAND: {"command": "create_slash_command", "name": "command_name", "description": "...", "code": "..."}>>>\nNEVER output conversational promises like "Fixing it now" or "Let me check" without executing the tool in the same turn.'
 
-        // Auto-inject existing source code of any command or action mentioned in conversation
+        // Auto-inject existing source code of any command or action mentioned in conversation or recent error
         try {
           const commandManager = require('../util/commandManager')
           const allRegistered = commandManager.listSlashCommands()
           let inspectedContext = ''
+
+          // 1. Check commands explicitly mentioned in messages
           for (const cmd of allRegistered) {
             const cmdPattern = new RegExp(`\\b(\\/?${cmd.name})\\b`, 'i')
             if (cmdPattern.test(messageText) || finalPromptMessages.slice(-4).some(m => cmdPattern.test(m.content || ''))) {
               const inspectRes = commandManager.inspectSlashCommand(cmd.name)
               if (inspectRes.success && inspectRes.content) {
-                inspectedContext += `\n\n[EXISTING SOURCE CODE FOR SLASH COMMAND "/${cmd.name}"]:\n\`\`\`javascript\n${inspectRes.content}\n\`\`\`\nTo fix, patch, or enhance this command, output create_slash_command with name "${cmd.name}" and the complete updated JavaScript code.`
+                inspectedContext += `\n\n[EXISTING SOURCE CODE FOR SLASH COMMAND "/${cmd.name}"]:\n\`\`\`javascript\n${inspectRes.content}\n\`\`\`\nTo fix or update this command, output create_slash_command with name "${cmd.name}" and the complete corrected JavaScript code.`
               }
             }
           }
+
+          // 2. If user reports an error and no command was explicitly named, inject the most recently executed/created custom command
+          if (isErrorReport && !inspectedContext) {
+            const dynamicCmds = allRegistered.filter(c => ['soundboard', 'dice', 'roll'].includes(c.name))
+            const targetCmd = dynamicCmds[0] || allRegistered[0]
+            if (targetCmd) {
+              const inspectRes = commandManager.inspectSlashCommand(targetCmd.name)
+              if (inspectRes.success && inspectRes.content) {
+                inspectedContext += `\n\n[RECENTLY EXECUTED SLASH COMMAND "/${targetCmd.name}"]:\n\`\`\`javascript\n${inspectRes.content}\n\`\`\`\nThe user is reporting a failure in recent execution. Diagnose the failure, fix the code, and re-create it immediately using create_slash_command with name "${targetCmd.name}".`
+              }
+            }
+          }
+
           if (inspectedContext) {
             effectiveSystemPrompt += inspectedContext
           }
@@ -326,49 +340,16 @@ async function execute (interaction, database) {
         userId: interaction.user?.id || null,
         systemPrompt: effectiveSystemPrompt
       }
-      const responseData = await queryOllamaWithContext(finalPromptMessages, ollamaContext, botName)
-      if (responseData && responseData.message) {
-        const rawAIContent = responseData.message.content || ''
-        logger.info(`AI Raw Response: "${rawAIContent.substring(0, 300)}${rawAIContent.length > 300 ? '...' : ''}"`)
-        channelHistories[channelId].messages.push({ role: 'assistant', content: rawAIContent }) // store clean assistant reply
 
-        // Discord message max length is 2000. Chunk intelligently.
-        let replyContent = rawAIContent
-
-        // Resolve @mentions back to <@ID> using the persistent resolver
-        replyContent = mentionResolver.resolve(replyContent, interaction.guildId)
-
-        const processor = new AutonomousCommandProcessor({
-          botName,
-          ActionExecutor,
-          agentMemory,
-          queryOllamaWithContext,
-          getParam
-        })
-        replyContent = await processor.process({
-          interaction,
-          database,
-          channelHistory: channelHistories[channelId],
-          replyContent,
-          sharedState,
-          ollamaContext
-        })
-
-        const responder = new DiscordResponder({ botName })
-        await responder.sendFinalResponse({ interaction, replyContent, sharedState })
-
-        // Post-Turn Cleanup:
-        // Erase any intermediate "system" messages (like the 18k HTML search payload) from the memory history
-        // to prevent token runaway in future interactions. The AI's final answered message holds enough context.
-        if (channelHistories[channelId]?.messages) {
-          channelHistories[channelId].messages = channelHistories[channelId].messages.filter((msg, idx) => {
-          // Keep the primary system prompt (idx 0) and any user/assistant messages.
-            return idx === 0 || msg.role !== 'system'
-          })
-        }
-      } else {
-        throw new Error('Invalid response from Ollama')
-      }
+      const ollama = require('../util/ollama')
+      const turnManager = new AgentTurnManager({ botName, queryOllamaWithContext: ollama.queryOllamaWithContext })
+      await turnManager.executeTurn({
+        interaction,
+        database,
+        channelHistory: channelHistories[channelId],
+        ollamaContext,
+        maxSteps: 25
+      })
     } catch (err) {
       logger.error('Ollama error: ' + err.message)
       try {
