@@ -252,5 +252,14 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
       channelHistory: { messages: [] }
     })
     expect(codeBlockInChat).toBe(true)
+
+    // Case 6: Structural forward-intent "let me find usable sources"
+    const structuralForwardIntent = turnManager.hasPendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: "Let me find usable sources for that topic.",
+      channelHistory: { messages: [] }
+    })
+    expect(structuralForwardIntent).toBe(true)
   })
 })

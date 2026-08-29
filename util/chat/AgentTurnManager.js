@@ -30,7 +30,7 @@ const MUTATION_TOOLS = new Set([
   'forget'
 ])
 
-const FORWARD_INTENT_REGEX = /\b(fixing|repairing|remedying|retrying|re-trying|recreating|creating now|updating now|running now|trying again|let me fix|let me update|let me create|let me try|let me rewrite|let me modify|let me adjust|let me build|let me check|one second|working on it|hold on|now fixing|i need to|i will|i should|i am going to|i'm going to|let me overwrite|let me deploy|overwriting now|deploying now|i have to overwrite|i have to deploy|redeploying|next step|proceeding to|rewriting|re-writing|refactoring|rebuilding|modifying|adjusting|updating|patching|re-registering|reregistering|re-creating)\b/i
+const FORWARD_INTENT_REGEX = /\b(let\s+me|i\s+will|i'll|i\s+am\s+going\s+to|i'm\s+going\s+to|going\s+to|need\s+to|about\s+to|proceeding\s+to|working\s+on|trying\s+to|starting\s+to|attempting\s+to)\s+[a-z]+|\b(fixing|repairing|remedying|retrying|re-trying|recreating|creating|updating|running|searching|looking|querying|fetching|checking|finding|investigating|inspecting|rewriting|re-writing|refactoring|rebuilding|modifying|adjusting|patching|re-registering|reregistering|re-creating|deploying|overwriting)\s+(now|again|it|that|this|the|for|usable|sources|code|command|action|files|data|info|information)?\b/i
 
 class AgentTurnManager {
   constructor ({ botName = 'Skynet', queryOllamaWithContext = null } = {}) {
