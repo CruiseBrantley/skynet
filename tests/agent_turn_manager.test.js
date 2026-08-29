@@ -262,4 +262,30 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     })
     expect(structuralForwardIntent).toBe(true)
   })
+
+  test("evaluatePendingWork uses LLM coordinator reflection when text is ambiguous", async () => {
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify({
+          has_pending_work: true,
+          reason: "Assistant stated it will research but did not execute web_search tool",
+          suggested_action: "Call web_search with query"
+        })
+      }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: { isCodeTask: false },
+      executedTools: [{ name: "custom_plugin_tool" }],
+      assistantText: "The state looks interesting here.",
+      channelHistory: {
+        messages: [{ role: "user", content: "Can you analyze the logs and take appropriate action?" }]
+      }
+    })
+
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("Assistant stated it will research")
+    expect(evalResult.suggestedAction).toContain("Call web_search")
+  })
 })

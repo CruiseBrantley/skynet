@@ -40,58 +40,129 @@ class AgentTurnManager {
 
   /**
    * Generically determines if the current turn has unfinished work before ending.
+   * Uses fast heuristic short-circuits, then queries an LLM coordinator evaluation if ambiguous.
    */
-  hasPendingWork ({ ollamaContext, executedTools = [], assistantText = '', channelHistory }) {
+  async evaluatePendingWork ({ ollamaContext, executedTools = [], assistantText = '', channelHistory }) {
     const trimmed = (assistantText || '').trim()
 
-    // 1. If the assistant explicitly asks the user a question, it is waiting for user confirmation
+    // Fast Short-Circuit 1: If assistant explicitly asks the user a question, it is waiting for user confirmation
+    if (trimmed.endsWith('?') || /\b(do you want me to|would you like me to|should i|which option|please confirm)\b/i.test(trimmed)) {
+      return { isPending: false, reason: 'Waiting for user input' }
+    }
+
+    // Fast Short-Circuit 2: Explicit Completion Assertions
+    const completionRegex = /\b(task complete|response already delivered|already delivered|already answered|no further action|nothing to execute|no tool to call|no action pending|end of turn|done|no action required)\b/i
+    if (completionRegex.test(trimmed)) {
+      return { isPending: false, reason: 'Explicit completion assertion' }
+    }
+
+    // Fast Short-Circuit 3: Structural forward intent in text (e.g. "let me find...", "I will deploy...", "rewriting now...")
+    if (FORWARD_INTENT_REGEX.test(trimmed)) {
+      return { isPending: true, reason: 'Explicit forward intent detected in response' }
+    }
+
+    const isActionTask = Boolean(ollamaContext?.isCodeTask)
+    const hasTools = executedTools.length > 0
+
+    // Fast Short-Circuit 4: If information retrieval / read tools were executed and substantial answer provided
+    const hasSearchOrInfo = executedTools.some(t => ['read_state', 'web_search', 'fetch_feed', 'get_twitch_status', 'get_host_stats', 'get_command_logs', 'get_command_stats', 'read_system_file'].includes(typeof t === 'string' ? t : t.name))
+    if (hasSearchOrInfo && trimmed.length > 20 && !FORWARD_INTENT_REGEX.test(trimmed) && !isActionTask) {
+      return { isPending: false, reason: 'Information retrieval completed with answer' }
+    }
+
+    // Fast Short-Circuit 5: Simple conversational answer without tool requirements or forward intent
+    if (executedTools.length === 0 && !isActionTask && !FORWARD_INTENT_REGEX.test(trimmed)) {
+      return { isPending: false, reason: 'Conversational answer complete' }
+    }
+
+    // Fast Short-Circuit 6: Code task where mutation tool already ran successfully
+    if (isActionTask) {
+      const hasMutated = executedTools.some(t => MUTATION_TOOLS.has(typeof t === 'string' ? t : t.name))
+      if (hasMutated) {
+        return { isPending: false, reason: 'Mutation tool executed successfully on code task' }
+      }
+      if (/```(javascript|js)?[\s\S]*```/i.test(trimmed) || /\b(pattern|rewrite|rewriting|matching|function|export|module\.exports|data\.setname)\b/i.test(trimmed)) {
+        return { isPending: true, reason: 'Code commentary/drafting without tool execution' }
+      }
+      if (executedTools.length > 0 && trimmed.length < 400) {
+        return { isPending: true, reason: 'Read tool executed on code task without mutation tool call' }
+      }
+    }
+
+    // LLM Coordinator Reflection for Ambiguous Multi-Step Turns:
+    // Only invoke LLM coordinator when tools were executed or explicit task/action is active.
+    if (hasTools || isActionTask || FORWARD_INTENT_REGEX.test(trimmed)) {
+      try {
+        const userPrompt = channelHistory?.messages?.find(m => m.role === 'user')?.content || 'User request'
+        const executedNames = executedTools.map(t => (typeof t === 'string' ? t : t.name)).join(', ') || 'None'
+
+        const evaluationPrompt = [
+          {
+            role: 'system',
+            content: 'You are an autonomous AI Turn Coordinator. Analyze whether the Assistant has completely fulfilled the User Request or if it stopped prematurely with pending intentions, promises, or unfinished tool executions.\n' +
+              'Respond ONLY with a valid JSON object matching this schema:\n' +
+              '{"has_pending_work": boolean, "reason": "brief explanation", "suggested_action": "what tool or step to run next if pending"}'
+          },
+          {
+            role: 'user',
+            content: `[USER REQUEST]:\n${userPrompt.substring(0, 500)}\n\n` +
+              `[TOOLS EXECUTED SO FAR]:\n${executedNames}\n\n` +
+              `[ASSISTANT PROPOSED REPLY]:\n${trimmed.substring(0, 800)}\n\n` +
+              'Has the assistant finished the task, or is there pending work / unexecuted intent?'
+          }
+        ]
+
+        const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
+        const evalResp = await queryFn(evaluationPrompt, { ...ollamaContext, isCodeTask: false }, this.botName)
+        const evalContent = evalResp?.message?.content || ''
+        const evalJsonMatch = evalContent.match(/\{[\s\S]*\}/)
+
+        if (evalJsonMatch) {
+          const parsed = JSON.parse(jsonrepair(evalJsonMatch[0]))
+          if (typeof parsed.has_pending_work === 'boolean') {
+            logger.info(`AgentTurnManager: LLM Coordinator evaluation: has_pending_work=${parsed.has_pending_work} (${parsed.reason || 'no reason'})`)
+            return {
+              isPending: parsed.has_pending_work,
+              reason: parsed.reason || 'LLM Coordinator evaluation',
+              suggestedAction: parsed.suggested_action
+            }
+          }
+        }
+      } catch (evalErr) {
+        logger.warn(`AgentTurnManager: LLM Coordinator evaluation failed: ${evalErr.message}`)
+      }
+    }
+
+    return { isPending: false, reason: 'Default completion' }
+  }
+
+  /**
+   * Backward-compatible synchronous wrapper around evaluatePendingWork for simple tests/checks.
+   */
+  hasPendingWork (params) {
+    const trimmed = (params.assistantText || '').trim()
     if (trimmed.endsWith('?') || /\b(do you want me to|would you like me to|should i|which option|please confirm)\b/i.test(trimmed)) {
       return false
     }
-
-    // 2. Explicit Completion Assertions: If the model states it has delivered the answer or no tools apply
     const completionRegex = /\b(task complete|response already delivered|already delivered|already answered|no further action|nothing to execute|no tool to call|no action pending|end of turn|done|no action required)\b/i
     if (completionRegex.test(trimmed)) {
       return false
     }
-
-    // 3. Explicit Forward Action Intent in text (e.g. "I will deploy...", "Fixing now...")
     if (FORWARD_INTENT_REGEX.test(trimmed)) {
       return true
     }
-
-    // 4. If information retrieval tools were executed (web_search, fetch_feed, etc.) and substantial answer provided without forward intent
-    const hasSearchOrInfo = executedTools.some(t => ['web_search', 'fetch_feed', 'get_twitch_status', 'get_host_stats', 'get_command_logs', 'get_command_stats'].includes(typeof t === 'string' ? t : t.name))
-    if (hasSearchOrInfo && trimmed.length > 50 && !FORWARD_INTENT_REGEX.test(trimmed)) {
-      return false
-    }
-
-    // 5. Code & Mutation Task Incompleteness Check:
-    // If this is a code/remediation task, any response that did not execute a mutation tool (create_slash_command, create_action, modify_action, etc.)
-    // or contains code block text in chat instead of calling the tool is incomplete.
-    const isActionTask = Boolean(ollamaContext?.isCodeTask)
+    const isActionTask = Boolean(params.ollamaContext?.isCodeTask)
     if (isActionTask) {
-      const hasMutated = executedTools.some(t => MUTATION_TOOLS.has(typeof t === 'string' ? t : t.name))
+      const hasMutated = (params.executedTools || []).some(t => MUTATION_TOOLS.has(typeof t === 'string' ? t : t.name))
       if (!hasMutated) {
-        // If the model output JavaScript code blocks in markdown or mentions pattern/rewriting without tool execution, it's incomplete
         if (/```(javascript|js)?[\s\S]*```/i.test(trimmed) || /\b(pattern|rewrite|rewriting|matching|function|export|module\.exports|data\.setname)\b/i.test(trimmed)) {
           return true
         }
-        if (executedTools.length > 0 && trimmed.length < 400) {
+        if ((params.executedTools || []).length > 0 && trimmed.length < 400) {
           return true
         }
       }
     }
-
-    // 6. Unresolved Error Observation:
-    if (channelHistory?.messages?.length > 0 && trimmed.length < 250) {
-      const lastMsg = channelHistory.messages[channelHistory.messages.length - 1]
-      const msgStr = lastMsg ? String(lastMsg.content) : ''
-      if (msgStr.includes('SYSTEM: Error') || (msgStr.includes('Tool Output') && msgStr.includes('failed'))) {
-        return true
-      }
-    }
-
     return false
   }
 
@@ -481,22 +552,26 @@ class AgentTurnManager {
       if (toolCalls.length === 0) {
         finalReplyContent = rawContent.replace(COMMAND_REGEX, '').trim()
 
-        const isPending = this.hasPendingWork({
+        const pendingEval = await this.evaluatePendingWork({
           ollamaContext,
           executedTools,
           assistantText: finalReplyContent,
           channelHistory
         })
 
-        if (isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
+        if (pendingEval.isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
           pendingPromptCount++
-          logger.info(`AgentTurnManager: Pending work detected at step ${step + 1} ("${finalReplyContent.slice(0, 80)}..."). Prompting model to execute action (retry #${pendingPromptCount}).`)
+          logger.info(`AgentTurnManager: Pending work detected at step ${step + 1} ("${finalReplyContent.slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to execute action (retry #${pendingPromptCount}).`)
           channelHistory.messages.push({ role: 'assistant', content: finalReplyContent })
 
           const isCode = Boolean(ollamaContext?.isCodeTask)
-          const directive = isCode
+          let directive = isCode
             ? '[SYSTEM COORDINATOR: You stated intent or drafted code commentary without executing. Do not end the turn with commentary. Output the executable <<<RUN_COMMAND: {"command": "create_slash_command", "name": "...", "description": "...", "code": "..."}>>> or action tool now to apply the changes.]'
             : '[SYSTEM COORDINATOR: You diagnosed the state or stated intent. Do not stop with text commentary. Proceed to execute the necessary action tool now using <<<RUN_COMMAND: {"command": "...", ...}>>> to complete the request.]'
+
+          if (pendingEval.suggestedAction) {
+            directive += ` Recommended next action: ${pendingEval.suggestedAction}`
+          }
 
           channelHistory.messages.push({
             role: 'user',

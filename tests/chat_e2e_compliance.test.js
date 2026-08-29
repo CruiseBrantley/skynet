@@ -18,7 +18,9 @@ describe('Chat E2E Compliance and Guardrails', () => {
     // Setup mocks before requiring commands/chat
     jest.doMock('../util/ollama', () => ({
       queryOllamaWithContext: jest.fn().mockImplementation((messages) => {
-        capturedMessages = JSON.parse(JSON.stringify(messages))
+        if (!capturedMessages || capturedMessages.length === 0) {
+          capturedMessages = JSON.parse(JSON.stringify(messages))
+        }
         return Promise.resolve({
           message: {
             role: 'assistant',
