@@ -72,9 +72,19 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
   })
 
   test("executeTurn handles pure conversational response without tool calls", async () => {
-    const mockQuery = jest.fn().mockResolvedValue({
-      message: { role: "assistant", content: "The capital of France is Paris." }
-    })
+    const mockQuery = jest.fn()
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: "The capital of France is Paris."
+        }
+      })
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: JSON.stringify({ has_pending_work: false })
+        }
+      })
 
     turnManager.queryOllamaWithContext = mockQuery
 
@@ -95,7 +105,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(result.success).toBe(true)
     expect(result.replyContent).toBe("The capital of France is Paris.")
     expect(result.executedTools).toHaveLength(0)
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(mockQuery).toHaveBeenCalledTimes(2)
   })
 
   test("executeTurn handles multi-step tool call execution and observation feedback", async () => {
@@ -135,7 +145,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(result.replyContent).toBe("The latest Diablo 4 patch is version 2.1.0.")
     expect(result.executedTools).toHaveLength(1)
     expect(result.executedTools[0].name).toBe("read_state")
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(mockQuery).toHaveBeenCalledTimes(3)
   })
 
   test("executeTurn detects cycle on 3 consecutive identical tool calls and injects warning", async () => {
@@ -153,6 +163,10 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
       // Step 4: Final resolution
       .mockResolvedValueOnce({
         message: { role: "assistant", content: "System metrics retrieved." }
+      })
+      // Step 4b: Coordinator evaluation confirming completion
+      .mockResolvedValueOnce({
+        message: { role: "assistant", content: JSON.stringify({ has_pending_work: false }) }
       })
 
     turnManager.queryOllamaWithContext = mockQuery
@@ -173,7 +187,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
 
     expect(result.success).toBe(true)
     expect(result.replyContent).toBe("System metrics retrieved.")
-    expect(mockQuery).toHaveBeenCalledTimes(4)
+    expect(mockQuery).toHaveBeenCalledTimes(5)
   })
 
   test("executeTurn detects intermediate commentary without tool call and prompts immediate action", async () => {
@@ -182,17 +196,32 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
       .mockResolvedValueOnce({
         message: { role: "assistant", content: `<<<RUN_COMMAND: {"command": "read_system_file", "file_path": "nonexistent.json"}>>>` }
       })
-      // Step 2: Intermediate commentary ("Fixing the structure now.") without tool call
+      // Step 2: Intermediate commentary without tool call
       .mockResolvedValueOnce({
-        message: { role: "assistant", content: "Fixing the structure now." }
+        message: { role: "assistant", content: "I found an issue with the file structure." }
       })
-      // Step 3: Actual tool call execution
+      // Step 2b: LLM Coordinator reflection evaluating whether work is pending
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: JSON.stringify({
+            has_pending_work: true,
+            reason: "Tool error occurred and assistant stated an issue without running repair tool",
+            suggested_action: "Execute repair tool"
+          })
+        }
+      })
+      // Step 3: Actual tool call execution after coordinator prompt
       .mockResolvedValueOnce({
         message: { role: "assistant", content: `<<<RUN_COMMAND: {"command": "get_host_stats"}>>>` }
       })
       // Step 4: Final answer
       .mockResolvedValueOnce({
         message: { role: "assistant", content: "Command completed successfully." }
+      })
+      // Step 4b: Coordinator evaluation confirming completion
+      .mockResolvedValueOnce({
+        message: { role: "assistant", content: JSON.stringify({ has_pending_work: false }) }
       })
 
     turnManager.queryOllamaWithContext = mockQuery
@@ -213,7 +242,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
 
     expect(result.success).toBe(true)
     expect(result.replyContent).toBe("Command completed successfully.")
-    expect(mockQuery).toHaveBeenCalledTimes(4)
+    expect(mockQuery).toHaveBeenCalledTimes(6)
   })
 
   test("hasPendingWork detects incomplete action task when only read tools executed", () => {
@@ -221,7 +250,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     const pending = turnManager.hasPendingWork({
       ollamaContext: { isCodeTask: true },
       executedTools: [{ name: "list_slash_commands" }],
-      assistantText: "I found the command in the list and it needs to be updated.",
+      assistantText: "I found the command in the list.",
       channelHistory: { messages: [] }
     })
     expect(pending).toBe(true)
@@ -235,16 +264,16 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     })
     expect(finished).toBe(false)
 
-    // Case 4: False ending stating rewriting to match working pattern without calling tool
-    const falseEndingRewrite = turnManager.hasPendingWork({
-      ollamaContext: { isCodeTask: true },
-      executedTools: [{ name: "inspect_slash_command" }],
-      assistantText: "Rewriting to match the working pattern exactly.",
+    // Case 3: Pure conversation without tools or code task
+    const pureConversation = turnManager.hasPendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: "Here are some name ideas for the bot.",
       channelHistory: { messages: [] }
     })
-    expect(falseEndingRewrite).toBe(true)
+    expect(pureConversation).toBe(false)
 
-    // Case 5: Model outputting code block in markdown instead of executing tool on code task
+    // Case 4: Model outputting code block in markdown instead of executing tool on code task
     const codeBlockInChat = turnManager.hasPendingWork({
       ollamaContext: { isCodeTask: true },
       executedTools: [{ name: "list_slash_commands" }],
@@ -252,15 +281,6 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
       channelHistory: { messages: [] }
     })
     expect(codeBlockInChat).toBe(true)
-
-    // Case 6: Structural forward-intent "let me find usable sources"
-    const structuralForwardIntent = turnManager.hasPendingWork({
-      ollamaContext: {},
-      executedTools: [],
-      assistantText: "Let me find usable sources for that topic.",
-      channelHistory: { messages: [] }
-    })
-    expect(structuralForwardIntent).toBe(true)
   })
 
   test("evaluatePendingWork uses LLM coordinator reflection when text is ambiguous", async () => {

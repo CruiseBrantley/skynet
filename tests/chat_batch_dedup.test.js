@@ -73,6 +73,10 @@ describe('Chat Batch & De-duplication Safety', () => {
       followUp: jest.fn().mockResolvedValue({}),
       deleteReply: jest.fn().mockResolvedValue({})
     }
+
+    queryOllamaWithContext.mockResolvedValue({
+      message: { content: JSON.stringify({ has_pending_work: false }) }
+    })
   })
 
   test('Batch Execution: Should run a mix of utility and high-impact commands in one turn', async () => {
@@ -88,15 +92,19 @@ describe('Chat Batch & De-duplication Safety', () => {
       message: { content: 'All done!' }
     })
 
+    // Coordinator evaluation confirming completion
+    queryOllamaWithContext.mockResolvedValueOnce({
+      message: { content: JSON.stringify({ has_pending_work: false }) }
+    })
+
     await chat.execute(mockInteraction, {})
 
     // Verification 1: Both ran
     expect(mockExecuteAction).toHaveBeenCalledWith('add_reaction', expect.anything(), expect.anything())
     expect(mockExecuteAction).toHaveBeenCalledWith('send_embed', expect.anything(), expect.anything())
 
-    // Verification 2: ONLY TWO queries to Ollama total (Initial + ONE followup)
-    // If Batch Drain works, we don't query after poll, we just move to embed.
-    expect(queryOllamaWithContext).toHaveBeenCalledTimes(2)
+    // Verification 2: Initial + ONE followup + Coordinator evaluation
+    expect(queryOllamaWithContext).toHaveBeenCalledTimes(3)
   })
 
   test('De-duplication: Should reject a command if it is repeated in a followup with the exact same JSON', async () => {

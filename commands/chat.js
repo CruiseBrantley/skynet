@@ -281,13 +281,11 @@ async function execute (interaction, database) {
       const contextPrefix = channelContext + (resourcesContext ? `\n${resourcesContext}` : '')
       const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
 
-      // Detect code-heavy intent or error remediation across recent conversation history or current message (exclude system prompt)
-      const chatMessages = finalPromptMessages.filter(m => m.role !== 'system')
+      // Detect code-heavy intent or error remediation on current user message
       const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|fix the command|fix command|rebuild the command|rebuild command|custom command|bot command|new command|add command|make command|build command|update command|change command|patch command)\b|\b(make|build|create|write|implement|fix|update|rebuild|code)\b.*\b(command|action|feature|endpoint|function|slash command)\b/i
       const errorReportRegex = /\b(download failed|audio failed|failed|not working|broke|broken|crash|crashing|error|threw|exception|bug|issue|fix this|fix it|why did it fail|remedy)\b/i
-
-      const isExplicitCode = codeRegex.test(messageText) || chatMessages.slice(-6).some(m => codeRegex.test(m.content || ''))
-      const isErrorReport = errorReportRegex.test(messageText) || chatMessages.slice(-4).some(m => errorReportRegex.test(m.content || ''))
+      const isExplicitCode = codeRegex.test(messageText)
+      const isErrorReport = errorReportRegex.test(messageText)
       const isCodeTask = isExplicitCode || isErrorReport
 
       let effectiveSystemPrompt = enhancedSystemPrompt

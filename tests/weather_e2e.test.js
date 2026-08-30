@@ -68,13 +68,18 @@ describe('Weather Search E2E Flow', () => {
       message: { content: 'The weather in Fayetteville is currently sunny and 75F.' }
     })
 
+    // 4. Coordinator evaluation confirming completion
+    queryOllamaWithContext.mockResolvedValueOnce({
+      message: { content: JSON.stringify({ has_pending_work: false }) }
+    })
+
     // Execute the command
     await chat.execute(mockInteraction, {})
 
     // VERIFICATIONS
 
-    // Should have called Ollama twice (Thought then Report)
-    expect(queryOllamaWithContext).toHaveBeenCalledTimes(2)
+    // Should have called Ollama (Initial + Summary + Coordinator)
+    expect(queryOllamaWithContext).toHaveBeenCalledTimes(3)
 
     // Should have called axios for Google Search Grounding
     expect(axios.post).toHaveBeenCalledWith(
