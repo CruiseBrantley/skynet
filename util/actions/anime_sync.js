@@ -206,7 +206,11 @@ function isTitleOnCalendar (title, calendarTitles) {
   if (!title || !Array.isArray(calendarTitles) || calendarTitles.length === 0) return false
 
   const titleSeason = extractSeasonNumber(title)
-  const cleanTitle = title.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
+  const cleanTitle = title.toLowerCase()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .trim()
   const titleWords = new Set(cleanTitle.split(/\s+/).filter(w => w.length > 2))
 
   return calendarTitles.some(ct => {
@@ -216,11 +220,15 @@ function isTitleOnCalendar (title, calendarTitles) {
       return false
     }
 
-    const cleanCt = ct.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
+    const cleanCt = ct.toLowerCase()
+      .replace(/\([^)]*\)/g, '')
+      .replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .trim()
 
     if (cleanTitle === cleanCt) return true
-    if (cleanTitle.length >= 6 && cleanCt.includes(cleanTitle)) return true
-    if (cleanCt.length >= 6 && cleanTitle.includes(cleanCt)) return true
+    if (cleanTitle.length >= 6 && cleanCt.startsWith(cleanTitle)) return true
+    if (cleanCt.length >= 6 && cleanTitle.startsWith(cleanCt)) return true
 
     const ctWords = new Set(cleanCt.split(/\s+/).filter(w => w.length > 2))
     if (titleWords.size === 0 || ctWords.size === 0) return false
@@ -233,7 +241,7 @@ function isTitleOnCalendar (title, calendarTitles) {
     const minWords = Math.min(titleWords.size, ctWords.size)
     const ratio = matchCount / minWords
     if (minWords >= 3 && ratio >= 0.7) return true
-    if (minWords === 2 && matchCount === 2) return true
+    if (minWords === 2 && matchCount === 2 && (cleanTitle.startsWith(cleanCt) || cleanCt.startsWith(cleanTitle))) return true
 
     return false
   })
@@ -289,9 +297,19 @@ async function resolveAnimeSchedule (params = {}) {
     animeInfo?.status === 3 ||
     providedItem?.anime_airing_status === 3
 
+  // For upcoming series:
+  // An upcoming series is ready to be scheduled on Google Calendar only when it is premiering
+  // within the current weekly cycle (<= 7 days) and has an exact confirmed broadcast timestamp.
+  // Upcoming anime releasing in future months/seasons (e.g. October 2026) are deferred
+  // to pending broadcast status so they don't clutter current calendars with unconfirmed dates.
+  const isAiringWithinWeek = Boolean(
+    media?.nextAiringEpisode?.airingAt &&
+    (media.nextAiringEpisode.airingAt * 1000 - Date.now() <= 7 * 24 * 60 * 60 * 1000)
+  )
+
   const hasBroadcastSchedule = Boolean(
-    media?.nextAiringEpisode?.airingAt ||
-    (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day)
+    (!isUpcoming && (media?.nextAiringEpisode?.airingAt || media?.status === 'RELEASING' || providedItem?.anime_airing_status === 1)) ||
+    (isUpcoming && isAiringWithinWeek)
   )
 
   const year = media?.startDate?.year || animeInfo?.start_season?.year || providedItem?.anime_season?.year
@@ -747,6 +765,7 @@ module.exports = {
       const calendar = await googleCalendar.resolveCalendar(calendarTarget)
       let existingCalendarTitles = []
       let existingCalendarEvents = []
+      let activeCalendarEvents = []
       try {
         let pageToken = null
         do {
@@ -761,7 +780,32 @@ module.exports = {
           existingCalendarEvents = existingCalendarEvents.concat(items)
           pageToken = calRes.data?.nextPageToken
         } while (pageToken)
-        existingCalendarTitles = existingCalendarEvents.map(e => e.summary).filter(Boolean)
+
+        const now = new Date()
+        activeCalendarEvents = existingCalendarEvents.filter(event => {
+          if (!event.summary) return false
+          const rrule = (event.recurrence && event.recurrence[0]) || ''
+          if (rrule.includes('UNTIL=')) {
+            const match = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/i)
+            if (match) {
+              const untilDate = new Date(Date.UTC(parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10), 23, 59, 59))
+              if (untilDate < now) return false
+            }
+          }
+          const countMatch = rrule.match(/COUNT=(\d+)/i)
+          if (countMatch) {
+            const count = parseInt(countMatch[1], 10)
+            const start = new Date(event.start?.dateTime || event.start?.date || 0)
+            const endDate = new Date(start.getTime() + count * 7 * 24 * 60 * 60 * 1000)
+            if (endDate < now) return false
+          }
+          if (!rrule) {
+            const end = new Date(event.end?.dateTime || event.end?.date || event.start?.dateTime || event.start?.date || 0)
+            if (end.getTime() > 0 && end < new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)) return false
+          }
+          return true
+        })
+        existingCalendarTitles = activeCalendarEvents.map(e => e.summary).filter(Boolean)
       } catch (err) {
         logger.warn(`anime_sync: Failed to fetch full calendar events list: ${err.message}`)
       }
@@ -893,7 +937,7 @@ module.exports = {
         }
 
         // 3. Check if already on calendar (by MAL ID or title)
-        const isPresentById = existingCalendarEvents.some(e => {
+        const isPresentById = activeCalendarEvents.some(e => {
           const eMalId = extractMalIdFromEvent(e)
           return eMalId && (eMalId === item.anime_id || (media.idMal && eMalId === media.idMal))
         })
@@ -939,7 +983,7 @@ module.exports = {
           const calRes = await scheduleAnimeOnCalendar({
             calendarTarget,
             schedule,
-            existingEvents: existingCalendarEvents,
+            existingEvents: activeCalendarEvents,
             context,
             bot,
             channel
