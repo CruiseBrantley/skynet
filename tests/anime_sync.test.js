@@ -346,4 +346,47 @@ describe('anime_sync action', () => {
     expect(result.success).toBe(false)
     expect(result.error).toContain('Access Denied')
   })
+
+  test('sync_watchlist defers calendar creation for upcoming anime with unconfirmed broadcast dates', async () => {
+    jest.spyOn(animeSync, 'fetchMalList').mockResolvedValueOnce([
+      {
+        anime_title: 'Black Clover 2nd Season',
+        anime_airing_status: 3,
+        anime_season: { year: 2026, season: 'fall' }
+      }
+    ])
+
+    jest.spyOn(animeSync, 'getAnimeDetails').mockResolvedValueOnce({
+      id: 195604,
+      title: { english: 'Black Clover Season 2' },
+      status: 'NOT_YET_RELEASED',
+      startDate: { year: 2026, month: 10, day: null },
+      nextAiringEpisode: null,
+      externalLinks: [
+        { site: 'Crunchyroll', url: 'https://crunchyroll.com/black-clover' }
+      ]
+    })
+
+    jest.spyOn(googleCalendar, 'getAccessToken').mockResolvedValue('token')
+    jest.spyOn(googleCalendar, 'resolveCalendar').mockResolvedValue({ id: 'cal_id', summary: 'Anime Release' })
+    axios.get.mockResolvedValueOnce({
+      data: { items: [] }
+    })
+    const calExecuteSpy = jest.spyOn(googleCalendar, 'execute')
+
+    const result = await animeSync.execute({}, {}, {
+      operation: 'sync_watchlist',
+      username: 'skynetanimelist',
+      structured: true
+    }, { isOwner: true })
+
+    expect(calExecuteSpy).not.toHaveBeenCalled()
+    expect(result.pendingBroadcast).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'Black Clover Season 2',
+        timeDesc: 'Oct 2026'
+      })
+    ]))
+    expect(result.summaryText).toContain('Premiere date unconfirmed (Oct 2026) — pending broadcast schedule.')
+  })
 })

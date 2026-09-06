@@ -282,4 +282,39 @@ describe("Slash Command: /animelist", () => {
       expect.anything()
     )
   })
+
+  test("add subcommand defers calendar scheduling for upcoming anime without confirmed air date", async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue("add")
+    mockInteraction.options.getString.mockImplementation((name) => {
+      if (name === "title") return "Black Clover 2nd Season"
+      return null
+    })
+    mockInteraction.options.getBoolean.mockReturnValue(true)
+
+    malClient.searchAnime.mockResolvedValue({
+      id: 61967,
+      title: "Black Clover 2nd Season",
+      status: "not_yet_aired",
+      media: {
+        status: "NOT_YET_RELEASED",
+        startDate: { year: 2026, month: 10, day: null },
+        nextAiringEpisode: null
+      }
+    })
+    malClient.isAuthenticated.mockReturnValue(true)
+    malClient.addAnime.mockResolvedValue({ success: true })
+    malClient.getPublicUrl.mockReturnValue("https://myanimelist.net/animelist/skynetanimelist")
+
+    await animelistCommand.execute(mockInteraction)
+
+    expect(malClient.addAnime).toHaveBeenCalledWith(61967, { status: "watching" })
+    expect(ActionExecutor.executeAction).not.toHaveBeenCalledWith("google_calendar", expect.anything(), expect.anything())
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          description: expect.stringContaining("Premiere date unconfirmed (Oct 2026)")
+        })
+      })]
+    }))
+  })
 })

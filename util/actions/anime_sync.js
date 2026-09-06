@@ -592,6 +592,7 @@ module.exports = {
 
       const addedToCalendar = []
       const alreadyPresent = []
+      const pendingBroadcast = []
       const syncErrors = []
 
       for (const item of toProcess) {
@@ -630,7 +631,29 @@ module.exports = {
           continue
         }
 
-        // 4. Resolve streaming service platform and link
+        // 4. If upcoming and broadcast schedule is not yet confirmed, defer calendar creation
+        const isUpcoming = item.anime_airing_status === 3 || media.status === 'NOT_YET_RELEASED'
+        const hasBroadcastSchedule = Boolean(
+          media.nextAiringEpisode?.airingAt ||
+          (media.startDate?.year && media.startDate?.month && media.startDate?.day)
+        )
+
+        if (isUpcoming && !hasBroadcastSchedule) {
+          const year = media.startDate?.year || item.anime_season?.year
+          const month = media.startDate?.month
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+          const monthStr = month ? monthNames[month - 1] : (item.anime_season?.season ? item.anime_season.season.toUpperCase() : null)
+          const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
+          pendingBroadcast.push({
+            title: canonicalTitle,
+            timeDesc,
+            platform: getStreamingPlatformInfo(media).site
+          })
+          results.push(`- ⏳ **${canonicalTitle}**: Premiere date unconfirmed (${timeDesc}) — pending broadcast schedule.`)
+          continue
+        }
+
+        // 5. Resolve streaming service platform and link
         const platformInfo = getStreamingPlatformInfo(media)
 
         // Determine schedule
@@ -643,12 +666,11 @@ module.exports = {
             startDate = cst.date
             simulcastStr = cst.simulcastString
           }
-        }
-
-        if (!startDate && item.anime_season?.year) {
+        } else if (media.startDate?.year && media.startDate?.month && media.startDate?.day) {
+          startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+        } else {
           startDate = new Date()
         }
-        if (!startDate) startDate = new Date()
 
         const episodesCount = media.episodes || 12
         const calculatedEndDate = calculateSeriesEndDate(media, startDate, episodesCount)
@@ -732,6 +754,7 @@ module.exports = {
           upcomingCount: toProcess.filter(i => i.anime_airing_status === 3).length,
           alreadyPresent,
           addedToCalendar,
+          pendingBroadcast,
           scheduleShifted,
           endedTruncated,
           errors: syncErrors,

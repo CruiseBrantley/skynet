@@ -240,66 +240,85 @@ module.exports = {
             const chosenPlatform = platformOverride || platformInfo?.name || platformInfo?.site || 'Crunchyroll'
             const episodesCount = episodesOverride || media?.episodes || 12
 
-            let startDate = new Date()
-            let simulcastStr = 'Weekly Simulcast'
+            const isUpcoming = media?.status === 'NOT_YET_RELEASED' || animeInfo?.status === 'not_yet_aired' || animeInfo?.status === 3
+            const hasBroadcastSchedule = Boolean(
+              media?.nextAiringEpisode?.airingAt ||
+              (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day)
+            )
 
-            if (media?.nextAiringEpisode?.airingAt) {
-              const cst = animeSync.formatCstSchedule(media.nextAiringEpisode.airingAt)
-              if (cst) {
-                startDate = cst.date
-                simulcastStr = cst.simulcastString
-              }
-            } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
-              startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
-            }
-
-            const calculatedEndDate = animeSync.calculateSeriesEndDate(media, startDate, episodesCount)
-            const isContinuing = !calculatedEndDate && !episodesCount
-            const recurrenceLabel = calculatedEndDate
-              ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
-              : (isContinuing ? 'Continuing Weekly' : `${episodesCount} episodes`)
-
-            // Check if an event already exists on Google Calendar for this anime to avoid duplicate entries
-            let existingEvent = null
-            try {
-              const targetCal = await googleCalendar.resolveCalendar(process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release')
-              if (targetCal?.id) {
-                existingEvent = await googleCalendar.findExistingEvent(targetCal.id, canonicalTitle, animeId)
-              }
-            } catch (findErr) {
-              logger.warn(`animelist: Failed to check for existing calendar event: ${findErr.message}`)
-            }
-
-            const calParams = {
-              operation: existingEvent ? 'update_event' : 'create_event',
-              summary: canonicalTitle,
-              streaming_service: chosenPlatform,
-              seasonal_run: !isContinuing,
-              continuing: isContinuing,
-              episodes_count: episodesCount,
-              simulcast: simulcastStr,
-              start: startDate.toISOString(),
-              link: platformInfo.url || '',
-              mal_id: animeId
-            }
-            if (existingEvent) {
-              calParams.event_id = existingEvent.id
-            }
-            if (calculatedEndDate) {
-              calParams.until = calculatedEndDate.toISOString()
-            }
-
-            const calRes = await ActionExecutor.executeAction('google_calendar', calParams, { isOwner: true, isInteractive: true, interaction })
-
-            if (calRes.success) {
+            if (isUpcoming && !hasBroadcastSchedule) {
+              const year = media?.startDate?.year || animeInfo?.start_season?.year
+              const month = media?.startDate?.month
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+              const monthStr = month ? monthNames[month - 1] : (animeInfo?.start_season?.season ? animeInfo.start_season.season.toUpperCase() : null)
+              const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
               calendarResult = {
-                platform: chosenPlatform,
-                simulcast: simulcastStr,
-                recurrence: recurrenceLabel,
-                isUpdated: Boolean(existingEvent)
+                pendingSchedule: true,
+                timeDesc,
+                platform: chosenPlatform
               }
             } else {
-              calendarResult = { error: calRes.error }
+              let startDate = new Date()
+              let simulcastStr = 'Weekly Simulcast'
+
+              if (media?.nextAiringEpisode?.airingAt) {
+                const cst = animeSync.formatCstSchedule(media.nextAiringEpisode.airingAt)
+                if (cst) {
+                  startDate = cst.date
+                  simulcastStr = cst.simulcastString
+                }
+              } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
+                startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+              }
+
+              const calculatedEndDate = animeSync.calculateSeriesEndDate(media, startDate, episodesCount)
+              const isContinuing = !calculatedEndDate && !episodesCount
+              const recurrenceLabel = calculatedEndDate
+                ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
+                : (isContinuing ? 'Continuing Weekly' : `${episodesCount} episodes`)
+
+              // Check if an event already exists on Google Calendar for this anime to avoid duplicate entries
+              let existingEvent = null
+              try {
+                const targetCal = await googleCalendar.resolveCalendar(process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release')
+                if (targetCal?.id) {
+                  existingEvent = await googleCalendar.findExistingEvent(targetCal.id, canonicalTitle, animeId)
+                }
+              } catch (findErr) {
+                logger.warn(`animelist: Failed to check for existing calendar event: ${findErr.message}`)
+              }
+
+              const calParams = {
+                operation: existingEvent ? 'update_event' : 'create_event',
+                summary: canonicalTitle,
+                streaming_service: chosenPlatform,
+                seasonal_run: !isContinuing,
+                continuing: isContinuing,
+                episodes_count: episodesCount,
+                simulcast: simulcastStr,
+                start: startDate.toISOString(),
+                link: platformInfo?.url || '',
+                mal_id: animeId
+              }
+              if (existingEvent) {
+                calParams.event_id = existingEvent.id
+              }
+              if (calculatedEndDate) {
+                calParams.until = calculatedEndDate.toISOString()
+              }
+
+              const calRes = await ActionExecutor.executeAction('google_calendar', calParams, { isOwner: true, isInteractive: true, interaction })
+
+              if (calRes.success) {
+                calendarResult = {
+                  platform: chosenPlatform,
+                  simulcast: simulcastStr,
+                  recurrence: recurrenceLabel,
+                  isUpdated: Boolean(existingEvent)
+                }
+              } else {
+                calendarResult = { error: calRes.error }
+              }
             }
           } catch (calErr) {
             calendarResult = { error: calErr.message }
@@ -326,6 +345,8 @@ module.exports = {
         if (calendarResult) {
           if (calendarResult.error) {
             descLines.push(`⚠️ **Calendar:** Failed to schedule (${calendarResult.error})`)
+          } else if (calendarResult.pendingSchedule) {
+            descLines.push(`⏳ **Google Calendar:** Premiere date unconfirmed (${calendarResult.timeDesc})\n   • Streaming on **${calendarResult.platform}**\n   • Will be automatically scheduled on Anime Release calendar once broadcast time is announced.`)
           } else {
             const actionVerb = calendarResult.isUpdated ? 'Updated existing schedule on' : 'Scheduled on'
             descLines.push(`📅 **Google Calendar:** ${actionVerb} Anime Release calendar\n   • **Platform:** ${calendarResult.platform}\n   • **Schedule:** ${calendarResult.simulcast}\n   • **Run:** ${calendarResult.recurrence}`)
@@ -542,6 +563,14 @@ module.exports = {
           fields.push({
             name: `🛑 Ended Series Cleared (${data.endedTruncated.length})`,
             value: data.endedTruncated.map(t => `- 🛑 **${t}**: Future events cleared (history preserved)`).join('\n').substring(0, 1024),
+            inline: false
+          })
+        }
+
+        if (data.pendingBroadcast?.length > 0) {
+          fields.push({
+            name: `⏳ Pending Broadcast Announcement (${data.pendingBroadcast.length})`,
+            value: data.pendingBroadcast.map(p => `- ⏳ **${p.title}**: ${p.timeDesc} (schedule unconfirmed)`).join('\n').substring(0, 1024),
             inline: false
           })
         }

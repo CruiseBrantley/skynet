@@ -8,7 +8,8 @@ jest.mock('../util/actions/anime_sync', () => ({
   getAnimeDetails: jest.fn().mockImplementation(async (title) => ({
     title: { english: title },
     episodes: 28
-  }))
+  })),
+  getStreamingPlatformInfo: jest.fn().mockReturnValue({ name: 'Crunchyroll', site: 'Crunchyroll', key: 'crunchyroll', emoji: '🟠' })
 }))
 jest.mock('../logger')
 
@@ -102,5 +103,34 @@ describe('Built-in Action - animelist permissions', () => {
 
     expect(result).toContain('Permission denied')
     expect(result).toContain('525112230006489091')
+  })
+
+  test('operation "add" defers calendar scheduling for upcoming anime without confirmed broadcast date', async () => {
+    const mockChannel = { id: ALLOWED_CHANNEL }
+    const context = { userId: OWNER_ID, isOwner: true }
+    malClient.addAnime.mockResolvedValueOnce({
+      title: 'Black Clover 2nd Season',
+      animeId: 61967
+    })
+    malClient.searchAnime.mockResolvedValueOnce({
+      id: 61967,
+      title: 'Black Clover 2nd Season',
+      status: 'not_yet_aired',
+      media: {
+        status: 'NOT_YET_RELEASED',
+        startDate: { year: 2026, month: 10, day: null },
+        nextAiringEpisode: null
+      }
+    })
+    malClient.getPublicUrl.mockReturnValue('https://myanimelist.net/animelist/skynetanimelist')
+
+    const result = await animelistAction.execute(null, mockChannel, {
+      operation: 'add',
+      title: 'Black Clover 2nd Season',
+      sync_calendar: true
+    }, context)
+
+    expect(result).toContain('Premiere date not yet confirmed (Oct 2026)')
+    expect(googleCalendar.execute).not.toHaveBeenCalled()
   })
 })

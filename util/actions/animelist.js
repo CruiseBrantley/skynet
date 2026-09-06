@@ -63,39 +63,95 @@ module.exports = {
 
       try {
         const malRes = await malClient.addAnime(title, { status: 'watching' })
-        let calAdded = false
+        let calStatus = ''
 
         if (syncCalendar) {
           try {
+            const animeSync = require('./anime_sync')
+            const googleCalendar = require('./google_calendar')
             const animeDetails = malRes.media || await malClient.searchAnime(title)
-            let epCount = params.episodes ? parseInt(params.episodes, 10) : (animeDetails?.episodes || 12)
-            if (isNaN(epCount) || epCount < 1) epCount = 12
+            const canonicalTitle = animeDetails?.title || malRes.title || title
+            const animeId = animeDetails?.id || malRes.animeId
+            const media = animeDetails?.media || await animeSync.getAnimeDetails(canonicalTitle, animeId)
+            const platformInfo = typeof animeSync.getStreamingPlatformInfo === 'function' ? animeSync.getStreamingPlatformInfo(media) : null
+            const platform = params.platform || platformInfo?.name || platformInfo?.site || 'Crunchyroll'
+            const epCount = params.episodes ? parseInt(params.episodes, 10) : (media?.episodes || 12)
 
-            const platform = params.platform || 'Crunchyroll'
-            const nextAiring = animeDetails?.media?.nextAiringEpisode
-            let eventDate = 'today'
-            if (nextAiring?.airingAt) {
-              const airMs = nextAiring.airingAt * 1000
-              eventDate = new Date(airMs).toISOString()
+            const isUpcoming = media?.status === 'NOT_YET_RELEASED' || animeDetails?.status === 'not_yet_aired' || animeDetails?.status === 3 || animeDetails?.anime_airing_status === 3
+            const hasBroadcastSchedule = Boolean(
+              media?.nextAiringEpisode?.airingAt ||
+              (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day)
+            )
+
+            if (isUpcoming && !hasBroadcastSchedule) {
+              const year = media?.startDate?.year || animeDetails?.start_season?.year
+              const month = media?.startDate?.month
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+              const monthStr = month ? monthNames[month - 1] : (animeDetails?.start_season?.season ? animeDetails.start_season.season.toUpperCase() : null)
+              const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
+              calStatus = ` Premiere date not yet confirmed (${timeDesc}) — will schedule on Google Calendar automatically when broadcast time is announced.`
+            } else {
+              let startDate = null
+              let simulcastStr = 'Weekly Simulcast'
+
+              if (media?.nextAiringEpisode?.airingAt) {
+                const cst = animeSync.formatCstSchedule(media.nextAiringEpisode.airingAt)
+                if (cst) {
+                  startDate = cst.date
+                  simulcastStr = cst.simulcastString
+                }
+              } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
+                startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+              } else {
+                startDate = new Date()
+              }
+
+              const calculatedEndDate = animeSync.calculateSeriesEndDate(media, startDate, epCount)
+              const isContinuing = !calculatedEndDate && !epCount
+
+              // Check existing to prevent duplicate
+              let existingEvent = null
+              try {
+                const targetCal = await googleCalendar.resolveCalendar(process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release')
+                if (targetCal?.id) {
+                  existingEvent = await googleCalendar.findExistingEvent(targetCal.id, canonicalTitle, animeId)
+                }
+              } catch (findErr) {
+                logger.warn(`actions/animelist: Failed to check for existing calendar event: ${findErr.message}`)
+              }
+
+              const calParams = {
+                operation: existingEvent ? 'update_event' : 'create_event',
+                calendar: 'Anime Release',
+                summary: canonicalTitle,
+                streaming_service: platform,
+                seasonal_run: !isContinuing,
+                continuing: isContinuing,
+                episodes_count: epCount,
+                simulcast: simulcastStr,
+                start: startDate.toISOString(),
+                link: platformInfo?.url || '',
+                mal_id: animeId
+              }
+              if (existingEvent) {
+                calParams.event_id = existingEvent.id
+              }
+              if (calculatedEndDate) {
+                calParams.until = calculatedEndDate.toISOString()
+              }
+
+              const calResult = await googleCalendar.execute(bot, channel, calParams, { ...context, isInteractive: true })
+              if (calResult && !calResult.includes('FAILED')) {
+                calStatus = existingEvent ? ' Updated existing schedule on Anime Release Google Calendar.' : ' Also scheduled on Anime Release Google Calendar.'
+              }
             }
-
-            const calResult = await googleCalendar.execute(bot, channel, {
-              operation: 'create_event',
-              calendar: 'Anime Release',
-              title: malRes.title,
-              date: eventDate,
-              recurrence: `RRULE:FREQ=WEEKLY;COUNT=${epCount}`,
-              description: `Streaming: ${platform} | Episodes: ${epCount} | Added via Skynet\nMAL: https://myanimelist.net/anime/${malRes.animeId}`
-            }, { ...context, isInteractive: true })
-
-            calAdded = calResult && !calResult.includes('FAILED')
           } catch (cErr) {
             logger.warn(`actions/animelist: Calendar creation failed for "${title}": ${cErr.message}`)
           }
         }
 
         const publicUrl = malClient.getPublicUrl()
-        return `[MAL Watchlist: Added "${malRes.title}" (MAL ID: ${malRes.animeId}) to Watching status on ${publicUrl}.${calAdded ? ' Also scheduled on Anime Release Google Calendar.' : ''}]`
+        return `[MAL Watchlist: Added "${malRes.title}" (MAL ID: ${malRes.animeId}) to Watching status on ${publicUrl}.${calStatus}]`
       } catch (err) {
         return `[MAL Watchlist Error: Failed to add "${title}": ${err.message}]`
       }
