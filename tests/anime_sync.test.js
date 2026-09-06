@@ -389,4 +389,235 @@ describe('anime_sync action', () => {
     ]))
     expect(result.summaryText).toContain('Premiere date unconfirmed (Oct 2026) — pending broadcast schedule.')
   })
+
+  describe('Edge Cases & Hardening', () => {
+    describe('extractSeasonNumber', () => {
+      test('correctly extracts Arabic season, part, and cour numbers', () => {
+        expect(animeSync.extractSeasonNumber('Jujutsu Kaisen Season 2')).toBe(2)
+        expect(animeSync.extractSeasonNumber('Fire Force S3')).toBe(3)
+        expect(animeSync.extractSeasonNumber('Slime s04')).toBe(4)
+        expect(animeSync.extractSeasonNumber('Tensei Kizoku 3rd Season')).toBe(3)
+        expect(animeSync.extractSeasonNumber('Kimi no Na wa 1st Season')).toBe(1)
+        expect(animeSync.extractSeasonNumber('Bleach Part 2')).toBe(2)
+        expect(animeSync.extractSeasonNumber('Spy x Family Cour 2')).toBe(2)
+      })
+
+      test('correctly extracts Roman numerals for seasons and sequels', () => {
+        expect(animeSync.extractSeasonNumber('DanMachi Season IV')).toBe(4)
+        expect(animeSync.extractSeasonNumber('Overlord IV')).toBe(4)
+        expect(animeSync.extractSeasonNumber('Mob Psycho 100 III')).toBe(3)
+        expect(animeSync.extractSeasonNumber('Date A Live V')).toBe(5)
+        expect(animeSync.extractSeasonNumber('Kingdom Season II')).toBe(2)
+      })
+
+      test('returns null for titles without season markers', () => {
+        expect(animeSync.extractSeasonNumber('One Piece')).toBeNull()
+        expect(animeSync.extractSeasonNumber('Tokyo Revengers')).toBeNull()
+        expect(animeSync.extractSeasonNumber('The Villager of Level 999')).toBeNull()
+        expect(animeSync.extractSeasonNumber('10 Year-Long Last Stand')).toBeNull()
+        expect(animeSync.extractSeasonNumber(null)).toBeNull()
+        expect(animeSync.extractSeasonNumber('')).toBeNull()
+      })
+    })
+
+    describe('extractMalIdFromEvent', () => {
+      test('extracts MAL ID from extendedProperties private fields', () => {
+        expect(animeSync.extractMalIdFromEvent({ extendedProperties: { private: { idMal: '60601' } } })).toBe(60601)
+        expect(animeSync.extractMalIdFromEvent({ extendedProperties: { private: { mal_id: '59088' } } })).toBe(59088)
+        expect(animeSync.extractMalIdFromEvent({ extendedProperties: { private: { malId: '12345' } } })).toBe(12345)
+      })
+
+      test('extracts MAL ID from description URL and text label', () => {
+        expect(animeSync.extractMalIdFromEvent({ description: 'MAL: https://myanimelist.net/anime/60601' })).toBe(60601)
+        expect(animeSync.extractMalIdFromEvent({ description: 'Notes here\nMAL ID: 59088' })).toBe(59088)
+        expect(animeSync.extractMalIdFromEvent({ description: 'Airing on Crunchyroll. MAL: 42249' })).toBe(42249)
+      })
+
+      test('returns null when event has no MAL ID information', () => {
+        expect(animeSync.extractMalIdFromEvent({ summary: 'No ID Event' })).toBeNull()
+        expect(animeSync.extractMalIdFromEvent(null)).toBeNull()
+        expect(animeSync.extractMalIdFromEvent({})).toBeNull()
+      })
+    })
+
+    describe('isTitleOnCalendar edge cases', () => {
+      const calendar = [
+        'That Time I Got Reincarnated as a Slime Season 4',
+        'Bleach Part 1',
+        'As a Reincarnated Aristocrat, I\'ll Use My Appraisal Skill to Rise in the World Season 3',
+        'One Piece'
+      ]
+
+      test('prevents season mismatch from false matching', () => {
+        expect(animeSync.isTitleOnCalendar('That Time I Got Reincarnated as a Slime Season 3', calendar)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('That Time I Got Reincarnated as a Slime Season 2', calendar)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('That Time I Got Reincarnated as a Slime Season 4', calendar)).toBe(true)
+      })
+
+      test('prevents part/cour mismatch from false matching', () => {
+        expect(animeSync.isTitleOnCalendar('Bleach Part 2', calendar)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('Bleach Part 1', calendar)).toBe(true)
+      })
+
+      test('never false-matches substring words like Kill la Kill to Appraisal Skill', () => {
+        expect(animeSync.isTitleOnCalendar('Kill la Kill', calendar)).toBe(false)
+      })
+
+      test('handles smart quotes, apostrophes, and punctuation gracefully', () => {
+        expect(animeSync.isTitleOnCalendar('As a Reincarnated Aristocrat, I’ll Use My Appraisal Skill to Rise in the World Season 3', calendar)).toBe(true)
+      })
+
+      test('handles parenthetical tags such as English Dub and platform tags', () => {
+        expect(animeSync.isTitleOnCalendar('One Piece (English Dub)', calendar)).toBe(true)
+        expect(animeSync.isTitleOnCalendar('One Piece (Crunchyroll)', calendar)).toBe(true)
+      })
+
+      test('returns false for null, undefined, or empty calendar', () => {
+        expect(animeSync.isTitleOnCalendar(null, calendar)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('One Piece', null)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('One Piece', [])).toBe(false)
+      })
+    })
+
+    describe('resolveAnimeSchedule edge cases', () => {
+      test('prioritizes English titles from media, MAL alternative titles, or item', async () => {
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'Tensei Kizoku 3rd Season',
+          animeId: 60601,
+          media: {
+            idMal: 60601,
+            title: {
+              romaji: 'Tensei Kizoku 3rd Season',
+              english: 'As a Reincarnated Aristocrat Season 3'
+            },
+            status: 'RELEASING',
+            episodes: 12
+          }
+        })
+        expect(schedule.canonicalTitle).toBe('As a Reincarnated Aristocrat Season 3')
+      })
+
+      test('defers upcoming anime premiering in future seasons (> 7 days away) to pending', async () => {
+        const futureDate = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000)
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'Tokyo Revengers: War of the Three Titan Arc',
+          animeId: 59088,
+          media: {
+            idMal: 59088,
+            title: { english: 'Tokyo Revengers: War of the Three Titan Arc' },
+            status: 'NOT_YET_RELEASED',
+            nextAiringEpisode: {
+              airingAt: Math.floor(futureDate.getTime() / 1000),
+              episode: 1
+            },
+            startDate: { year: futureDate.getUTCFullYear(), month: futureDate.getUTCMonth() + 1, day: futureDate.getUTCDate() }
+          }
+        })
+        expect(schedule.isUpcoming).toBe(true)
+        expect(schedule.pendingSchedule).toBe(true)
+      })
+
+      test('schedules upcoming anime premiering within the next 7 days', async () => {
+        const imminentDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'Imminent Premiere Anime',
+          animeId: 99999,
+          media: {
+            idMal: 99999,
+            title: { english: 'Imminent Premiere Anime' },
+            status: 'NOT_YET_RELEASED',
+            nextAiringEpisode: {
+              airingAt: Math.floor(imminentDate.getTime() / 1000),
+              episode: 1
+            }
+          }
+        })
+        expect(schedule.isUpcoming).toBe(true)
+        expect(schedule.pendingSchedule).toBe(false)
+        expect(schedule.hasBroadcastSchedule).toBe(true)
+      })
+
+      test('handles continuous long-running series with indefinite episode count', async () => {
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'One Piece',
+          animeId: 21,
+          media: {
+            idMal: 21,
+            title: { english: 'One Piece' },
+            status: 'RELEASING',
+            episodes: null,
+            nextAiringEpisode: { episode: 1120, airingAt: Math.floor(Date.now() / 1000) + 86400 }
+          }
+        })
+        expect(schedule.isContinuing).toBe(true)
+        expect(schedule.calculatedEndDate).toBeNull()
+        expect(schedule.recurrenceLabel).toBe('Continuing Weekly')
+      })
+    })
+
+    describe('scheduleAnimeOnCalendar edge cases', () => {
+      test('rejects event creation when title is missing or whitespace', async () => {
+        const res = await animeSync.scheduleAnimeOnCalendar({
+          calendarTarget: 'Anime Release',
+          schedule: { canonicalTitle: '   ' }
+        })
+        expect(res.success).toBe(false)
+        expect(res.error).toContain('valid non-empty title')
+      })
+
+      test('returns immediately for pending schedule without modifying calendar', async () => {
+        const res = await animeSync.scheduleAnimeOnCalendar({
+          calendarTarget: 'Anime Release',
+          schedule: {
+            canonicalTitle: 'Black Clover Season 2',
+            pendingSchedule: true,
+            timeDesc: 'Oct 2026'
+          }
+        })
+        expect(res.success).toBe(true)
+        expect(res.pendingSchedule).toBe(true)
+      })
+
+      test('deduplicates and updates existing event by MAL ID', async () => {
+        jest.spyOn(googleCalendar, 'resolveCalendar').mockResolvedValue({ id: 'cal_id', summary: 'Anime Release' })
+        const calExecuteSpy = jest.spyOn(googleCalendar, 'execute').mockResolvedValueOnce('Updated')
+
+        const existingEvent = {
+          id: 'existing_evt_1',
+          summary: 'Tensei Kizoku 3rd Season',
+          extendedProperties: { private: { idMal: '60601' } }
+        }
+
+        const schedule = {
+          canonicalTitle: 'As a Reincarnated Aristocrat Season 3',
+          animeId: 60601,
+          startDate: new Date('2026-09-27T15:00:00Z'),
+          platform: 'crunchyroll',
+          episodesCount: 12,
+          simulcastStr: 'Sundays at 10 AM CST',
+          calculatedEndDate: new Date('2026-12-13T23:59:59Z')
+        }
+
+        const res = await animeSync.scheduleAnimeOnCalendar({
+          calendarTarget: 'cal_id',
+          schedule,
+          existingEvents: [existingEvent],
+          context: { isOwner: true }
+        })
+
+        expect(res.success).toBe(true)
+        expect(calExecuteSpy).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({
+            operation: 'update_event',
+            event_id: 'existing_evt_1',
+            summary: 'As a Reincarnated Aristocrat Season 3'
+          }),
+          expect.any(Object)
+        )
+      })
+    })
+  })
 })
+

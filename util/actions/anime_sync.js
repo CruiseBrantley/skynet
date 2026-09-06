@@ -175,10 +175,26 @@ function getCrunchyrollInfo (media) {
  */
 function extractSeasonNumber (str) {
   if (!str) return null
-  const m = str.match(/(?:season|cour|part)\s*(\d+)|s(\d+)|(\d+)(?:nd|rd|th|st)\s*season/i)
-  if (m) {
-    return parseInt(m[1] || m[2] || m[3], 10)
+  const romanMap = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10 }
+
+  const digitMatch = str.match(/(?:season|cour|part)\s*(\d+)|\bs(\d+)\b|(\d+)(?:nd|rd|th|st)\s*season/i)
+  if (digitMatch) {
+    return parseInt(digitMatch[1] || digitMatch[2] || digitMatch[3], 10)
   }
+
+  const romanMatch = str.match(/\b(?:season|cour|part)\s*([ivx]+)\b/i)
+  if (romanMatch) {
+    const val = romanMap[romanMatch[1].toLowerCase()]
+    if (val) return val
+  }
+
+  // Check standalone trailing roman numeral after title (e.g. "Overlord IV", "DanMachi III")
+  const trailingRoman = str.match(/\s+([ivx]+)$/i)
+  if (trailingRoman) {
+    const val = romanMap[trailingRoman[1].toLowerCase()]
+    if (val && val > 1) return val
+  }
+
   return null
 }
 
@@ -187,13 +203,17 @@ function extractSeasonNumber (str) {
  */
 function extractMalIdFromEvent (event) {
   if (!event) return null
-  const idFromPrivate = event.extendedProperties?.private?.idMal || event.extendedProperties?.private?.mal_id
+  const idFromPrivate = event.extendedProperties?.private?.idMal ||
+    event.extendedProperties?.private?.mal_id ||
+    event.extendedProperties?.private?.malId
   if (idFromPrivate && !isNaN(parseInt(idFromPrivate, 10))) {
     return parseInt(idFromPrivate, 10)
   }
   if (event.description) {
-    const m = event.description.match(/myanimelist\.net\/anime\/(\d+)/i)
-    if (m) return parseInt(m[1], 10)
+    const urlMatch = event.description.match(/myanimelist\.net\/anime\/(\d+)/i)
+    if (urlMatch) return parseInt(urlMatch[1], 10)
+    const labelMatch = event.description.match(/MAL(?:\s*ID)?:\s*(\d+)/i)
+    if (labelMatch) return parseInt(labelMatch[1], 10)
   }
   return null
 }
@@ -290,7 +310,9 @@ async function resolveAnimeSchedule (params = {}) {
   const romajiTitle = media?.title?.romaji || providedItem?.anime_title || title
   const platformInfo = getStreamingPlatformInfo(media)
   const platform = platformOverride || platformInfo?.key || platformInfo?.name || platformInfo?.site || 'crunchyroll'
-  const episodesCount = episodesOverride ? parseInt(episodesOverride, 10) : (media?.episodes || animeInfo?.episodes || 12)
+  const episodesCount = episodesOverride
+    ? parseInt(episodesOverride, 10)
+    : (media?.episodes || animeInfo?.episodes || null)
 
   const isUpcoming = media?.status === 'NOT_YET_RELEASED' ||
     animeInfo?.status === 'not_yet_aired' ||
@@ -336,8 +358,8 @@ async function resolveAnimeSchedule (params = {}) {
   const calculatedEndDate = calculateSeriesEndDate(media, startDate, episodesCount)
   const isContinuing = !calculatedEndDate && !media?.episodes && !animeInfo?.episodes
   const recurrenceLabel = calculatedEndDate
-    ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
-    : (isContinuing ? 'Continuing Weekly' : `${episodesCount} episodes`)
+    ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount || 12} eps)`
+    : (isContinuing ? 'Continuing Weekly' : `${episodesCount || 12} episodes`)
 
   return {
     animeId: effectiveId,
@@ -376,6 +398,13 @@ async function scheduleAnimeOnCalendar (params = {}) {
     bot = null,
     channel = null
   } = params
+
+  if (!schedule || !schedule.canonicalTitle || !schedule.canonicalTitle.trim()) {
+    return {
+      success: false,
+      error: 'Cannot schedule anime without a valid non-empty title.'
+    }
+  }
 
   if (schedule.pendingSchedule) {
     return {

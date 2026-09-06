@@ -317,4 +317,93 @@ describe("Slash Command: /animelist", () => {
       })]
     }))
   })
+
+  test("add subcommand defers upcoming anime premiering in future seasons (> 7 days away)", async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue("add")
+    mockInteraction.options.getString.mockImplementation((name) => {
+      if (name === "title") return "Tokyo Revengers: War of the Three Titan Arc"
+      return null
+    })
+    mockInteraction.options.getBoolean.mockReturnValue(true)
+
+    const futureDate = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000)
+    malClient.searchAnime.mockResolvedValue({
+      id: 59088,
+      title: "Tokyo Revengers: War of the Three Titan Arc",
+      status: "not_yet_aired",
+      media: {
+        status: "NOT_YET_RELEASED",
+        startDate: { year: futureDate.getUTCFullYear(), month: futureDate.getUTCMonth() + 1, day: futureDate.getUTCDate() },
+        nextAiringEpisode: {
+          airingAt: Math.floor(futureDate.getTime() / 1000),
+          episode: 1
+        }
+      }
+    })
+    malClient.isAuthenticated.mockReturnValue(true)
+    malClient.addAnime.mockResolvedValue({ success: true })
+    malClient.getPublicUrl.mockReturnValue("https://myanimelist.net/animelist/skynetanimelist")
+
+    await animelistCommand.execute(mockInteraction)
+
+    expect(malClient.addAnime).toHaveBeenCalledWith(59088, { status: "watching" })
+    expect(ActionExecutor.executeAction).not.toHaveBeenCalledWith("google_calendar", expect.anything(), expect.anything())
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          description: expect.stringContaining("Premiere date unconfirmed (Oct 2026)")
+        })
+      })]
+    }))
+  })
+
+  test("add subcommand rejects execution when title is missing", async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue("add")
+    mockInteraction.options.getString.mockReturnValue("")
+
+    await animelistCommand.execute(mockInteraction)
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining("Missing anime title"))
+  })
+
+  test("sync subcommand displays structured embed with pending announcements and up-to-date count", async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue("sync")
+    malClient.getPublicUrl.mockReturnValue("https://myanimelist.net/animelist/skynetanimelist")
+
+    ActionExecutor.executeAction.mockResolvedValue({
+      success: true,
+      output: {
+        addedToCalendar: [],
+        scheduleShifted: [],
+        endedTruncated: [],
+        pendingBroadcast: [
+          { title: "Black Clover Season 2", timeDesc: "Oct 2026" },
+          { title: "Tokyo Revengers: War of the Three Titan Arc", timeDesc: "Oct 2026" }
+        ],
+        alreadyPresent: [
+          { title: "Bleach: Thousand-Year Blood War", isUpcoming: false },
+          { title: "That Time I Got Reincarnated as a Slime Season 4", isUpcoming: false }
+        ],
+        airingCount: 2,
+        upcomingCount: 0
+      }
+    })
+
+    await animelistCommand.execute(mockInteraction)
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          title: "🎌 Watchlist & Google Calendar Sync",
+          fields: expect.arrayContaining([
+            expect.objectContaining({
+              name: expect.stringContaining("Pending Broadcast Announcement (2)"),
+              value: expect.stringContaining("Black Clover Season 2")
+            }),
+            expect.objectContaining({
+              name: expect.stringContaining("Up to Date on Calendar (2)")
+            })
+          ])
+        })
+      })]
+    }))
+  })
 })
