@@ -380,7 +380,7 @@ module.exports = {
     // Operation: create_event
     // ─────────────────────────────────────────────────────────────
     if (operation === 'create_event') {
-      const summary = params.summary || params.title
+      const summary = (params.summary || params.title || '').trim()
       if (!summary) {
         throw new Error('Event "summary" (title) is required to create a calendar event.')
       }
