@@ -1,5 +1,5 @@
-const { MessageFlags } = require('discord.js')
 const { jsonrepair } = require('jsonrepair')
+const { ActionProgressTracker } = require('./actionProgress')
 const logger = require('../../logger')
 const telemetry = require('../telemetry')
 const ActionExecutor = require('../ActionExecutor')
@@ -56,16 +56,21 @@ class AgentTurnManager {
       const evaluationPrompt = [
         {
           role: 'system',
-          content: 'You are an autonomous AI Turn Coordinator. Analyze whether the Assistant has completely fulfilled the User Request or if it stopped prematurely with pending intentions, promises, or unfinished tool executions.\n' +
+          content: 'You are an autonomous AI Turn Coordinator. Analyze whether the Assistant\'s proposed reply is a complete, finished response to the User Request, or if it stopped prematurely with unfinished work, conversational intent promises, or a failure.\n' +
+            'Evaluation Rules:\n' +
+            '1. "is_sufficient: false" if the Assistant states intent to do work, inspect, check, or fix something (e.g., "I will inspect...", "Let me check...", "I need to look at...", "I will start with..."), but stopped with text commentary without executing the action tool in this turn.\n' +
+            '2. "is_sufficient: false" if the Assistant output raw/malformed tool command syntax (e.g. <<<RUN_COMMAND...>>> or unparsed JSON) instead of natural dialogue or an executed tool.\n' +
+            '3. "is_sufficient: false" if the user request requires an action or inspection and the Assistant only provided intermediate commentary without completing the task.\n' +
+            '4. "is_sufficient: true" ONLY when the Assistant has fully answered/resolved the request, OR when the Assistant is actively blocked and asking the user a direct clarifying question.\n' +
             'Respond ONLY with a valid JSON object matching this schema:\n' +
-            '{"has_pending_work": boolean, "reason": "brief explanation", "suggested_action": "what tool or step to run next if pending"}'
+            '{"is_sufficient": boolean, "reason": "brief explanation", "suggested_action": "what tool, inspection, or step to run next if insufficient"}'
         },
         {
           role: 'user',
           content: `[USER REQUEST]:\n${userPrompt.substring(0, 500)}\n\n` +
             `[TOOLS EXECUTED SO FAR]:\n${executedNames}\n\n` +
             `[ASSISTANT PROPOSED REPLY]:\n${trimmed.substring(0, 800)}\n\n` +
-            'Has the assistant finished the task, or is there pending work / unexecuted intent?'
+            'Is the proposed reply complete and sufficient, or did the assistant stop prematurely, state unexecuted intent, leak command syntax, or leave work pending?'
         }
       ]
 
@@ -76,20 +81,24 @@ class AgentTurnManager {
 
       if (evalJsonMatch) {
         const parsed = JSON.parse(jsonrepair(evalJsonMatch[0]))
-        if (typeof parsed.has_pending_work === 'boolean') {
-          logger.info(`AgentTurnManager: LLM Coordinator evaluation: has_pending_work=${parsed.has_pending_work} (${parsed.reason || 'no reason'})`)
-          return {
-            isPending: parsed.has_pending_work,
-            reason: parsed.reason || 'LLM Coordinator evaluation',
-            suggestedAction: parsed.suggested_action
-          }
+        const isSufficient = typeof parsed.is_sufficient === 'boolean'
+          ? parsed.is_sufficient
+          : (typeof parsed.has_pending_work === 'boolean' ? !parsed.has_pending_work : true)
+        const isPending = !isSufficient || Boolean(parsed.has_pending_work)
+
+        logger.info(`AgentTurnManager: LLM Coordinator evaluation: is_sufficient=${isSufficient} (${parsed.reason || 'no reason'})`)
+        return {
+          isPending,
+          isSufficient,
+          reason: parsed.reason || (isPending ? 'Turn Coordinator determined response is insufficient' : 'Sufficient reply'),
+          suggestedAction: parsed.suggested_action
         }
       }
     } catch (evalErr) {
       logger.warn(`AgentTurnManager: LLM Coordinator evaluation failed: ${evalErr.message}`)
     }
 
-    return { isPending: false, reason: 'Default completion' }
+    return { isPending: false, isSufficient: true, reason: 'Default completion' }
   }
 
   /**
@@ -121,8 +130,11 @@ class AgentTurnManager {
   /**
    * Generates a clean, typed JSON schema catalog of all available actions.
    */
-  static getToolCatalogPrompt () {
-    const actions = ActionExecutor.listActions()
+  static getToolCatalogPrompt (options = {}) {
+    const isOwner = Boolean(options && (options.isOwner || options.userId === process.env.OWNER_ID))
+    const isPrivate = options ? (!options.guildId || options.isDM) : true
+
+    const actions = ActionExecutor.listActions({ isOwner, isPrivate })
     if (!actions || actions.length === 0) return ''
 
     const lines = [
@@ -258,8 +270,9 @@ class AgentTurnManager {
    */
   async executeToolCall ({ name, args, interaction, database, sharedState }) {
     const rawCmdName = name.toLowerCase()
-    const allActions = ActionExecutor.listActions()
-    const isAction = allActions.some(a => a.name === rawCmdName)
+    const isAction = ActionExecutor.hasAction
+      ? ActionExecutor.hasAction(rawCmdName)
+      : Boolean(ActionExecutor._actions?.[rawCmdName] || (typeof ActionExecutor.listActions === 'function' && ActionExecutor.listActions().some(a => a.name === rawCmdName)) || typeof ActionExecutor.executeAction === 'function')
     const targetCmd = interaction.client?.commands?.get ? interaction.client.commands.get(rawCmdName) : null
 
     // Special case: built-in memory operations
@@ -297,15 +310,6 @@ class AgentTurnManager {
       sharedState.visualActionExecuted = true
     }
 
-    if (!sharedState.primaryResponseUsed && typeof interaction.editReply === 'function') {
-      try {
-        await interaction.editReply({
-          content: `*${this.botName} is executing \`${rawCmdName}\`...*`,
-          flags: [MessageFlags.SuppressEmbeds]
-        })
-      } catch (e) {}
-    }
-
     const targetChannel = interaction.channel
     const mock = createMockInteraction(interaction, {
       params: args || {},
@@ -316,6 +320,7 @@ class AgentTurnManager {
     const resolveParam = (n) => {
       if (args && args[n] !== undefined) return args[n]
       if (args && args.params && args.params[n] !== undefined) return args.params[n]
+      if (n === 'title' && (args?.add || args?.remove)) return args.add || args.remove
       return getParam(args, n)
     }
 
@@ -324,7 +329,17 @@ class AgentTurnManager {
         const v = resolveParam(n)
         return v !== null && v !== undefined ? String(v) : null
       },
-      getSubcommand: () => resolveParam('subcommand') || null,
+      getSubcommand: () => {
+        const direct = resolveParam('subcommand')
+        if (direct) return direct
+        if (args?.add !== undefined) return 'add'
+        if (args?.remove !== undefined) return 'remove'
+        if (args?.list !== undefined) return 'list'
+        if (args?.sync !== undefined) return 'sync'
+        if (args?.seed !== undefined) return 'seed'
+        if (args?.auth !== undefined) return 'auth'
+        return null
+      },
       getSubcommandGroup: () => resolveParam('subcommand_group') || null,
       getChannel: (n) => {
         const val = resolveParam(n)
@@ -353,16 +368,34 @@ class AgentTurnManager {
     const startEpoch = Date.now()
 
     if (isAction) {
+      const isOwner = Boolean(
+        interaction.isOwner ||
+        interaction.user?.id === process.env.OWNER_ID ||
+        interaction.userId === process.env.OWNER_ID
+      )
+      const isDM = Boolean(
+        !interaction.guildId ||
+        interaction.channel?.type === 1 ||
+        interaction.isDM ||
+        interaction.clientId === 'web' ||
+        interaction.clientId === 'cli'
+      )
+
       const actionContext = {
         interaction: mock,
         channel: targetChannel,
         client: interaction.client,
         guild: interaction.guild,
-        userId: interaction.user?.id,
+        userId: interaction.user?.id || interaction.userId,
         guildId: interaction.guildId,
         channelId: targetChannel?.id,
         member: interaction.member,
-        user: interaction.user
+        user: interaction.user,
+        isOwner,
+        isDM,
+        clientId: interaction.clientId,
+        isInteractive: true,
+        isScheduled: false
       }
 
       const result = await ActionExecutor.executeAction(rawCmdName, args, actionContext)
@@ -481,14 +514,27 @@ class AgentTurnManager {
     let pendingPromptCount = 0
     let finalReplyContent = ''
 
+    const tracker = new ActionProgressTracker({ botName: this.botName })
+    if (!sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
+      await interaction.showStatus(`${this.botName} is thinking...`).catch(() => {})
+    }
+
     for (let step = 0; step < maxSteps; step++) {
       logger.info(`AgentTurnManager: Executing turn step ${step + 1}/${maxSteps}`)
 
+      if (typeof interaction.resetStream === 'function') {
+        interaction.resetStream()
+      } else if (typeof interaction.streamToken?.reset === 'function') {
+        interaction.streamToken.reset()
+      }
+
+      const streamCallback = interaction.streamToken || interaction.onToken || null
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
       const responseData = await queryFn(
         [...channelHistory.messages],
         ollamaContext,
-        this.botName
+        this.botName,
+        streamCallback
       )
 
       if (!responseData || !responseData.message) {
@@ -513,17 +559,16 @@ class AgentTurnManager {
 
         if (pendingEval.isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
           pendingPromptCount++
-          logger.info(`AgentTurnManager: Pending work detected at step ${step + 1} ("${finalReplyContent.slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to execute action (retry #${pendingPromptCount}).`)
+          logger.info(`AgentTurnManager: Pending work or insufficient response detected at step ${step + 1} ("${finalReplyContent.slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to complete work (retry #${pendingPromptCount}).`)
           channelHistory.messages.push({ role: 'assistant', content: finalReplyContent })
 
-          const isCode = Boolean(ollamaContext?.isCodeTask)
-          let directive = isCode
-            ? '[SYSTEM COORDINATOR: You stated intent or drafted code commentary without executing. Do not end the turn with commentary. Output the executable <<<RUN_COMMAND: {"command": "create_slash_command", "name": "...", "description": "...", "code": "..."}>>> or action tool now to apply the changes.]'
-            : '[SYSTEM COORDINATOR: You diagnosed the state or stated intent. Do not stop with text commentary. Proceed to execute the necessary action tool now using <<<RUN_COMMAND: {"command": "...", ...}>>> to complete the request.]'
-
+          let directive = `[SYSTEM COORDINATOR FEEDBACK: Your previous reply was determined to be insufficient or incomplete. Reason: ${pendingEval.reason}.`
           if (pendingEval.suggestedAction) {
-            directive += ` Recommended next action: ${pendingEval.suggestedAction}`
+            directive += ` Action required: ${pendingEval.suggestedAction}.`
+          } else {
+            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete and proper response to the user.'
           }
+          directive += ']'
 
           channelHistory.messages.push({
             role: 'user',
@@ -593,6 +638,12 @@ class AgentTurnManager {
 
         executedSignatures.add(toolSig)
 
+        tracker.startAction(toolCall.name, toolCall.arguments)
+        if (!sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
+          const statusText = interaction.isWeb ? tracker.renderWebStatus() : tracker.renderDiscordProgress()
+          await interaction.showStatus(statusText).catch(() => {})
+        }
+
         const executionResult = await this.executeToolCall({
           name: toolCall.name,
           args: toolCall.arguments,
@@ -606,6 +657,12 @@ class AgentTurnManager {
           arguments: toolCall.arguments,
           success: executionResult.success
         })
+
+        tracker.finishAction(toolCall.name, executionResult.success)
+        if (!sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
+          const statusText = interaction.isWeb ? tracker.renderWebStatus() : tracker.renderDiscordProgress()
+          await interaction.showStatus(statusText).catch(() => {})
+        }
 
         // Feed structured tool observation back into context
         channelHistory.messages.push({
@@ -621,27 +678,33 @@ class AgentTurnManager {
       finalReplyContent = mentionResolver.resolve(finalReplyContent, interaction.guildId)
     }
 
-    // Deliver final formatted response to Discord
-    const responder = new DiscordResponder({ botName: this.botName })
-    await responder.sendFinalResponse({
-      interaction,
-      replyContent: finalReplyContent,
-      sharedState
-    })
-
-    // Ephemeral Turn Scratchpad Hygiene:
-    // Retain only the initial user prompt, system prompt, and final assistant response
-    // to prevent intermediate JSON/HTML dumps from inflating future conversation context.
-    if (channelHistory?.messages) {
-      channelHistory.messages = channelHistory.messages.filter((msg, idx) => {
-        return idx === 0 || msg.role === 'user' || msg.role === 'assistant'
+    try {
+      // Deliver final formatted response to Discord
+      const responder = new DiscordResponder({ botName: this.botName })
+      await responder.sendFinalResponse({
+        interaction,
+        replyContent: finalReplyContent,
+        sharedState
       })
-    }
 
-    return {
-      success: true,
-      replyContent: finalReplyContent,
-      executedTools
+      // Ephemeral Turn Scratchpad Hygiene:
+      // Retain only the initial user prompt, system prompt, and final assistant response
+      // to prevent intermediate JSON/HTML dumps from inflating future conversation context.
+      if (channelHistory?.messages) {
+        channelHistory.messages = channelHistory.messages.filter((msg, idx) => {
+          return idx === 0 || msg.role === 'user' || msg.role === 'assistant'
+        })
+      }
+
+      return {
+        success: true,
+        replyContent: finalReplyContent,
+        executedTools
+      }
+    } finally {
+      if (typeof interaction.cleanup === 'function') {
+        interaction.cleanup()
+      }
     }
   }
 }

@@ -38,7 +38,7 @@ describe('Ollama Fallback Hierarchy', () => {
     expect(result.message.content).toBe('remote')
   })
 
-  test('should failover to Level 1 (Local Mac) when Remote is offline', async () => {
+  test('should failover directly to Level 2 (Gemini) when Remote is offline', async () => {
     // Mock remote port as closed
     mockSocket.connect.mockImplementation((p, h, cb) => {
       if (p === 11434 && h === 'remote-host') return // fail
@@ -48,39 +48,60 @@ describe('Ollama Fallback Hierarchy', () => {
       if (event === 'error' || event === 'timeout') setImmediate(cb)
     })
 
-    axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
     const result = await queryOllama('/api/chat', { messages: [] })
-    expect(result.message.content).toBe('local')
+    expect(result.message.content).toBe('gemini')
+    // Verification: local was bypassed, call went straight to Gemini
+    expect(axios.post.mock.calls[0][0]).toContain('googleapis')
   })
 
-  test('should failover to Level 2 (Gemini) when Local Mac fails', async () => {
-    // Mock remote port as closed
-    mockSocket.connect.mockImplementation((p, h, cb) => {
-      if (p === 11434 && h === 'remote-host') return // fail
-      if (cb) setImmediate(cb)
-    })
-    mockSocket.once.mockImplementation((event, cb) => {
-      if (event === 'error' || event === 'timeout') setImmediate(cb)
-    })
-
-    axios.post.mockRejectedValueOnce(new Error('Local error'))
+  test('should failover directly to Level 2 (Gemini) when Remote errors', async () => {
+    axios.post.mockRejectedValueOnce(new Error('Remote timeout or VRAM crash'))
     axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
     expect(result.message.content).toBe('gemini')
+    expect(axios.post.mock.calls[1][0]).toContain('googleapis')
   })
 
-  test('should skip Level 0 entirely if OLLAMA_REMOTE_HOST is missing', async () => {
+  test('should skip Level 0 entirely and route directly to Gemini if OLLAMA_REMOTE_HOST is missing', async () => {
     delete process.env.OLLAMA_REMOTE_HOST
-    axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
 
-    expect(result.message.content).toBe('local')
-    // Any socket checks should be against localhost, never the remote host
+    expect(result.message.content).toBe('gemini')
     const connectCalls = mockSocket.connect.mock.calls
     const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
     expect(remoteConnects.length).toBe(0)
+    expect(axios.post.mock.calls[0][0]).toContain('googleapis')
+  })
+
+  test('should allow Level 1 (Local Mac) when explicitly requested', async () => {
+    axios.post.mockResolvedValueOnce({ data: { message: { content: 'local-explicit' } } })
+    const result = await queryOllama('/api/chat', { messages: [] }, 1)
+    expect(result.message.content).toBe('local-explicit')
+    expect(axios.post.mock.calls[0][0]).toContain('127.0.0.1')
+  })
+
+  test('should cascade across candidateModels when primary Gemini model returns 503 high demand', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+    process.env.GEMINI_MODEL = 'gemini-3.8-flash'
+
+    // First model (3.8-flash) fails with 503
+    const err503 = new Error('High demand')
+    err503.response = { status: 503, data: { error: { message: 'High demand' } } }
+
+    axios.post
+      .mockRejectedValueOnce(err503)
+      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-3.7-flash' }] } }] } })
+
+    const result = await queryOllama('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('from-3.7-flash')
+    expect(axios.post).toHaveBeenCalledTimes(2)
+    expect(axios.post.mock.calls[0][0]).toContain('gemini-3.8-flash')
+    expect(axios.post.mock.calls[1][0]).toContain('gemini-3.7-flash')
   })
 })
 
@@ -166,5 +187,18 @@ describe('queryLocalOrRemote — Gemini-free routing', () => {
     const connectCalls = mockSocket.connect.mock.calls
     const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
     expect(remoteConnects.length).toBe(0)
+  })
+
+  test('strictly never calls Gemini even if both remote and local fail', async () => {
+    // Remote port check succeeds but remote post fails
+    axios.post.mockRejectedValueOnce(new Error('remote dead'))
+    // Local post also fails
+    axios.post.mockRejectedValueOnce(new Error('local dead'))
+
+    await expect(queryLocalOrRemote('/api/chat', { messages: [] })).rejects.toThrow('local dead')
+
+    // Verify googleapis was never called
+    const urls = axios.post.mock.calls.map(c => c[0])
+    expect(urls.some(u => u.includes('googleapis'))).toBe(false)
   })
 })

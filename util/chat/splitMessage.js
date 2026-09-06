@@ -10,7 +10,10 @@ function splitMessage (text) {
 
   const lines = sanitizedText.split('\n')
   for (const line of lines) {
-    if (line.startsWith('```')) {
+    const isFence = line.startsWith('```')
+    const wasInCode = inCodeBlock
+
+    if (isFence) {
       inCodeBlock = !inCodeBlock
       if (inCodeBlock) {
         codeBlockLang = line.replace(/```/g, '').trim()
@@ -19,9 +22,9 @@ function splitMessage (text) {
       }
     }
 
-    // If adding this line exceeds the Discord limit (leaving room for code block closing wrappers)
-    if (currentChunk.length + line.length > 1900) {
-      if (inCodeBlock) {
+    // Never split on a fence line; use pre-toggle state for close-guard
+    if (currentChunk.length + line.length > 1900 && !isFence) {
+      if (wasInCode) {
         currentChunk += '\n```'
       }
       chunks.push(currentChunk)

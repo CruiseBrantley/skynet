@@ -19,19 +19,21 @@ function loadConfig () {
   }
 }
 
-async function announce (bot, data, group, config) {
+async function announce (bot, data, group, config, hasImage = false) {
   try {
-    const attachment = new AttachmentBuilder('image.jpg', { name: 'image.jpg' })
     const embed = new EmbedBuilder()
       .setAuthor({
         name: `${data.broadcaster_name} is Streaming ${data.game_name ? `${data.game_name} ` : ''}on Twitch!`
       })
       .setURL(`https://www.twitch.tv/${data.broadcaster_name}`)
-      .setTitle(data.title)
-      .setImage('attachment://image.jpg')
+      .setTitle(data.title || 'Live on Twitch')
       .setTimestamp()
 
-    const socials = config.socials[data.broadcaster_id]
+    if (hasImage) {
+      embed.setImage('attachment://image.jpg')
+    }
+
+    const socials = config.socials && config.socials[data.broadcaster_id]
     const youtubeText = socials && socials.youtube ? `\n📺 **YouTube:** ${socials.youtube}` : ''
 
     const targetChannel = await bot.channels.fetch(group.channel_id).catch(() => null)
@@ -42,11 +44,16 @@ async function announce (bot, data, group, config) {
 
     const mention = group.mention !== undefined ? group.mention : '@everyone'
 
-    await targetChannel.send({
+    const sendPayload = {
       content: `${mention} ${data.broadcaster_name} has gone Live! https://www.twitch.tv/${data.broadcaster_name}${youtubeText}`,
-      embeds: [embed],
-      files: [attachment]
-    })
+      embeds: [embed]
+    }
+
+    if (hasImage) {
+      sendPayload.files = [new AttachmentBuilder('image.jpg', { name: 'image.jpg' })]
+    }
+
+    await targetChannel.send(sendPayload)
   } catch (err) {
     logger.error('Main announce error:', err)
   }
@@ -54,6 +61,8 @@ async function announce (bot, data, group, config) {
 
 async function botAnnounce (bot, data) {
   try {
+    if (!data || !data.broadcaster_id) return
+
     // 2. Session Deduplication (Online/Offline flicker)
     const now = Date.now()
     const lastAnnounce = recentAnnouncements.get(data.broadcaster_id)
@@ -70,19 +79,31 @@ async function botAnnounce (bot, data) {
     }
 
     const config = loadConfig()
-    const imageUrl = data.game_image
-      ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
-      : data.thumbnail_url
-        .replace('{width}', '1025')
-        .replace('{height}', '577')
+    const rawImage = data.game_image || data.thumbnail_url
+    let hasImage = false
 
-    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' })
-    fs.writeFileSync('image.jpg', imageResponse.data)
+    if (rawImage) {
+      try {
+        const imageUrl = data.game_image
+          ? data.game_image.replace('{width}', '900').replace('{height}', '1200')
+          : data.thumbnail_url
+            .replace('{width}', '1025')
+            .replace('{height}', '577')
+
+        const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' })
+        fs.writeFileSync('image.jpg', imageResponse.data)
+        hasImage = true
+      } catch (imgErr) {
+        logger.warn(`botAnnounce: Failed to download thumbnail for ${data.broadcaster_name}: ${imgErr.message}`)
+      }
+    } else {
+      logger.warn(`botAnnounce: No image URL for ${data.broadcaster_name} — announcing without image attachment.`)
+    }
 
     for (const group of config.groups) {
       if (group.streamers.includes(data.broadcaster_id)) {
         logger.info(`Announcing: ${data.broadcaster_name} in ${group.channel_id}`)
-        await announce(bot, data, group, config)
+        await announce(bot, data, group, config, hasImage)
       }
     }
   } catch (err) {

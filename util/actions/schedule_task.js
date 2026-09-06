@@ -27,10 +27,17 @@ module.exports = {
     }
 
     // 2. Add to the local scheduler
-    const targetChannelId = channelId || context.channelId || channel.id
+    let targetChannelId = channelId
+    if (!targetChannelId || targetChannelId === 'current') {
+      targetChannelId = channel?.id || context.channelId || 'dm'
+    }
+    if (targetChannelId === 'terminal' || targetChannelId.startsWith('cli_') || targetChannelId.startsWith('web_')) {
+      targetChannelId = 'dm'
+    }
+
     let targetGuildId = context.guild?.id || context.guildId || null
-    if (!targetGuildId && targetChannelId) {
-      const chan = bot.channels.cache.get(targetChannelId)
+    if (!targetGuildId && targetChannelId && targetChannelId !== 'dm') {
+      const chan = bot?.channels?.cache?.get ? bot.channels.cache.get(targetChannelId) : null
       if (chan && chan.guildId) {
         targetGuildId = chan.guildId
       }
@@ -47,12 +54,15 @@ module.exports = {
 
     const timeString = new Date(scheduledAt).toLocaleString()
     const repeatString = task.repeat ? ` (repeating ${task.repeat})` : ''
+    const targetDisplay = (targetChannelId === 'dm' || !targetChannelId)
+      ? 'Direct Message / All Channels'
+      : `<#${targetChannelId}>`
 
     // 3. Confirm back to user
     const response = '✅ **Task Scheduled Successfully!**\n' +
                          `**ID:** \`${task.id}\`\n` +
                          `**Task:** ${description}\n` +
-                         `**Target:** <#${targetChannelId}>\n` +
+                         `**Target:** ${targetDisplay}\n` +
                          `**Time:** ${timeString}${repeatString}`
 
     if (context && typeof context.reply === 'function' && !context.replied) {

@@ -13,7 +13,8 @@ const SKIP_PATTERNS = [
   /discord\.(com|gg)/i,
   /twitch\.tv/i,
   /tenor\.com/i,
-  /giphy\.com/i
+  /giphy\.com/i,
+  /yelp\.com/i
 ]
 
 const SUCCINCT_PROMPT = `Given the text content of a web page, provide a very brief summary (maximum 2 sentences).

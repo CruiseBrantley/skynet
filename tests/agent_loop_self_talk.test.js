@@ -68,4 +68,29 @@ describe('AgentLoop Self-Talk Prevention', () => {
 
     expect(loggerInfoSpy).not.toHaveBeenCalledWith(expect.stringContaining('skipping #general — last message was from me'))
   })
+
+  test('skips evaluation when bot is wrapped inside CoreController adapter structure', async () => {
+    agentLoop.stop()
+    const mockCoreController = {
+      getClient: jest.fn().mockReturnValue({
+        client: { user: { id: 'wrapped_bot_789' } }
+      })
+    }
+    agentLoop.start(mockCoreController, 60000)
+
+    const messages = new Map([
+      ['msg1', { id: 'msg1', author: { id: 'wrapped_bot_789' }, createdAt: new Date() }],
+      ['msg2', { id: 'msg2', author: { id: 'human456' }, createdAt: new Date(Date.now() - 1000) }],
+      ['msg3', { id: 'msg3', author: { id: 'human789' }, createdAt: new Date(Date.now() - 2000) }]
+    ])
+    messages.first = () => messages.get('msg1')
+    messages.size = 3
+    mockChannel.messages.fetch.mockResolvedValue(messages)
+
+    const loggerInfoSpy = jest.spyOn(logger, 'info')
+
+    await agentLoop._evaluateProactivePresence(mockChannel, 'guild123')
+
+    expect(loggerInfoSpy).toHaveBeenCalledWith(expect.stringContaining('skipping #general — last message was from me'))
+  })
 })

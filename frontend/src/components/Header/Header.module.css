@@ -1,0 +1,107 @@
+
+.header {
+  background-color: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding-top: max(44px, env(safe-area-inset-top, 44px));
+  padding-bottom: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 16px));
+  padding-right: max(16px, env(safe-area-inset-right, 16px));
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.headerContent {
+  width: 100%;
+  max-width: var(--chat-max-width, 860px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  background: #238636;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #238636;
+}
+
+.titleText {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.authGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profileBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #21262d;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+.userAvatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.authBtn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.authBtn:hover {
+  background: var(--accent-hover);
+}
+
+.twitchBtn {
+  background: var(--twitch-color);
+}
+
+.twitchBtn:hover {
+  background: #772ce8;
+}
+
+.logoutBtn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.logoutBtn:hover {
+  color: #f85149;
+  border-color: #f85149;
+}

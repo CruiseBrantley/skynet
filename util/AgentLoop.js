@@ -85,7 +85,7 @@ class AgentLoop {
       if (this._tickCount % 72 === 0) {
         try {
           const { checkTwitchHealth } = require('../server/server')
-          await checkTwitchHealth(this._bot)
+          await checkTwitchHealth(this._getDiscordClient())
         } catch (twitchErr) {
           logger.warn(`AgentLoop: Periodic Twitch health check error: ${twitchErr.message}`)
         }
@@ -102,11 +102,26 @@ class AgentLoop {
     }
   }
 
+  _getDiscordClient () {
+    if (!this._bot) return null
+    if (this._bot.guilds && this._bot.guilds.cache) return this._bot
+    if (this._bot.client && this._bot.client.guilds) return this._bot.client
+    if (typeof this._bot.getClient === 'function') {
+      const adapter = this._bot.getClient('discord')
+      if (adapter) return adapter.client || adapter
+    }
+    return this._bot
+  }
+
   /**
        * Iterate through all whitelisted guilds and decide if we should chime in.
        */
   async _checkProactiveGuilds () {
-    if (!this._bot) return
+    const discordClient = this._getDiscordClient()
+    if (!discordClient?.guilds?.cache) {
+      logger.warn('AgentLoop: _checkProactiveGuilds — bot.guilds.cache unavailable, skipping.')
+      return
+    }
 
     // Fetch settings from Firebase
     const database = require('../firebase-login')()
@@ -124,13 +139,13 @@ class AgentLoop {
       const emojiEnabled = settings.proactive_emoji_enabled ?? settings.agent_enabled ?? false
       if (!textEnabled && !emojiEnabled) continue
 
-      const guild = this._bot.guilds.cache.get(guildId)
+      const guild = discordClient?.guilds?.cache?.get(guildId)
       if (!guild) continue
 
       const channels = await guild.channels.fetch()
       const textChannels = channels.filter(c =>
         c.isTextBased() && !c.isThread() && c.viewable &&
-        c.permissionsFor(this._bot.user).has(['SendMessages', 'ReadMessageHistory']) &&
+        c.permissionsFor(discordClient.user).has(['SendMessages', 'ReadMessageHistory']) &&
         c.lastMessageId &&
         isProactiveChannelAllowed(guildId, c.id, c.name)
       )
@@ -163,7 +178,7 @@ class AgentLoop {
 
       // RECENCY CHECK: Only evaluate if the conversation is still "alive" (last message within 15 mins)
       const lastMessage = messages.first()
-      const botId = this._bot?.user?.id
+      const botId = this._getDiscordClient()?.user?.id
 
       // BOT SELF-TALK PREVENTION: Never evaluate or interject if the last message was from me.
       // We wait for humans to provide fresh input before chiming in again.

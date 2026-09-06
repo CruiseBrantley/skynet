@@ -46,9 +46,28 @@ This document details the complete physical, network, and software architecture 
 ### Ingress Flow:
 1. **Subscription Registration**: On bot startup (or `/twitch-notify sync`), Skynet issues OAuth2 credentials and calls Twitch Helix API (`POST https://api.twitch.tv/helix/eventsub/subscriptions`) requesting `stream.online` webhook callbacks to `https://sirian.ddns.net/twitch`.
 2. **Challenge Handshake**: Twitch sends an initial `POST` request containing a verification `challenge` token.
-3. **Public DNS / Port Routing**: `sirian.ddns.net` resolves to public WAN IP → ASUS Router forwards port 443 to `192.168.50.61` (Raspberry Pi) → `lighttpd` terminates SSL → forwards payload to Skynet on `http://192.168.50.133:3000/twitch`.
+3. **Public DNS / Port Routing**: `sirian.ddns.net` resolves to public WAN IP → ASUS Router forwards port 443 to `192.168.50.61` (Raspberry Pi) → `lighttpd` terminates SSL → forwards Skynet traffic (`/twitch`, `/chat`, `/api/chat`, `/api/conversations`) to Skynet on `http://192.168.50.133:3000`. (All other paths forward to port 4000).
 4. **Validation & Deduplication**: Skynet validates headers, responds with `200 OK` + `body.challenge`, and deduplicates Twitch retry message IDs in memory (`processedMessageIds`).
 5. **Discord Announcement**: When a streamer goes live, Skynet fetches channel/game metadata and dispatches formatted embeds to the designated Discord channels configured in `config/announcements.json`.
+
+---
+
+## 2.1 Web Chat UI & Streaming API (`/chat`)
+
+- **Web Chat UI**: Accessible publicly at `https://sirian.ddns.net/chat` (and locally at `http://192.168.50.133:3000/chat`).
+- **Endpoints**:
+  - `GET /chat`: Serves the mobile-responsive chat frontend (`public/index.html`).
+  - `POST /api/chat`: Supports Server-Sent Events (SSE) streaming token responses from the central AI engine, authenticated via session cookies.
+  - `GET /api/conversations/history`: Hydrates persistent chat history directly from `data/conversations/{profile}.json` scoped to the authenticated caller.
+  - `GET /api/auth/providers`: Returns list of available enabled OAuth providers (Discord, Twitch, etc.).
+  - `GET /api/auth/:provider/login`: Initiates OAuth flow with the chosen identity provider.
+  - `GET /api/auth/:provider/callback`: Validates OAuth callback, generates signed HMAC `skynet_session` cookie, and redirects to `/chat`.
+  - `GET /api/auth/me`: Returns active authenticated user identity, display name, avatar, and owner status.
+  - `POST /api/auth/logout`: Clears active session cookie.
+- **Identity Architecture**:
+  - `server/auth/BaseAuthProvider.js`: Pluggable abstract class for adding new identity providers.
+  - `server/auth/DiscordAuthProvider.js` & `server/auth/TwitchAuthProvider.js`: Out-of-the-box provider implementations.
+  - `server/auth/AuthManager.js`: Central session signing, user store (`data/users.json`), and profile resolver (`sirian` for owner vs `user_<provider>_<id>` for others).
 
 ---
 

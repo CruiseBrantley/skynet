@@ -97,4 +97,30 @@ describe('AgentScheduler.processDueTasks', () => {
     // One-shot tasks should remain if delivery failed (for retry)
     expect(AgentScheduler.getAll()).toContainEqual(expect.objectContaining({ id: task.id }))
   })
+
+  test('sanitizes "current", "terminal", and "cli_*" channel IDs to "dm"', () => {
+    const taskCurrent = AgentScheduler.add({
+      description: 'Current target',
+      scheduledAt: Date.now() + 10000,
+      channelId: 'current'
+    })
+    expect(taskCurrent.channelId).toBe('dm')
+
+    const taskTerminal = AgentScheduler.add({
+      description: 'Terminal target',
+      scheduledAt: Date.now() + 10000,
+      channelId: 'terminal'
+    })
+    expect(taskTerminal.channelId).toBe('dm')
+
+    const taskCli = AgentScheduler.add({
+      description: 'CLI target',
+      scheduledAt: Date.now() + 10000,
+      channelId: 'cli_abc123'
+    })
+    expect(taskCli.channelId).toBe('dm')
+
+    AgentScheduler.update(taskCli.id, { channelId: 'current' })
+    expect(taskCli.channelId).toBe('dm')
+  })
 })

@@ -72,9 +72,14 @@ module.exports = {
     }
 
     await interaction.deferReply()
+    const { createStatusHeartbeat } = require('../util/chat/statusHeartbeat')
+    const botName = interaction.client?.user?.username || 'Skynet'
+    const heartbeat = createStatusHeartbeat(interaction, `${botName} is fetching and reading article...`)
+    await heartbeat.start()
 
     try {
       const summary = await summarizeUrl(url, isLong)
+      heartbeat.stop()
       if (summary) {
         // Store in cache for 15 mins
         const id = Math.random().toString(36).substring(7)
@@ -104,8 +109,11 @@ module.exports = {
         await interaction.editReply('Could not extract enough text to summarize.')
       }
     } catch (err) {
+      heartbeat.stop()
       logger.error(`Summarize command error: ${err.message}`)
       await interaction.editReply('There was an error summarizing that link.')
+    } finally {
+      heartbeat.stop()
     }
   },
 

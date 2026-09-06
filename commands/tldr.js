@@ -31,6 +31,10 @@ module.exports = {
   async execute (interaction) {
     await interaction.deferReply()
     const guildId = interaction.guildId
+    const botName = interaction.client?.user?.username || 'Skynet'
+    const { createStatusHeartbeat } = require('../util/chat/statusHeartbeat')
+    const heartbeat = createStatusHeartbeat(interaction, `${botName} is reading channel history...`)
+    await heartbeat.start()
 
     try {
       const caps = await getActiveModelCapabilities()
@@ -58,11 +62,14 @@ module.exports = {
         .join('\n')
 
       if (!formattedChat.trim()) {
+        heartbeat.stop()
         const emptyMsg = allDays
           ? 'No recent messages found to summarize.'
           : 'No messages found from today in this channel to summarize. Use `/tldr all_days:true` to include prior days.'
         return interaction.editReply({ content: emptyMsg })
       }
+
+      await heartbeat.updateStatus(`${botName} is synthesizing channel digest...`)
 
       const promptTopic = topicFilter ? ` Focus specifically on discussions related to: "${topicFilter}".` : ''
       const prompt = `Analyze the following channel discussion log from #${interaction.channel.name}.${promptTopic}\n\n` +
@@ -100,10 +107,14 @@ module.exports = {
         .setFooter({ text: `Engine: ${tierBadge}` })
         .setTimestamp()
 
-      return interaction.editReply({ embeds: [embed] })
+      heartbeat.stop()
+      return interaction.editReply({ content: '', embeds: [embed] })
     } catch (err) {
+      heartbeat.stop()
       logger.error(`tldr error: ${err.message}`)
-      return interaction.editReply({ content: `An error occurred while generating digest: ${err.message}` })
+      return interaction.editReply({ content: `An error occurred while generating digest: ${err.message}`, embeds: [] })
+    } finally {
+      heartbeat.stop()
     }
   }
 }

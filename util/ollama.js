@@ -41,22 +41,84 @@ async function checkOllamaOnline (url, endpoint) {
   }
 }
 
+async function consumeOllamaStream (responseStream, onToken = null) {
+  let fullContent = ''
+  let fullThinking = ''
+  let buffer = ''
+
+  for await (const chunk of responseStream) {
+    buffer += chunk.toString('utf8')
+    const lines = buffer.split('\n')
+    buffer = lines.pop()
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const parsed = JSON.parse(line)
+        if (parsed.message?.thinking) {
+          fullThinking += parsed.message.thinking
+        }
+        if (parsed.message?.content) {
+          fullContent += parsed.message.content
+          if (typeof onToken === 'function') {
+            onToken(parsed.message.content)
+          }
+        }
+        if (parsed.response) {
+          fullContent += parsed.response
+          if (typeof onToken === 'function') {
+            onToken(parsed.response)
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (buffer && buffer.trim()) {
+    try {
+      const parsed = JSON.parse(buffer)
+      if (parsed.message?.thinking) {
+        fullThinking += parsed.message.thinking
+      }
+      if (parsed.message?.content) {
+        fullContent += parsed.message.content
+        if (typeof onToken === 'function') onToken(parsed.message.content)
+      }
+      if (parsed.response) {
+        fullContent += parsed.response
+        if (typeof onToken === 'function') onToken(parsed.response)
+      }
+    } catch (e) {}
+  }
+
+  return {
+    message: {
+      role: 'assistant',
+      content: fullContent,
+      ...(fullThinking ? { thinking: fullThinking } : {})
+    }
+  }
+}
+
 /**
- * Queries Ollama with automatic failover from remote PC to Gemini to local fallback.
+ * Queries Ollama with automatic failover from remote PC directly to Gemini.
+ * Local Ollama is reserved exclusively for background proactive tasks (or explicit opt-in).
  * @param {string} endpoint - The API endpoint e.g., '/api/chat' or '/api/generate'
  * @param {object} payload - The request body (e.g. messages: [], prompt: "")
- * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: Gemini, 2: local Ollama
+ * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: local Ollama (opt-in), 2: Gemini
+ * @param {Function|null} onToken - Optional callback for streaming tokens
+ * @param {object} options - Optional flags (e.g. { allowCloudFallback: false })
  * @returns {Promise<object>} The normalized response data
  */
-async function queryOllama (endpoint, payload, fallbackLevel = 0) {
+async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null, options = {}) {
   logger.info(`queryOllama: Entry [Level ${fallbackLevel}] for ${endpoint}`)
-  // Handle backwards compatibility for boolean isBackup
-  if (fallbackLevel === true) fallbackLevel = 1
+  // Handle backwards compatibility for boolean isBackup -> backup is now Gemini (Level 2)
+  if (fallbackLevel === true) fallbackLevel = 2
   if (fallbackLevel === false) fallbackLevel = 0
 
   const timeoutMs = 180000 // 180s base timeout for more reliable failover/thinking models
 
-  // Level 1: Local Mac Fallback (Unlimited local hardware fallback)
+  // Level 1: Local Mac Fallback (Reserved for background tasks or explicit opt-in)
   if (fallbackLevel === 1) {
     const localUrl = `http://127.0.0.1:11434${endpoint}`
     const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
@@ -82,7 +144,20 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       if (payload.messages) {
         logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
       }
-      const response = await axios.post(localUrl, { ...payload, model: localModel, stream: false }, { timeout: 180000 }) // 180s for local load
+      const isStream = typeof onToken === 'function'
+      const response = await axios.post(
+        localUrl,
+        { ...payload, model: localModel, stream: isStream },
+        { timeout: 180000, ...(isStream ? { responseType: 'stream' } : {}) }
+      )
+
+      if (isStream) {
+        const data = await consumeOllamaStream(response.data, onToken)
+        if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+          return data
+        }
+        throw new Error(`Local Model ${localModel} produced empty content.`)
+      }
 
       const data = response.data
       if (data && data.message) {
@@ -98,8 +173,12 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       }
       throw new Error(`Local Model ${localModel} returned malformed response.`)
     } catch (err) {
+      if (options.allowCloudFallback === false) {
+        logger.error(`Local Ollama fallback failed: ${err.message}. Cloud fallback disallowed.`)
+        throw err
+      }
       logger.error(`Local Ollama fallback failed: ${err.message}. Dropping to Level 2 (Gemini).`)
-      return queryOllama(endpoint, payload, 2)
+      return queryOllama(endpoint, payload, 2, onToken, options)
     }
   }
 
@@ -111,10 +190,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
       throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
 
-    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.7-flash'
-    const candidateModels = [primaryModel]
-    if (!candidateModels.includes('gemini-2.5-flash')) candidateModels.push('gemini-2.5-flash')
-    if (!candidateModels.includes('gemini-2.0-flash')) candidateModels.push('gemini-2.0-flash')
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+    const candidateModels = [primaryModel, 'gemini-3.7-flash'].filter((v, i, a) => a.indexOf(v) === i)
 
     let geminiContents = []
     if (payload.messages) {
@@ -199,34 +276,85 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
   const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
 
-  // If no remote host is configured, skip straight to Level 1
+  // If no remote host is configured, skip straight to Level 2 (Gemini API)
   if (!remoteHost || !remoteModel) {
-    return queryOllama(endpoint, payload, 1)
+    logger.info('No remote Ollama host/model configured. Falling back to Level 2 (Gemini).')
+    return queryOllama(endpoint, payload, 2, onToken, options)
   }
 
   // Quick TCP pre-flight check (1s timeout)
   const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
   if (!isOnline) {
-    if (payload.isCodeTask) {
-      logger.info('Primary Ollama PC is unreachable via TCP and this is a code task. Skipping Level 1 (Local) -> Level 2 (Gemini).')
-      return queryOllama(endpoint, payload, 2)
-    }
-    logger.info('Primary Ollama PC is unreachable via TCP. Skipping to Level 1 (Local).')
-    return queryOllama(endpoint, payload, 1)
+    logger.info('Primary Ollama PC is unreachable via TCP. Falling back directly to Level 2 (Gemini).')
+    return queryOllama(endpoint, payload, 2, onToken, options)
   }
   try {
+    const isStream = typeof onToken === 'function'
     let response
     try {
-      response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs })
+      response = await axios.post(
+        remoteUrl,
+        { ...payload, model: remoteModel, stream: isStream },
+        { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
+      )
     } catch (postErr) {
       // If Ollama returned 500 while loading model into VRAM, retry once after 1.5s
       if (postErr.response?.status === 500) {
         logger.warn(`Remote Model [${remoteModel}] returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...`)
         await new Promise(resolve => setTimeout(resolve, 1500))
-        response = await axios.post(remoteUrl, { ...payload, model: remoteModel, stream: false }, { timeout: timeoutMs })
+        response = await axios.post(
+          remoteUrl,
+          { ...payload, model: remoteModel, stream: isStream },
+          { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
+        )
       } else {
         throw postErr
       }
+    }
+
+    if (isStream) {
+      const data = await consumeOllamaStream(response.data, onToken)
+      if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+        logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
+        return data
+      }
+      // If content is empty but thinking contains code, command, or text, recover it
+      if (data?.message?.thinking && typeof data.message.thinking === 'string') {
+        const cmdMatch = data.message.thinking.match(/<<<RUN_COMMAND[\s\S]*?>>>/)
+        if (cmdMatch) {
+          logger.info(`queryOllama: Recovered command from streaming thinking block on ${remoteHost}`)
+          if (typeof onToken === 'function') onToken(cmdMatch[0])
+          return { message: { role: 'assistant', content: cmdMatch[0] } }
+        }
+        const codeMatch = data.message.thinking.match(/```[\s\S]*?```/)
+        if (codeMatch) {
+          logger.info(`queryOllama: Recovered code block from streaming thinking block on ${remoteHost}`)
+          if (typeof onToken === 'function') onToken(codeMatch[0])
+          return { message: { role: 'assistant', content: codeMatch[0] } }
+        }
+      }
+      // If think was true and returned empty content, retry once on 5090 with think: false
+      if (payload.think) {
+        logger.warn(`Remote Model [${remoteModel}] produced empty content with think=true in stream. Retrying on Level 0 with think=false...`)
+        try {
+          const noThinkRes = await axios.post(remoteUrl, { ...payload, model: remoteModel, think: false, stream: false }, { timeout: timeoutMs })
+          const noThinkData = noThinkRes.data
+          if (noThinkData?.message?.content && noThinkData.message.content.trim().length > 0) {
+            logger.info(`queryOllama: Level 0 Success on think=false retry from ${remoteHost}`)
+            if (typeof onToken === 'function') onToken(noThinkData.message.content)
+            return noThinkData
+          }
+        } catch (noThinkErr) {
+          logger.warn(`queryOllama: think=false retry failed on ${remoteHost}: ${noThinkErr.message}`)
+        }
+      }
+      if (data?.message?.thinking && typeof data.message.thinking === 'string' && data.message.thinking.trim().length > 0) {
+        logger.info(`queryOllama: Recovered streaming thinking text as response from ${remoteHost}`)
+        const thinkingText = data.message.thinking.trim()
+        if (typeof onToken === 'function') onToken(thinkingText)
+        return { message: { role: 'assistant', content: thinkingText } }
+      }
+      throw new Error(`Remote Model ${remoteModel} produced empty content.`)
     }
 
     // NORMALIZATION LAYER: Ensure we always have a message.content structure
@@ -277,24 +405,20 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0) {
 
     throw new Error('Malformed Ollama response: Missing valid message.content or response fields.')
   } catch (err) {
-    if (payload.isCodeTask) {
-      logger.info(`Primary Ollama failed on code task (${err.message}). Skipping Level 1 (Local) -> Level 2 (Gemini).`)
-      return queryOllama(endpoint, payload, 2)
-    }
-    // For general chatting tasks, fall back to Level 1 (Local Mac) first to conserve Gemini quota
-    logger.info(`Primary Ollama failed on general chat task (${err.message}). Falling back to Level 1 (Local Mac).`)
-    return queryOllama(endpoint, payload, 1)
+    logger.info(`Primary Ollama failed (${err.message}). Falling back directly to Level 2 (Gemini).`)
+    return queryOllama(endpoint, payload, 2, onToken, options)
   }
 }
 
 /**
  * Queries Ollama using ONLY local Mac or remote PC — never Gemini.
  * Safe for background agent tasks (schedulers, loops) where API costs must be avoided.
- * Priority: Remote PC (level 0) → Local Mac (level 2). Gemini (level 1) is explicitly skipped.
+ * Priority: Remote PC → Local Mac. Gemini API is strictly disallowed.
  * @param {string} endpoint
  * @param {object} payload
+ * @param {Function|null} onToken
  */
-async function queryLocalOrRemote (endpoint, payload) {
+async function queryLocalOrRemote (endpoint, payload, onToken = null) {
   const remoteHost = process.env.OLLAMA_REMOTE_HOST
   const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
@@ -314,12 +438,16 @@ async function queryLocalOrRemote (endpoint, payload) {
     const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
     if (isOnline) {
       try {
+        const isStream = typeof onToken === 'function'
         const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
         const response = await axios.post(
           remoteUrl,
-          { ...payload, model: remoteModel, stream: false },
-          { timeout: timeoutMs }
+          { ...payload, model: remoteModel, stream: isStream },
+          { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
         )
+        if (isStream) {
+          return await consumeOllamaStream(response.data, onToken)
+        }
         return response.data
       } catch (err) {
         logger.info(`queryLocalOrRemote: Remote PC failed, falling to local: ${err.message}`)
@@ -327,15 +455,15 @@ async function queryLocalOrRemote (endpoint, payload) {
     }
   }
 
-  // Fall through to local — never calls Gemini (level 1 is local)
-  return queryOllama(endpoint, payload, 1)
+  // Fall through to local — strictly disable Gemini fallback to protect quota
+  return queryOllama(endpoint, payload, 1, onToken, { allowCloudFallback: false })
 }
 
 /**
  * Advanced wrapper for queryOllama that handles memory injection, context blocks,
  * and system prompt management. Used primarily by the chat command.
  */
-async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
+async function queryOllamaWithContext (messages, options, botName = 'Skynet', onToken = null) {
   const {
     isBackup = false,
     commandsContext = '',
@@ -345,9 +473,10 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     userId = null
   } = options
 
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'qwen3.5:9b'
+  const tokenCallback = onToken || options.onToken || options.streamToken || null
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
-  const currentModel = (isBackup || !remoteModel) ? localModel : remoteModel
+  const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+  const currentModel = (isBackup || !remoteModel) ? geminiModel : remoteModel
 
   // Qwen & Gemma 4 Family Enhancements:
   const isQwen = currentModel.toLowerCase().includes('qwen')
@@ -356,11 +485,12 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
 
   let numCtx = 8192
   let think = false
-  let maxMemoryChars = 3500 // Cap for local Mac fallback (Level 2)
+  let maxMemoryChars = 3500
 
   if (isBackup) {
-    // Level 1 Backup is Gemini API (1M token context window)
+    // Level 2 Backup is Gemini API (1M token context window)
     maxMemoryChars = 8000
+    think = false
   } else if (isQwen3) {
     numCtx = 65536 // 64k context window on RTX 5090
     maxMemoryChars = 8000 // Full deep memory history for 5090
@@ -381,14 +511,27 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
     ? agentMemory.getSummary('all', maxMemoryChars)
     : agentMemory.getSummary(guildId, maxMemoryChars)
   const memoryBlock = memorySummary ? `\n\nLONG-TERM MEMORY & ACTIVE RULES:\n${memorySummary}` : ''
-  let sysMsg = `${systemPrompt}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}${memoryBlock}\n\nCURRENT APPLICATION STATE:\n${commandsContext}\n\n${logsContext}`
 
+  const { getBasePrompt } = require('./systemPrompt')
+  const baseSystemPrompt = systemPrompt || getBasePrompt()
+
+  let effectiveCommandsContext = commandsContext
+  if (!effectiveCommandsContext) {
+    const ActionExecutor = require('./ActionExecutor')
+    effectiveCommandsContext = 'Available Tools & Actions:\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+  }
+
+  // Stable prefix for maximum Ollama KV-cache reuse on RTX 5090
+  let sysMsg = `${baseSystemPrompt}`
   if (isOwner && isDM) {
-    sysMsg += '\n\nCREATOR SPECIAL ACCESS (DMs ONLY):\n' +
-      'You are communicating directly with your creator (owner) in DMs.\n' +
+    sysMsg += '\n\nCREATOR SPECIAL ACCESS (DIRECT CHAT ONLY):\n' +
+      'You are communicating directly with your creator (owner).\n' +
       'You have full administrative access to view, update, and manage all scheduled tasks and agent memories across ALL servers.\n' +
       'When the creator asks you to remember, recall, list, schedule, or cancel tasks/memories for other servers, execute those commands. Do not filter tasks by guild.'
   }
+
+  // Dynamic context appended at suffix
+  sysMsg += `\n\nCURRENT APPLICATION STATE:\n${effectiveCommandsContext}\n\n${logsContext}${memoryBlock}\n\nCURRENT SYSTEM DATE & TIME:\n${new Date().toLocaleString('en-US', { timeZoneName: 'short' })}`
 
   const processedMessages = messages.map((msg, idx) => {
     if (idx === 0 && msg.role === 'system') {
@@ -410,7 +553,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
         top_k: 40,
         top_p: 0.9
       }
-    })
+    }, tokenCallback)
   }
 
   try {
@@ -424,12 +567,12 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet') {
         top_k: 40,
         top_p: 0.9
       }
-    }, isBackup)
+    }, isBackup ? 2 : 0, tokenCallback)
     return result
   } catch (err) {
     if (!isBackup) {
-      logger.info(`Primary Ollama failed, falling back to backup: ${err.message}`)
-      return queryOllamaWithContext(messages, { ...options, isBackup: true }, botName)
+      logger.info(`Primary Ollama failed, falling back to backup (Gemini): ${err.message}`)
+      return queryOllamaWithContext(messages, { ...options, isBackup: true }, botName, tokenCallback)
     }
     throw err
   }
@@ -455,14 +598,14 @@ async function getActiveModelCapabilities () {
     }
   }
 
-  // Local Mac Fallback (Level 1)
-  const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
+  // Backup Tier: Gemini API (when remote is offline)
+  const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
   return {
-    tier: 'local_mac',
-    modelName: localModel,
-    maxContextTokens: 16384,
-    maxDigestMessages: 25,
-    supportsDeepResearch: false // Simplified single-pass search
+    tier: 'gemini_cloud',
+    modelName: geminiModel,
+    maxContextTokens: 65536,
+    maxDigestMessages: 100,
+    supportsDeepResearch: true
   }
 }
 
@@ -472,9 +615,10 @@ async function getActiveModelCapabilities () {
  * Routing: Level 0 (Remote RTX 5090) -> Level 2 (Gemini API), completely skipping Level 1 (Local Mac Mini).
  * @param {string} endpoint e.g. '/api/chat'
  * @param {object} payload
+ * @param {Function|null} onToken
  * @returns {Promise<object>}
  */
-async function queryCodeCapableModel (endpoint, payload) {
+async function queryCodeCapableModel (endpoint, payload, onToken = null) {
   const remoteHost = process.env.OLLAMA_REMOTE_HOST
   const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
@@ -484,11 +628,12 @@ async function queryCodeCapableModel (endpoint, payload) {
   if (isRemoteOnline) {
     try {
       logger.info(`queryCodeCapableModel: Routing code task to Remote PC (${remoteModel})`)
+      const isStream = typeof onToken === 'function'
       const enhancedPayload = {
         ...payload,
         model: remoteModel,
         think: true,
-        stream: false,
+        stream: isStream,
         options: {
           num_ctx: 65536,
           num_predict: -1,
@@ -499,15 +644,26 @@ async function queryCodeCapableModel (endpoint, payload) {
       const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
       let response
       try {
-        response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+        response = await axios.post(remoteUrl, enhancedPayload, {
+          timeout: 180000,
+          ...(isStream ? { responseType: 'stream' } : {})
+        })
       } catch (postErr) {
         if (postErr.response?.status === 500) {
           logger.warn('queryCodeCapableModel: Remote PC returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...')
           await new Promise(resolve => setTimeout(resolve, 1500))
-          response = await axios.post(remoteUrl, enhancedPayload, { timeout: 180000 })
+          response = await axios.post(remoteUrl, enhancedPayload, {
+            timeout: 180000,
+            ...(isStream ? { responseType: 'stream' } : {})
+          })
         } else {
           throw postErr
         }
+      }
+
+      if (isStream) {
+        const data = await consumeOllamaStream(response.data, onToken)
+        if (data?.message?.content) return data
       }
 
       const data = response.data
@@ -526,7 +682,7 @@ async function queryCodeCapableModel (endpoint, payload) {
       // If think: true produced empty content, retry once with think: false
       if ((!content || content.length === 0) && enhancedPayload.think !== false) {
         logger.warn(`queryCodeCapableModel: Remote Model [${remoteModel}] produced empty content with think: true. Retrying with think: false...`)
-        const noThinkPayload = { ...enhancedPayload, think: false }
+        const noThinkPayload = { ...enhancedPayload, think: false, stream: false }
         const retryResp = await axios.post(remoteUrl, noThinkPayload, { timeout: 180000 })
         const retryData = retryResp.data
         if (retryData && retryData.message && typeof retryData.message.content === 'string' && retryData.message.content.trim().length > 0) {
@@ -549,7 +705,7 @@ async function queryCodeCapableModel (endpoint, payload) {
   }
 
   // Level 2: Gemini API
-  return queryOllama(endpoint, payload, 2)
+  return queryOllama(endpoint, payload, 2, onToken)
 }
 
 module.exports = {

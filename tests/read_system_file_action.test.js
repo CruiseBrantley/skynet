@@ -49,10 +49,18 @@ DATABASE_URL=https://my-secret-db.firebaseio.com
     expect(res).toContain('OWNER_ID=')
   })
 
-  test('reads and inspects logic files in util, commands, server, and root markdown', async () => {
+  test('reads and inspects logic files in util, commands, server, core, and frontend', async () => {
     const resUtil = await readSystemFile.execute({}, {}, { file_path: 'commands/twitch-notify.js' })
     expect(resUtil).toContain('[SYSTEM: File Content for "commands/twitch-notify.js"')
     expect(resUtil).toContain('twitch-notify')
+
+    const resCore = await readSystemFile.execute({}, {}, { file_path: 'core/conversationStore.js' })
+    expect(resCore).toContain('[SYSTEM: File Content for "core/conversationStore.js"')
+    expect(resCore).toContain('conversationStore')
+
+    const resFrontend = await readSystemFile.execute({}, {}, { file_path: 'frontend/src/types.ts' })
+    expect(resFrontend).toContain('[SYSTEM: File Content for "frontend/src/types.ts"')
+    expect(resFrontend).toContain('AuthUser')
 
     const resServer = await readSystemFile.execute({}, {}, { file_path: 'server/server.js' })
     expect(resServer).toContain('[SYSTEM: File Content for "server/server.js"')

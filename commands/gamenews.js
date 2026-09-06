@@ -3,7 +3,7 @@
 
 const { SlashCommandBuilder } = require('discord.js')
 const { SafeEmbedBuilder: EmbedBuilder } = require('../util/discordFormatter')
-const { searchViaGoogleGrounding } = require('../util/actions/web_search')
+const ActionExecutor = require('../util/ActionExecutor')
 
 module.exports = {
   guildId: '579210338352889867',
@@ -27,7 +27,8 @@ module.exports = {
           : 'Provide the latest patch version, release date, main features, balance adjustments, and bug fixes.'
       } Format clearly with readable markdown bullet points.`
 
-      const content = await searchViaGoogleGrounding(prompt)
+      const searchRes = await ActionExecutor.executeAction('web_search', { query: prompt }, interaction)
+      const content = searchRes.output || searchRes.result
 
       if (!content) {
         await interaction.editReply(`Could not retrieve recent patch notes or news for **${game}**.`)

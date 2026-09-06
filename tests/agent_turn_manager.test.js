@@ -308,4 +308,58 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(evalResult.reason).toContain("Assistant stated it will research")
     expect(evalResult.suggestedAction).toContain("Call web_search")
   })
+
+  test("evaluatePendingWork detects insufficient response or leaked command failure and prompts feedback", async () => {
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify({
+          is_sufficient: false,
+          reason: "Assistant output raw unexecuted command syntax instead of executing or answering",
+          suggested_action: "Execute read_system_file tool with <<<RUN_COMMAND: {...}>>>"
+        })
+      }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: "<<<RUN_COMMAND: {\"command\": \"read_system_file\", \"file_path\": \"frontend/src/\"}}>>",
+      channelHistory: {
+        messages: [{ role: "user", content: "Check frontend/src" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("Assistant output raw unexecuted command syntax")
+    expect(evalResult.suggestedAction).toContain("Execute read_system_file")
+  })
+
+  test("evaluatePendingWork detects mid-turn intent promise without tool execution", async () => {
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify({
+          is_sufficient: false,
+          reason: "Assistant stated intent to inspect ChatContainer component CSS but stopped with commentary without executing tool",
+          suggested_action: "Execute read_system_file for ChatContainer.module.css"
+        })
+      }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: "The issue is a layout error. I need to inspect the CSS. I will start with the ChatContainer component's CSS.",
+      channelHistory: {
+        messages: [{ role: "user", content: "For the web app on iOS the bottom of the chat has a large gap from the bottom of the screen" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("Assistant stated intent to inspect")
+    expect(evalResult.suggestedAction).toContain("Execute read_system_file")
+  })
 })

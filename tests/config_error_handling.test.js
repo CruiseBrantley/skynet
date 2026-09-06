@@ -26,16 +26,17 @@ describe('Config Error Handling & Branching', () => {
   })
 
   describe('Ollama Fallback Branching', () => {
-    test('should skip Level 0 when OLLAMA_REMOTE_HOST is missing', async () => {
+    test('should skip Level 0 when OLLAMA_REMOTE_HOST is missing and route to Gemini', async () => {
       const originalHost = process.env.OLLAMA_REMOTE_HOST
       delete process.env.OLLAMA_REMOTE_HOST
-      process.env.OLLAMA_LOCAL_MODEL = 'gemma4:e4b'
+      process.env.GEMINI_API_KEY = 'test-key'
+      process.env.GEMINI_MODEL = 'gemini-3.7-flash'
 
-      axios.post.mockResolvedValueOnce({ data: { message: { content: 'local' } } })
+      axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini' }] } }] } })
 
       const result = await queryOllama('/api/chat', { messages: [] })
 
-      expect(result.message.content).toBe('local')
+      expect(result.message.content).toBe('gemini')
       const connectCalls = mockSocket.connect.mock.calls
       const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
       expect(remoteConnects.length).toBe(0)

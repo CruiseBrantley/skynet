@@ -38,6 +38,7 @@ jspm_packages/
 
 # TypeScript v1 declaration files
 typings/
+*.tsbuildinfo
 
 # Optional npm cache directory
 .npm
@@ -56,6 +57,8 @@ typings/
 
 # dotenv environment variables file
 auth.json
+mal_auth.json
+*mal_auth*.json
 .env
 youtube_cookies.txt
 
@@ -65,8 +68,11 @@ youtube_cookies.txt
 # temp game image
 image.jpg
 
-# firebase
+# firebase & google cloud
 service-account.json
+credentials/
+google-service-account.json
+*service_account*.json
 
 # TTS engine binaries, models, and temp audio
 tts_engine/

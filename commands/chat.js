@@ -16,6 +16,7 @@ const mentionResolver = require('../util/MentionResolver')
 
 const { getBasePrompt } = require('../util/systemPrompt')
 const { markChannelInFlight, clearChannelInFlight } = require('../util/inFlightChannels')
+const conversationStore = require('../core/conversationStore')
 
 const channelHistories = {}
 const channelQueues = new Map() // Per-channel promise chains for sequential processing
@@ -85,26 +86,55 @@ async function execute (interaction, database) {
         }
       }
 
-      // reset the chat thread after 10 minutes
-      if (!channelHistories[channelId] || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
-        channelHistories[channelId] = {
-          time: Date.now(),
-          messages: [{ role: 'system', content: getBasePrompt() }]
+      const isDM = !interaction.guildId || interaction.channel?.type === 1 || interaction.clientId === 'cli' || interaction.clientId === 'web'
+      const profileId = conversationStore.resolveProfileId(interaction.user?.id, interaction.user?.id === process.env.OWNER_ID)
+
+      const isOwner = Boolean(interaction.user?.id === process.env.OWNER_ID)
+      const promptOptions = { isOwner, isDM, guildId: interaction.guildId, userId: interaction.user?.id }
+
+      // Direct Message (1-on-1) Mode: Unified persistent local conversationStore
+      if (isDM) {
+        // Sync incrementally from Discord if available
+        if (interaction.channel && typeof interaction.channel.messages?.fetch === 'function') {
+          await conversationStore.syncFromDiscord(profileId, interaction.channel, interaction.client?.user?.id, 20)
         }
 
-        // Populate initial context with last 20 messages for better situational awareness
-        try {
-          const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
-          channelHistories[channelId].messages.push(...history)
-          logger.info(`Populated ${history.length} historical messages for channel context.`)
-        } catch (err) {
-          logger.warn(`Failed to fetch historical context for channel ${channelId}: ${err.message}`)
+        const storedHistory = conversationStore.getHistory(profileId, 20)
+        const formatted = storedHistory.map(m => ({
+          role: m.role || 'user',
+          content: m.author ? `@${m.author}: ${m.content}` : m.content
+        }))
+
+        channelHistories[channelId] = {
+          time: Date.now(),
+          messages: [
+            { role: 'system', content: getBasePrompt(promptOptions) },
+            ...formatted
+          ]
         }
-        // Prune oldest histories if we exceed the cap
-        const historyKeys = Object.keys(channelHistories)
-        if (historyKeys.length > MAX_CHANNEL_HISTORIES) {
-          const oldest = historyKeys.sort((a, b) => channelHistories[a].time - channelHistories[b].time)[0]
-          delete channelHistories[oldest]
+        logger.info(`Populated ${formatted.length} historical messages from conversationStore for profile "${profileId}".`)
+      } else {
+        // Server / Guild Channel Mode: Live Discord channel snapshot
+        if (!channelHistories[channelId] || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
+          channelHistories[channelId] = {
+            time: Date.now(),
+            messages: [{ role: 'system', content: getBasePrompt(promptOptions) }]
+          }
+
+          // Populate initial context with last 20 messages for better situational awareness
+          try {
+            const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
+            channelHistories[channelId].messages.push(...history)
+            logger.info(`Populated ${history.length} historical messages for channel context.`)
+          } catch (err) {
+            logger.warn(`Failed to fetch historical context for channel ${channelId}: ${err.message}`)
+          }
+          // Prune oldest histories if we exceed the cap
+          const historyKeys = Object.keys(channelHistories)
+          if (historyKeys.length > MAX_CHANNEL_HISTORIES) {
+            const oldest = historyKeys.sort((a, b) => channelHistories[a].time - channelHistories[b].time)[0]
+            delete channelHistories[oldest]
+          }
         }
       }
 
@@ -181,7 +211,7 @@ async function execute (interaction, database) {
       } else {
         commandsContext += 'Unknown'
       }
-      commandsContext += '\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+      commandsContext += '\n' + ActionExecutor.listActions(promptOptions).map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
       let logsContext = 'No recent logs available.'
       try {
         const logPath = path.join(__dirname, '../logs/combined.log')
@@ -279,7 +309,7 @@ async function execute (interaction, database) {
 
       // Append channel context and resources context directly to the systemPrompt option
       const contextPrefix = channelContext + (resourcesContext ? `\n${resourcesContext}` : '')
-      const enhancedSystemPrompt = getBasePrompt() + '\n\n' + contextPrefix
+      const enhancedSystemPrompt = getBasePrompt(promptOptions) + '\n\n' + contextPrefix
 
       // Detect code-heavy intent or error remediation on current user message
       const codeRegex = /\b(slash command|create_command|create command|create_slash_command|disable_slash_command|enable_slash_command|create action|create_action|modify_action|write code|code a|implement a function|fix the code|fix the command|fix command|rebuild the command|rebuild command|custom command|bot command|new command|add command|make command|build command|update command|change command|patch command)\b|\b(make|build|create|write|implement|fix|update|rebuild|code)\b.*\b(command|action|feature|endpoint|function|slash command)\b/i
@@ -340,15 +370,107 @@ async function execute (interaction, database) {
         systemPrompt: effectiveSystemPrompt
       }
 
+      const { createStatusHeartbeat } = require('../util/chat/statusHeartbeat')
+      let heartbeat = null
+      const clearStatusInterval = () => {
+        if (heartbeat) {
+          heartbeat.stop()
+          heartbeat = null
+        }
+      }
+
+      if (!interaction.streamToken && typeof interaction.editReply === 'function') {
+        let buffer = ''
+        let lastEdit = 0
+        let isEditing = false
+        let hasEdited = false
+        let gen = 0
+        const BATCH_MS = 800 // 800ms throttle to stay comfortably within Discord rate limits
+        const MAX_LEN = 1900
+
+        interaction.streamToken = async (token) => {
+          const myGen = gen
+          if (myGen !== gen) return
+          buffer += token
+          const now = Date.now()
+          if (now - lastEdit < BATCH_MS || isEditing) return
+          lastEdit = now
+          isEditing = true
+          try {
+            if (myGen !== gen) return
+            const visibleText = buffer
+              .replace(/<think[\s\S]*?(?:<\/think>|$)/gi, '')
+              .replace(/<thought[\s\S]*?(?:<\/thought>|$)/gi, '')
+              .replace(/<action[\s\S]*?(?:<\/action>|$)/gi, '')
+              .replace(/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd][\s\S]*?(?:>>>|$)/gi, '')
+              .replace(/<<<[\s\S]*?(?:>>>|$)/gi, '')
+              .replace(/<[a-zA-Z0-9_]*$/g, '')
+              .replace(/<<*$/g, '')
+              .trim()
+            if (!visibleText) return
+            clearStatusInterval()
+            const toPost = visibleText.length > MAX_LEN
+              ? visibleText.substring(0, MAX_LEN)
+              : visibleText
+            await interaction.editReply({ content: toPost, flags: [4096] })
+            hasEdited = true
+          } catch (e) {
+            logger.warn(`Stream editReply failed: ${e.message}`)
+          } finally {
+            isEditing = false
+          }
+        }
+        interaction.streamToken.reset = () => { buffer = ''; isEditing = false; hasEdited = false; lastEdit = 0; gen++ }
+        interaction.streamToken.hasEdited = () => hasEdited
+      }
+
+      if (!interaction.showStatus && typeof interaction.editReply === 'function') {
+        interaction.showStatus = async (text) => {
+          clearStatusInterval()
+          heartbeat = createStatusHeartbeat(interaction, text)
+          await heartbeat.start()
+        }
+
+        const existingCleanup = typeof interaction.cleanup === 'function' ? interaction.cleanup : null
+        interaction.cleanup = () => {
+          clearStatusInterval()
+          if (existingCleanup) existingCleanup()
+        }
+      }
+
+      if (typeof interaction.showStatus === 'function') {
+        await interaction.showStatus(`${botName} is thinking...`).catch(() => {})
+      }
+
       const ollama = require('../util/ollama')
       const turnManager = new AgentTurnManager({ botName, queryOllamaWithContext: ollama.queryOllamaWithContext })
-      await turnManager.executeTurn({
+      const turnResult = await turnManager.executeTurn({
         interaction,
         database,
         channelHistory: channelHistories[channelId],
         ollamaContext,
         maxSteps: 25
       })
+
+      // Persist turn into conversationStore for 1-on-1 direct chat profiles
+      if (isDM && turnResult?.replyContent) {
+        conversationStore.appendMessage(profileId, {
+          role: 'user',
+          content: messageText,
+          author: interaction.user?.username || 'User',
+          source: interaction.clientId || (interaction.guildId ? 'discord' : 'dm'),
+          timestamp: Date.now(),
+          discordId: interaction.triggeringMessageId || interaction.id
+        })
+
+        conversationStore.appendMessage(profileId, {
+          role: 'assistant',
+          content: turnResult.replyContent,
+          author: botName,
+          source: 'local',
+          timestamp: Date.now()
+        })
+      }
     } catch (err) {
       logger.error('Ollama error: ' + err.message)
       try {
@@ -357,6 +479,9 @@ async function execute (interaction, database) {
         await interaction.channel.send(`There was an error communicating with the ${botName} AI Core.`)
       }
     } finally {
+      if (typeof interaction.cleanup === 'function') {
+        interaction.cleanup()
+      }
       clearChannelInFlight(channelId)
     }
   })()

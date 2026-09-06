@@ -17,6 +17,10 @@ module.exports = {
     await interaction.deferReply()
     const customTopic = interaction.options.getString('topic')
     const guildId = interaction.guildId
+    const botName = interaction.client?.user?.username || 'Skynet'
+    const { createStatusHeartbeat } = require('../util/chat/statusHeartbeat')
+    const heartbeat = createStatusHeartbeat(interaction, `${botName} is synthesizing poll options...`)
+    await heartbeat.start()
 
     try {
       const caps = await getActiveModelCapabilities()
@@ -75,6 +79,7 @@ module.exports = {
 
       logger.info(`smart-poll: Creating Discord Poll "${cleanQuestion}" with ${cleanAnswers.length} options`)
 
+      heartbeat.stop()
       await interaction.deleteReply().catch(() => {})
 
       await interaction.channel.send({
@@ -86,8 +91,11 @@ module.exports = {
         }
       })
     } catch (err) {
+      heartbeat.stop()
       logger.error(`smart-poll error: ${err.message}`)
       return interaction.editReply({ content: `Failed to generate poll: ${err.message}` }).catch(() => {})
+    } finally {
+      heartbeat.stop()
     }
   }
 }

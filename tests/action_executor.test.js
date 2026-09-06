@@ -284,6 +284,26 @@ describe('ActionExecutor', () => {
       const result = await executor.classify({ description: 'Do something' })
       expect(result.action).toBe('send_message')
     })
+
+    test('replaces disallowed scheduling action (e.g. schedule_task) with send_message to prevent execution loop', async () => {
+      mockOllama.queryOllama.mockResolvedValue({
+        message: { content: '{"action":"schedule_task","params":{"description":"loop","when":"tomorrow"}}' }
+      })
+      const result = await executor.classify({ description: 'Send reminder tomorrow' })
+      expect(result.action).toBe('send_message')
+      expect(result.params.content).toBe('Send reminder tomorrow')
+    })
+
+    test('retries directly with Level 2 (Gemini) when Level 0 produces no JSON', async () => {
+      mockOllama.queryOllama
+        .mockResolvedValueOnce({ message: { content: 'Thinking without JSON...' } })
+        .mockResolvedValueOnce({ message: { content: '{"action":"send_poll","params":{"question":"Vote?","options":["A","B"]}}' } })
+      const result = await executor.classify({ description: 'Poll: Vote? A or B' })
+      expect(result.action).toBe('send_poll')
+      expect(mockOllama.queryOllama).toHaveBeenCalledTimes(2)
+      expect(mockOllama.queryOllama.mock.calls[0][2]).toBe(0) // Level 0 first
+      expect(mockOllama.queryOllama.mock.calls[1][2]).toBe(2) // Level 2 retry (Gemini)
+    })
   })
 
   // ─── resolveChannel ───────────────────────────────────────────────────────

@@ -70,12 +70,27 @@ class ActionExecutor {
     }
   }
 
-  listActions () {
-    return Object.values(this._actions).map(a => ({
-      name: a.name,
-      description: a.description,
-      schema: a.schema
-    }))
+  hasAction (name) {
+    if (!name) return false
+    return Boolean(this._actions[name.toLowerCase()])
+  }
+
+  listActions (options = {}) {
+    const isOwner = Boolean(options && (options.isOwner || options.userId === process.env.OWNER_ID))
+    const isPrivate = options && options.isPrivate !== undefined ? Boolean(options.isPrivate) : true
+    return Object.values(this._actions)
+      .filter(a => {
+        if (a.ownerOnly && !isOwner) return false
+        const requiresPrivate = Boolean(a.privateOnly || ['host_exec', 'host_read_file', 'host_write_file'].includes(a.name))
+        if (requiresPrivate && !isPrivate) return false
+        return true
+      })
+      .map(a => ({
+        name: a.name,
+        description: a.description,
+        schema: a.schema,
+        ownerOnly: Boolean(a.ownerOnly)
+      }))
   }
 
   // ─── Classification ──────────────────────────────────────────────────────────
@@ -87,7 +102,18 @@ class ActionExecutor {
      * @returns {Promise<{ action: string, params: object, override_channel_id?: string }>}
      */
   async classify (task) {
+    if (task.action && this._actions[task.action]) {
+      return {
+        action: task.action,
+        params: task.params || {},
+        override_channel_id: task.override_channel_id || null
+      }
+    }
+
+    // Scheduled task execution must deliver content, never loop into scheduling tools
+    const nonExecutableInTask = new Set(['schedule_task', 'cancel_task', 'list_tasks', 'update_task'])
     const actionList = this.listActions()
+      .filter(a => !nonExecutableInTask.has(a.name))
       .map(a => `- ${a.name}: ${a.description}\n  Schema: ${JSON.stringify(a.schema)}`)
       .join('\n')
 
@@ -124,22 +150,31 @@ Example output:
       let firstBrace = raw.indexOf('{')
       let lastBrace = raw.lastIndexOf('}')
 
-      // If Level 0 failed to provide JSON, try Level 1 (Gemini) as a direct retry
+      // If Level 0 failed to provide JSON, try Level 2 (Gemini) as a direct retry
       if ((firstBrace === -1 || lastBrace === -1) && classificationLevel === 0) {
-        logger.info('ActionExecutor: Level 0 classification produced no JSON. Retrying with Level 1 (Gemini)...')
+        logger.info('ActionExecutor: Level 0 classification produced no JSON. Retrying directly with Level 2 (Gemini)...')
         result = await queryOllama('/api/chat', {
           messages: [
             { role: 'system', content: 'You are a technical action classifier. Output ONLY valid JSON.' },
             { role: 'user', content: prompt }
           ]
-        }, 1)
+        }, 2)
         raw = result?.message?.content?.trim() || ''
         firstBrace = raw.indexOf('{')
         lastBrace = raw.lastIndexOf('}')
       }
 
       if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON object in response after retry')
-      return JSON.parse(jsonrepair(raw.substring(firstBrace, lastBrace + 1)))
+      const parsed = JSON.parse(jsonrepair(raw.substring(firstBrace, lastBrace + 1)))
+
+      // Prevent classified action from looping back into scheduling tools
+      if (parsed.action && nonExecutableInTask.has(parsed.action)) {
+        logger.warn(`ActionExecutor: Classifier returned disallowed task action "${parsed.action}". Fallback to send_message.`)
+        parsed.action = 'send_message'
+        parsed.params = { content: task.description }
+      }
+
+      return parsed
     } catch (e) {
       logger.warn(`ActionExecutor: Classification failed (${e.message}). Falling back to send_message.`)
       // Extract channel mentions even on fallback
@@ -161,24 +196,29 @@ Example output:
      * @param {string|null} overrideChannelId - Takes priority over task.channelId if present
      */
   async resolveChannel (bot, task, overrideChannelId) {
+    if (!bot) return null
     const channelId = overrideChannelId || task.channelId
 
     // Priority 1: explicit DM channel
-    if (channelId === 'dm' && task.userId) {
-      const user = await bot.users.fetch(task.userId).catch(() => null)
-      if (user) {
-        return await user.createDM().catch(() => null)
+    if ((channelId === 'dm' || !channelId) && task.userId) {
+      if (bot.users?.fetch) {
+        const user = await bot.users.fetch(task.userId).catch(() => null)
+        if (user) {
+          return await user.createDM().catch(() => null)
+        }
       }
     }
 
     // Priority 2: specified channel ID (takes precedence over DM fallback)
-    if (channelId && channelId !== 'dm') {
-      return bot.channels.cache.get(channelId) ||
-                 await bot.channels.fetch(channelId).catch(() => null)
+    if (channelId && channelId !== 'dm' && !channelId.startsWith('cli_') && !channelId.startsWith('web_') && channelId !== 'terminal') {
+      if (bot.channels?.cache?.get) {
+        return bot.channels.cache.get(channelId) ||
+                   await bot.channels.fetch?.(channelId).catch(() => null)
+      }
     }
 
-    // Priority 3: DM as last resort (only if no channel was specified)
-    if (!channelId && task.userId) {
+    // Priority 3: DM as last resort
+    if (task.userId && bot.users?.fetch) {
       const user = await bot.users.fetch(task.userId).catch(() => null)
       if (user) {
         return await user.createDM().catch(() => null)
@@ -200,6 +240,7 @@ Example output:
     // Hot-reload custom actions before every execution
     this._loadCustom()
 
+    const conversationStore = require('../core/conversationStore')
     const classified = await this.classify(task)
     logger.info(`ActionExecutor: Task "${task.id}" → action="${classified.action}" channel_override="${classified.override_channel_id || 'none'}"`)
 
@@ -214,10 +255,47 @@ Example output:
       classified.params = { content: task.description }
     }
 
+    const isIndividual = !task.guildId || task.channelId === 'dm' || task.channelId === 'terminal' || (task.channelId && (task.channelId.startsWith('cli_') || task.channelId.startsWith('web_')))
+    let deliveredAnywhere = false
+
+    // Record notification in conversationStore for individual/personal tasks so Web & CLI clients see it
+    if (isIndividual) {
+      const isOwner = task.userId === process.env.OWNER_ID
+      const profileId = conversationStore.resolveProfileId(task.userId, isOwner)
+      const alertContent = classified.params?.content || classified.params?.message || `⏰ Scheduled Alert: ${task.description}`
+      try {
+        conversationStore.appendMessage(profileId, {
+          role: 'assistant',
+          content: alertContent,
+          author: 'Skynet',
+          source: 'scheduler',
+          timestamp: Date.now()
+        })
+        logger.info(`ActionExecutor: Appended task alert ${task.id} to conversation store for profile "${profileId}"`)
+        deliveredAnywhere = true
+      } catch (storeErr) {
+        logger.warn(`ActionExecutor: Failed to record task alert in conversationStore: ${storeErr.message}`)
+      }
+    }
+
     const channel = await this.resolveChannel(bot, task, classified.override_channel_id)
-    if (!channel) {
-      logger.warn(`ActionExecutor: Could not resolve delivery channel for task ${task.id}. Attempting DM fallthrough...`)
-      if (task.userId) {
+    if (channel) {
+      try {
+        await action.execute(bot, channel, classified.params || {}, {
+          isScheduled: true,
+          isInteractive: false,
+          taskId: task.id,
+          task
+        })
+        logger.info(`ActionExecutor: Successfully executed "${classified.action}" for task ${task.id} in channel ${channel.id || 'DM'}`)
+        return true
+      } catch (err) {
+        logger.error(`ActionExecutor: Action "${classified.action}" threw an error for task ${task.id}: ${err.message}`)
+        return deliveredAnywhere
+      }
+    } else {
+      if (bot && bot.users && task.userId) {
+        logger.warn(`ActionExecutor: Could not resolve target channel for task ${task.id}. Attempting DM fallthrough...`)
         const user = await bot.users.fetch(task.userId).catch(() => null)
         if (user) {
           const dmChannel = await user.createDM().catch(() => null)
@@ -225,22 +303,19 @@ Example output:
             const fallbackMsg = `⚠️ **Task Fallthrough:** I couldn't find the original target channel for your scheduled task. Here is the content:\n\n**Task:** ${task.description}`
             await dmChannel.send(fallbackMsg).catch(() => {})
             logger.info(`ActionExecutor: Delivered fallthrough notification to user ${task.userId} for task ${task.id}`)
-            return true // Consider delivered so it reschedules
+            return true
           }
         }
       }
-      logger.error(`ActionExecutor: Total failure to deliver task ${task.id} — no channel and no DM possible.`)
-      return false
     }
 
-    try {
-      await action.execute(bot, channel, classified.params || {})
-      logger.info(`ActionExecutor: Successfully executed "${classified.action}" for task ${task.id} in channel ${channel.id || 'DM'}`)
+    if (deliveredAnywhere) {
+      logger.info(`ActionExecutor: Delivered task ${task.id} via persistent store for profile backlog.`)
       return true
-    } catch (err) {
-      logger.error(`ActionExecutor: Action "${classified.action}" threw an error for task ${task.id}: ${err.message}`)
-      return false
     }
+
+    logger.error(`ActionExecutor: Total failure to deliver task ${task.id} — no channel, no DM, and no profile store possible.`)
+    return false
   }
 
   // ─── Action Registration (AI-generated) ─────────────────────────────────────
@@ -435,20 +510,55 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
      * @param {object} context - Object with { client, channel } or a Discord Interaction
      * @returns {Promise<{ success: boolean, error?: string }>}
      */
-  async executeAction (name, params, context) {
+  async executeAction (name, params, context = {}) {
     logger.info(`ActionExecutor: Triggering action "${name}" with params: ${JSON.stringify(params).substring(0, 500)}`)
     const action = this._actions[name]
     if (!action) return { success: false, error: `unknown action: ${name}` }
 
+    const safeContext = context || {}
+
+    // RBAC Security Check: Owner-only action guard
+    if (action.ownerOnly) {
+      const isOwner = Boolean(
+        safeContext.isOwner ||
+        safeContext.userId === process.env.OWNER_ID ||
+        safeContext.user?.id === process.env.OWNER_ID
+      )
+      const isPrivate = Boolean(
+        !safeContext.guildId ||
+        safeContext.channel?.type === 1 || // Discord DM
+        safeContext.isDM ||
+        safeContext.clientId === 'web' ||
+        safeContext.clientId === 'cli'
+      )
+
+      if (!isOwner) {
+        logger.warn(`ActionExecutor: Access Denied for action "${name}" — user is not owner.`)
+        return {
+          success: false,
+          error: `[SYSTEM: Access Denied: Action "${name}" is strictly restricted to the bot owner.]`
+        }
+      }
+
+      const requiresPrivate = Boolean(action.privateOnly || ['host_exec', 'host_read_file', 'host_write_file'].includes(name))
+      if (requiresPrivate && !isPrivate) {
+        logger.warn(`ActionExecutor: Access Denied for action "${name}" — attempted in public server channel.`)
+        return {
+          success: false,
+          error: `[SYSTEM: Access Denied: Action "${name}" can only be executed in private 1-on-1 sessions (Direct Message or Web Chat), not in public server channels.]`
+        }
+      }
+    }
+
     // Compatibility layer: handle interaction, bot object, or specific client/channel keys
-    const bot = context.client || context.bot || context
-    let channel = context.channel || context
+    const bot = safeContext.client || safeContext.bot || safeContext
+    let channel = safeContext.channel || safeContext
 
     // Support channel override in params (ID, mention, or NAME)
     const channelInput = (params.channel || params.channelId || '').toString()
     const targetId = channelInput.replace(/[<#>]/g, '')
 
-    if (targetId && bot.channels) {
+    if (targetId && bot && bot.channels) {
       // Priority 1: Direct ID lookup
       let resolved = bot.channels.cache.get(targetId) || await bot.channels.fetch(targetId).catch(() => null)
 

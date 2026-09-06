@@ -56,6 +56,7 @@ describe('Skynet Recent Updates Verification', () => {
       mockInteraction = {
         id: 'msg-current',
         channelId,
+        guildId: 'guild-123',
         channel: {
           id: channelId,
           messages: { fetch: jest.fn() },

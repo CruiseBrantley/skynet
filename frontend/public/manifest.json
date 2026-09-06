@@ -1,0 +1,19 @@
+{
+  "name": "Skynet AI Interface",
+  "short_name": "Skynet",
+  "description": "Real-time agentic AI interface and mission control",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1117",
+  "theme_color": "#161b22",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

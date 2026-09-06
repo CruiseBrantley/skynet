@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { queryOllamaWithContext, getActiveModelCapabilities } = require('../util/ollama')
 const { formatForEmbed } = require('../util/discordFormatter')
+const { createStatusHeartbeat } = require('../util/chat/statusHeartbeat')
 const ActionExecutor = require('../util/ActionExecutor')
 const logger = require('../logger')
 
@@ -19,6 +20,10 @@ module.exports = {
     await interaction.deferReply()
     const query = interaction.options.getString('query')
     const guildId = interaction.guildId
+    const botName = interaction.client?.user?.username || 'Skynet'
+
+    const heartbeat = createStatusHeartbeat(interaction, `${botName} is searching the web...`)
+    await heartbeat.start()
 
     try {
       const caps = await getActiveModelCapabilities()
@@ -27,16 +32,19 @@ module.exports = {
       // Execute web search action
       let searchResults = ''
       try {
-        const searchResult = await ActionExecutor.execute('web_search', { query })
-        if (searchResult && searchResult.result) {
-          searchResults = typeof searchResult.result === 'string'
-            ? searchResult.result
-            : JSON.stringify(searchResult.result, null, 2)
+        const searchResult = await ActionExecutor.executeAction('web_search', { query }, interaction)
+        if (searchResult && (searchResult.output || searchResult.result)) {
+          const raw = searchResult.output || searchResult.result
+          searchResults = typeof raw === 'string'
+            ? raw
+            : JSON.stringify(raw, null, 2)
         }
       } catch (searchErr) {
         logger.warn(`research: Web search action failed: ${searchErr.message}`)
         searchResults = 'No live web search results available; relying on model knowledge.'
       }
+
+      await heartbeat.updateStatus(`${botName} is synthesizing research report...`)
 
       const prompt = `Conduct a technical research summary for the query: "${query}".\n\n` +
         `Web Search Findings:\n\`\`\`\n${searchResults.substring(0, 4000)}\n\`\`\`\n\n` +
@@ -72,10 +80,14 @@ module.exports = {
         .setFooter({ text: `Engine: ${tierBadge}` })
         .setTimestamp()
 
-      return interaction.editReply({ embeds: [embed] })
+      heartbeat.stop()
+      return interaction.editReply({ content: '', embeds: [embed] })
     } catch (err) {
+      heartbeat.stop()
       logger.error(`research error: ${err.message}`)
-      return interaction.editReply({ content: `An error occurred while conducting research: ${err.message}` })
+      return interaction.editReply({ content: `An error occurred while conducting research: ${err.message}`, embeds: [] })
+    } finally {
+      heartbeat.stop()
     }
   }
 }

@@ -1,0 +1,94 @@
+
+.messageWrapper {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+  gap: 4px;
+}
+
+@media (min-width: 768px) {
+  .messageWrapper {
+    max-width: 78%;
+  }
+}
+
+.userMessage {
+  align-self: flex-end;
+}
+
+.assistantMessage {
+  align-self: flex-start;
+  max-width: 95%;
+}
+
+@media (min-width: 768px) {
+  .assistantMessage {
+    max-width: 88%;
+  }
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  display: flex;
+  gap: 6px;
+}
+
+.userMessage .meta {
+  justify-content: flex-end;
+}
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+  border: 1px solid var(--border-color);
+}
+
+.userBubble {
+  background: var(--user-bubble);
+  color: var(--text-bright);
+  border-bottom-right-radius: 4px;
+  border-color: #2b3b55;
+}
+
+.assistantBubble {
+  background: var(--bot-bubble);
+  color: var(--text-main);
+  border-bottom-left-radius: 4px;
+}
+
+.bubble pre {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.bubble code {
+  background: #21262d;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.bubble p {
+  margin-bottom: 6px;
+}
+
+.bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble ul, .bubble ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}

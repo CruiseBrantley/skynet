@@ -25,23 +25,46 @@ function isPathWhitelisted (relativeFilePath) {
     return false
   }
 
-  if (normalized.startsWith('node_modules/') || normalized.startsWith('.git/') || normalized.startsWith('coverage/')) {
+  // Strictly block node_modules, git internals, and build output directories
+  if (
+    normalized.startsWith('node_modules/') ||
+    normalized.startsWith('.git/') ||
+    normalized.startsWith('coverage/') ||
+    normalized.includes('/node_modules/')
+  ) {
     return false
   }
 
-  if (normalized === '.env' || normalized === '.env.example' || normalized === 'package.json' || normalized === 'README.md' || normalized === 'AGENTS.md') {
+  // Root configuration and project files
+  if (
+    normalized === '.env' ||
+    normalized === '.env.example' ||
+    normalized === 'package.json' ||
+    normalized === 'README.md' ||
+    normalized === 'AGENTS.md' ||
+    normalized === 'ARCHITECTURE.md'
+  ) {
     return true
   }
 
-  if (normalized.startsWith('config/') || normalized.startsWith('data/') || normalized.startsWith('docs/')) {
+  // Configuration, database, and documentation directories
+  if (
+    normalized.startsWith('config/') ||
+    normalized.startsWith('data/') ||
+    normalized.startsWith('docs/')
+  ) {
     return true
   }
 
+  // Log files (with line tailing support)
   if (normalized.startsWith('logs/') && normalized.endsWith('.log')) {
     return true
   }
 
-  if (normalized.endsWith('.js') || normalized.endsWith('.json') || normalized.endsWith('.md')) {
+  // Codebase modules and frontend source files:
+  // Allow all project source code, markdown, styles, and configs
+  const allowedExtensions = /\.(js|mjs|cjs|ts|tsx|json|jsonc|md|txt|css|html|yml|yaml|sql)$/i
+  if (allowedExtensions.test(normalized)) {
     return true
   }
 
@@ -77,11 +100,11 @@ function sanitizeEnvContent (rawEnv) {
 
 module.exports = {
   name: 'read_system_file',
-  description: 'Reads and inspects codebase logic files (util/*, commands/*, routes/*), configuration files (config/*), environment definitions (.env with secrets redacted), or tails recent log files.',
+  description: 'Reads and inspects codebase files across the project (core/*, util/*, commands/*, server/*, frontend/src/*, adapters/*, routes/*), configuration files (config/*, data/*), environment definitions (.env with secrets redacted), or tails recent log files.',
   schema: {
     file_path: {
       type: 'string',
-      description: 'Relative path to inspect (e.g. "util/twitch_notify.js", "commands/announcements.js", "config/announcements.json", "logs/combined.log", ".env").'
+      description: 'Relative path to inspect (e.g. "core/conversationStore.js", "frontend/src/hooks/useChat.ts", "commands/chat.js", "config/announcements.json", "logs/combined.log", ".env").'
     },
     lines: {
       type: 'integer',
@@ -104,7 +127,7 @@ module.exports = {
 
     // Security Gate 2: Check strict whitelist
     if (!isPathWhitelisted(relativePath)) {
-      return `[SYSTEM: Error: Access Denied. "${relativePath}" is not in the allowed file whitelist (allowed: util/*.js, commands/*.js, routes/*.js, config/*, logs/*.log, data/*.json, .env, package.json, README.md, AGENTS.md).]`
+      return `[SYSTEM: Error: Access Denied. "${relativePath}" is not in the allowed file whitelist (allowed: codebase source files .js/.ts/.tsx/.css/.html/.json/.md in core, util, commands, server, frontend, adapters, config, logs).]`
     }
 
     if (!fs.existsSync(fullPath)) {

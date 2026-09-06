@@ -58,6 +58,9 @@
 	"scripts": {
 		"test": "node --no-experimental-webstorage node_modules/.bin/jest",
 		"lint": "standard",
+		"build:web": "npm --prefix frontend run build",
+		"dev:web": "npm --prefix frontend run dev",
+		"cli": "node cli.js",
 		"start": "npm run bot:prod",
 		"bot:run": "node bot.js",
 		"bot:dev": "cross-env NODE_ENV=dev node bot.js",
@@ -71,6 +74,9 @@
 	},
 	"jest": {
 		"testEnvironment": "node",
+		"testMatch": [
+			"<rootDir>/tests/**/*.test.js"
+		],
 		"testEnvironmentOptions": {
 			"url": "http://localhost"
 		},
@@ -84,7 +90,9 @@
 		],
 		"ignore": [
 			"tests/**",
-			"scripts/**"
+			"scripts/**",
+			"public/**",
+			"frontend/**"
 		]
 	}
 }

@@ -9,6 +9,8 @@ class DiscordResponder {
   }
 
   async sendFinalResponse ({ interaction, replyContent, sharedState }) {
+    const wasStreamed = (typeof interaction.streamToken?.hasEdited === 'function' && interaction.streamToken.hasEdited()) || false
+
     if (!replyContent || replyContent.length === 0) {
       // AI didn't provide a final summary string.
       if (sharedState.primaryResponseUsed && !sharedState.visualActionExecuted) {
@@ -135,6 +137,7 @@ class DiscordResponder {
           await interaction.followUp({ content: cleanChunk, flags: [MessageFlags.SuppressEmbeds] })
         }
       } catch (discordErr) {
+        logger.error(`DiscordResponder: editReply/followUp failed (chunk ${i}): ${discordErr.message}`)
         const fallbackClean = chunks[i]
           .replace(/<<<RUN_COMMAND:[\s\S]*?>>>/g, '')
           .replace(BOILERPLATE_SCRUB_REGEX, '')
@@ -143,7 +146,20 @@ class DiscordResponder {
           .trim()
 
         if (fallbackClean) {
-          logger.info('Interaction reply failed, falling back to channel.send: ' + discordErr.message)
+          // If we were streaming, try to fetch and edit the existing message instead of creating a new one
+          if (wasStreamed && i === 0) {
+            try {
+              const existing = await interaction.fetchReply()
+              if (existing && typeof existing.edit === 'function') {
+                await existing.edit({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] })
+                continue
+              }
+            } catch (fetchErr) {
+              logger.warn(`DiscordResponder: fetchReply fallback also failed: ${fetchErr.message}`)
+            }
+            // User already has the text from streaming. Do not spawn a duplicate channel.send.
+            continue
+          }
           await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] })
         }
       }

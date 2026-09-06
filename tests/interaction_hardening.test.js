@@ -105,4 +105,96 @@ describe('Unified Interaction Hardening Suite', () => {
     const lastSend = mockChannel.send.mock.calls[0][0]
     expect(lastSend.embeds[0].data.title).toBe('Flatten Me')
   })
+
+  test('Case 4: Interaction Cleanup Invoked on Execution Completion', async () => {
+    const mockCleanup = jest.fn()
+    mockInteraction.cleanup = mockCleanup
+    queryOllamaWithContext.mockResolvedValueOnce({
+      message: { content: 'Complete response.' }
+    })
+
+    await chat.execute(mockInteraction, {})
+
+    expect(mockCleanup).toHaveBeenCalled()
+  })
+
+  test('Case 5: Status Heartbeat Updates and Clears Cleanly', async () => {
+    jest.useFakeTimers()
+    try {
+      let intervalCleared = false
+      mockInteraction.showStatus = jest.fn().mockImplementation(() => {
+        const timer = setInterval(() => {}, 1000)
+        mockInteraction.cleanup = () => {
+          clearInterval(timer)
+          intervalCleared = true
+        }
+      })
+
+      queryOllamaWithContext.mockResolvedValueOnce({
+        message: { content: '<<<RUN_COMMAND: {"command": "send_message", "params": {"message": "hi"}}>>>' }
+      })
+      queryOllamaWithContext.mockResolvedValueOnce({
+        message: { content: 'All done.' }
+      })
+
+      await chat.execute(mockInteraction, {})
+
+      expect(mockInteraction.showStatus).toHaveBeenCalled()
+      expect(intervalCleared).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test('Case 6: mirrorWebTurnToUser sets vibrant color on EmbedBuilder', async () => {
+    const { DiscordAdapter } = require('../adapters/discord')
+    const mockSend = jest.fn().mockResolvedValue({ id: 'msg_embed_123' })
+    const mockUser = {
+      id: 'disc_user_1',
+      createDM: jest.fn().mockResolvedValue({ send: mockSend })
+    }
+    const adapter = new DiscordAdapter({ token: 'mock-token' })
+    adapter.client = {
+      user: { username: 'Skynet' },
+      users: {
+        fetch: jest.fn().mockResolvedValue(mockUser)
+      }
+    }
+
+    const msgId = await adapter.mirrorWebTurnToUser('disc_user_1', 'Hello Web', 'Hello Discord DM')
+    expect(msgId).toBe('msg_embed_123')
+    expect(mockSend).toHaveBeenCalledTimes(1)
+    const sentPayload = mockSend.mock.calls[0][0]
+    expect(sentPayload.embeds).toBeDefined()
+    expect(sentPayload.embeds.length).toBe(1)
+    const embedData = sentPayload.embeds[0].data
+    expect(embedData.color).toBeDefined()
+    expect(typeof embedData.color).toBe('number')
+  })
+
+  test('Case 7: mention detection ignores @everyone and @here broadcasts', () => {
+    const botId = '558428214805135370'
+    const mockMessageEveryone = {
+      content: '@here gonna be live 30 minutes late today.',
+      guildId: 'guild_123',
+      channel: { type: 0 },
+      mentions: {
+        everyone: true,
+        users: new Map(),
+        roles: new Map(),
+        has: jest.fn((id, options = {}) => {
+          if (!options.ignoreEveryone) return true
+          return false
+        })
+      }
+    }
+
+    const isMentioned = Boolean(
+      (botId && mockMessageEveryone.mentions?.has?.(botId, { ignoreEveryone: true, ignoreRoles: true })) ||
+      (botId && (mockMessageEveryone.content?.includes(`<@${botId}>`) || mockMessageEveryone.content?.includes(`<@!${botId}>`)))
+    )
+
+    expect(isMentioned).toBe(false)
+    expect(mockMessageEveryone.mentions.has).toHaveBeenCalledWith(botId, { ignoreEveryone: true, ignoreRoles: true })
+  })
 })

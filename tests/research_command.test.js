@@ -27,8 +27,9 @@ describe('commands/research', () => {
       reply: jest.fn().mockResolvedValue()
     }
 
-    ActionExecutor.execute.mockResolvedValue({
-      result: 'Top switches: Switch A, Switch B'
+    ActionExecutor.executeAction.mockResolvedValue({
+      success: true,
+      output: 'Top switches: Switch A, Switch B'
     })
 
     queryOllamaWithContext.mockResolvedValue({
@@ -40,7 +41,7 @@ describe('commands/research', () => {
     await researchCmd.execute(mockInteraction)
 
     expect(mockInteraction.deferReply).toHaveBeenCalled()
-    expect(ActionExecutor.execute).toHaveBeenCalledWith('web_search', { query: '10GbE network switches 2026' })
+    expect(ActionExecutor.executeAction).toHaveBeenCalledWith('web_search', { query: '10GbE network switches 2026' }, mockInteraction)
     expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
       embeds: expect.any(Array)
     }))

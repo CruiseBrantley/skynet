@@ -149,7 +149,7 @@ module.exports = {
         throw new Error('High Fidelity Image Generation is currently offline (Remote Core unreachable).')
       }
 
-      const successMessagePrefix = ''
+      const successMessagePrefix = targetAttachmentUrl ? '🖼️ **Img2Img Generated**\n' : ''
       const sessionId = sessionRes.data.session_id
 
       // 2. Generate Image
@@ -216,6 +216,8 @@ module.exports = {
       } catch (discordErr) {
         await interaction.channel.send(errorMsg)
       }
+    } finally {
+      stopTyping()
     }
   }
 }

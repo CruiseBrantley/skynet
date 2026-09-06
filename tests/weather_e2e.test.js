@@ -1,18 +1,16 @@
 const chat = require('../commands/chat')
-const executor = require('../util/ActionExecutor')
-const { queryOllamaWithContext } = require('../util/ollama')
-const axios = require('axios')
+const { queryOllamaWithContext, queryOllama } = require('../util/ollama')
+const wiki = require('wikipedia')
 
 // Mock external dependencies
 jest.mock('../util/ollama')
-jest.mock('axios')
+jest.mock('wikipedia')
 
 describe('Weather Search E2E Flow', () => {
   let mockInteraction
 
   beforeEach(() => {
     jest.clearAllMocks()
-    process.env.GEMINI_API_KEY = 'test-gemini-key'
 
     mockInteraction = {
       guildId: '123',
@@ -49,26 +47,25 @@ describe('Weather Search E2E Flow', () => {
       message: { content: '<<<RUN_COMMAND: {"command": "web_search", "params": {"query": "weather Fayetteville AR"}}>>>' }
     })
 
-    // 2. Google Search Grounding returns weather results
-    axios.post.mockResolvedValueOnce({
-      data: {
-        candidates: [{
-          content: {
-            parts: [{ text: 'The weather today in Fayetteville is sunny with a high of 75F and low of 50F.' }]
-          },
-          groundingMetadata: {
-            groundingChunks: [{ web: { uri: 'https://weather.com/local', title: 'Local Weather' } }]
-          }
-        }]
-      }
+    // 2. Wikipedia lookup returns summary
+    wiki.search.mockResolvedValueOnce({ results: [{ title: 'Fayetteville, Arkansas' }] })
+    wiki.summary.mockResolvedValueOnce({
+      title: 'Fayetteville, Arkansas',
+      extract: 'The climate in Fayetteville is humid subtropical with warm summers and mild winters.',
+      content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Fayetteville' } }
     })
 
-    // 3. AI provides final summary
+    // 3. Local model distillation
+    queryOllama.mockResolvedValueOnce({
+      response: 'Fayetteville, AR has a humid subtropical climate with sunny skies and mild weather today.'
+    })
+
+    // 4. AI provides final summary
     queryOllamaWithContext.mockResolvedValueOnce({
       message: { content: 'The weather in Fayetteville is currently sunny and 75F.' }
     })
 
-    // 4. Coordinator evaluation confirming completion
+    // 5. Coordinator evaluation confirming completion
     queryOllamaWithContext.mockResolvedValueOnce({
       message: { content: JSON.stringify({ has_pending_work: false }) }
     })
@@ -81,12 +78,8 @@ describe('Weather Search E2E Flow', () => {
     // Should have called Ollama (Initial + Summary + Coordinator)
     expect(queryOllamaWithContext).toHaveBeenCalledTimes(3)
 
-    // Should have called axios for Google Search Grounding
-    expect(axios.post).toHaveBeenCalledWith(
-      expect.stringContaining('generativelanguage.googleapis.com'),
-      expect.anything(),
-      expect.anything()
-    )
+    // Should have called Wikipedia search
+    expect(wiki.search).toHaveBeenCalledWith(expect.stringContaining('weather Fayetteville'), expect.any(Object))
 
     // Should have OVERWRITTEN the thinking status in editReply with the final summary
     expect(mockInteraction.editReply).toHaveBeenCalled()

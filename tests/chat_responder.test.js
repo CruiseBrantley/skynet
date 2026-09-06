@@ -77,4 +77,55 @@ describe('DiscordResponder', () => {
       content: expect.stringContaining('AI says hello')
     }))
   })
+
+  test('Recovers streamed message via fetchReply().edit() and still delivers chunks 1+', async () => {
+    const mockExistingMsg = {
+      edit: jest.fn().mockResolvedValue()
+    }
+    mockInteraction.editReply.mockRejectedValueOnce(new Error('Rate limited'))
+    mockInteraction.fetchReply = jest.fn().mockResolvedValue(mockExistingMsg)
+    mockInteraction.followUp = jest.fn().mockResolvedValue()
+    mockInteraction.streamToken = { hasEdited: jest.fn().mockReturnValue(true) }
+
+    const longMessage = 'First chunk of text\n\n' + 'A'.repeat(1950) + '\n\nSecond chunk of text: ' + 'B'.repeat(500)
+
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: longMessage,
+      sharedState
+    })
+
+    expect(mockExistingMsg.edit).toHaveBeenCalled()
+    expect(mockInteraction.followUp).toHaveBeenCalled()
+  })
+
+  test('splitMessage safely splits code blocks without orphan fences', () => {
+    const { splitMessage } = require('../util/chat/splitMessage')
+    const codeBlock = '```javascript\n' + 'const x = 1;\n'.repeat(200) + '```'
+    const chunks = splitMessage(codeBlock)
+
+    expect(chunks.length).toBeGreaterThan(1)
+    // Chunk 0 must be closed with ```
+    expect(chunks[0].trim().endsWith('```')).toBe(true)
+    // Chunk 1 must be reopened with ```javascript
+    expect(chunks[1].startsWith('```javascript')).toBe(true)
+    // Final chunk must end with ```
+    expect(chunks[chunks.length - 1].trim().endsWith('```')).toBe(true)
+  })
+
+  test('Falls back to channel.send when wasStreamed is false and editReply fails', async () => {
+    mockInteraction.editReply.mockRejectedValueOnce(new Error('Network failure'))
+    mockInteraction.channel = { send: jest.fn().mockResolvedValue() }
+    mockInteraction.streamToken = { hasEdited: jest.fn().mockReturnValue(false) }
+
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: 'Non-streamed fallback text',
+      sharedState
+    })
+
+    expect(mockInteraction.channel.send).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Non-streamed fallback text'
+    }))
+  })
 })

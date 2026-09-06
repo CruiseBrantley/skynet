@@ -427,7 +427,7 @@ async function createSlashCommand ({ name, description, options, code, bot, guil
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, AttachmentBuilder, ComponentType } = require('discord.js')
 const { SafeEmbedBuilder: EmbedBuilder } = require('../util/discordFormatter')
 const axios = require('axios')
-const { searchViaGoogleGrounding } = require('../util/actions/web_search')
+const ActionExecutor = require('../util/ActionExecutor')
 const agentMemory = require('../util/AgentMemory')
 
 module.exports = {

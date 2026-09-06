@@ -1,145 +1,181 @@
 const axios = require('axios')
 const wiki = require('wikipedia')
-const puppeteerSearch = require('../puppeteerSearch')
-const { fetchPageText } = require('../summarize')
+const { fetchPageText, extractUrls } = require('../summarize')
+const { queryOllama } = require('../ollama')
 const logger = require('../../logger')
 
 /**
- * Searches the web via Google Search Grounding (Gemini API v1beta).
- * Falls back across candidate models if one experiences transient demand spikes.
+ * Secondary fallback to Google Search Grounding (Gemini API v1beta) when local URL/Wiki data is insufficient.
  */
 async function searchViaGoogleGrounding (query) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return null
 
-  const candidateModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-3.5-flash']
-  for (const model of candidateModels) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        logger.info(`web_search: Attempting Google Search Grounding via ${model} (attempt ${attempt})...`)
-        const res = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            contents: [{ parts: [{ text: `Search the web for real-time information: ${query}\nProvide a factual breakdown and include specific details, dates, and sources.` }] }],
-            tools: [{ googleSearch: {} }]
-          },
-          { timeout: 60000 }
-        )
+  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+  try {
+    logger.info(`web_search: Attempting Google Search Grounding fallback via ${model}...`)
+    const res = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        contents: [{ parts: [{ text: `Search the web for real-time information: ${query}\nProvide a factual breakdown and include specific details, dates, and sources.` }] }],
+        tools: [{ googleSearch: {} }]
+      },
+      { timeout: 15000 }
+    )
 
-        const candidate = res.data.candidates?.[0]
-        const text = candidate?.content?.parts?.[0]?.text
-        if (text && text.trim().length > 0) {
-          const chunks = candidate.groundingMetadata?.groundingChunks || []
-          const sources = chunks
-            .filter(c => c.web?.uri)
-            .map(c => `- [${c.web.title || 'Source'}](${c.web.uri})`)
-            .slice(0, 5)
+    const candidate = res.data.candidates?.[0]
+    const text = candidate?.content?.parts?.[0]?.text
+    if (text && text.trim().length > 0) {
+      const chunks = candidate.groundingMetadata?.groundingChunks || []
+      const sources = chunks
+        .filter(c => c.web?.uri)
+        .map(c => `- [${c.web.title || 'Source'}](${c.web.uri})`)
+        .slice(0, 5)
 
-          let result = text
-          if (sources.length > 0) {
-            result += '\n\n**Sources:**\n' + sources.join('\n')
-          }
-          logger.info(`web_search: Successfully retrieved grounded results via ${model}`)
-          return result
-        }
-      } catch (err) {
-        const status = err.response?.status
-        logger.warn(`web_search: Google Search Grounding via ${model} (attempt ${attempt}) failed (HTTP ${status || 'ERR'}): ${err.message}`)
-        if (status === 503 && attempt === 1) {
-          // Transient demand spike on Google servers; wait 1.5s and retry
-          await new Promise(resolve => setTimeout(resolve, 1500))
-          continue
-        }
-        if (status && status !== 503 && status !== 429 && status !== 404 && status !== 500) {
-          break
-        }
+      let result = text
+      if (sources.length > 0) {
+        result += '\n\n**Sources:**\n' + sources.join('\n')
       }
+      logger.info(`web_search: Successfully retrieved grounded results via ${model}`)
+      return result
     }
+  } catch (err) {
+    logger.info(`web_search: Google Grounding fallback skipped: ${err.message}`)
   }
   return null
 }
 
 module.exports = {
   name: 'web_search',
-  description: 'Searches the web for real-time information, specific facts, domain reputation, news corroboration, or fact-checking.',
+  description: 'Fetches and extracts information from web pages, URLs, and encyclopedic reference data using local AI distillation.',
   schema: {
-    query: 'The search query to perform.'
+    query: 'The search query or target URL to investigate.'
   },
   execute: async (bot, channel, params, context) => {
-    const query = params.query || params.message || ''
-    if (!query) return '[SYSTEM: Error - No search query provided.]'
+    const query = params.query || params.message || params.url || ''
+    if (!query) return '[SYSTEM: Error - No search query or URL provided.]'
 
-    logger.info(`Action: web_search executing for query: "${query}"`)
+    logger.info(`Action: web_search executing for: "${query}"`)
+
+    const extractedUrls = extractUrls(query)
+    const contentSources = []
+
+    // 1. Direct Page Fetching for any explicit URLs
+    if (extractedUrls.length > 0) {
+      for (const url of extractedUrls.slice(0, 3)) {
+        try {
+          logger.info(`web_search: Fetching page directly: ${url}`)
+          const pageText = await fetchPageText(url, 12000)
+          if (pageText && pageText.length > 100) {
+            contentSources.push({
+              source: url,
+              content: pageText.substring(0, 8000)
+            })
+          }
+        } catch (fetchErr) {
+          logger.warn(`web_search: Failed to fetch ${url}: ${fetchErr.message}`)
+        }
+      }
+    }
+
+    // 2. Live Web Search via Headless Browser (DuckDuckGo HTML)
+    if (contentSources.length === 0) {
+      try {
+        const puppeteerSearch = require('../puppeteerSearch')
+        logger.info(`web_search: Launching headless browser search for "${query}"...`)
+        const searchResults = await puppeteerSearch.performSearch(query)
+        if (searchResults && searchResults.length > 0) {
+          for (const item of searchResults.slice(0, 5)) {
+            contentSources.push({
+              source: `Web Result: ${item.title} (${item.link})`,
+              content: item.snippet
+            })
+          }
+
+          // Fetch full page text for the top 2 links in parallel
+          const pagePromises = searchResults.slice(0, 2).map(async (item) => {
+            try {
+              if (item.link && item.link.startsWith('http')) {
+                const text = await fetchPageText(item.link, 10000)
+                if (text && text.length > 200) {
+                  return {
+                    source: `Article: ${item.title} (${item.link})`,
+                    content: text.substring(0, 5000)
+                  }
+                }
+              }
+            } catch (e) {}
+            return null
+          })
+
+          const fetchedPages = await Promise.all(pagePromises)
+          fetchedPages.filter(Boolean).forEach(p => contentSources.push(p))
+        }
+      } catch (pupErr) {
+        logger.info(`web_search: Headless browser search skipped: ${pupErr.message}`)
+      }
+    }
+
+    // 3. Wikipedia Search & Summary Reference
+    try {
+      const cleanSearchTerm = query.replace(/https?:\/\/[^\s]+/gi, '').trim()
+      if (cleanSearchTerm.length > 2) {
+        const searchRes = await wiki.search(cleanSearchTerm, { limit: 2 }).catch(() => null)
+        if (searchRes && searchRes.results && searchRes.results.length > 0) {
+          for (const item of searchRes.results.slice(0, 2)) {
+            try {
+              const page = await wiki.summary(item.title).catch(() => null)
+              if (page && page.extract) {
+                contentSources.push({
+                  source: `Wikipedia: ${page.title} (${page.content_urls?.desktop?.page || item.title})`,
+                  content: page.extract
+                })
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (wikiErr) {
+      logger.info(`web_search: Wikipedia lookup skipped: ${wikiErr.message}`)
+    }
+
+    // 4. Fallback to Google Grounding if local sources were insufficient
+    if (contentSources.length === 0) {
+      const grounded = await searchViaGoogleGrounding(query)
+      if (grounded) {
+        return `[SYSTEM: WEB SEARCH RESULTS (Google Grounding)]\n${grounded}\n\n[INSTRUCTIONS]: Use this real-time information to formulate your answer.`
+      }
+
+      return `[SYSTEM: WEB RESEARCH FINDINGS FOR "${query}"]\nNo direct external web pages or articles were retrieved. Rely on deep internal model reasoning to answer the query thoroughly.`
+    }
+
+    // 3. Local Model (5090 RTX / Qwen) Context Distillation & Fact Extraction
+    const combinedRaw = contentSources.map(s => `[SOURCE: ${s.source}]\n${s.content}`).join('\n\n---\n\n')
 
     try {
-      // Tier 1: Google Search Grounding via Gemini API
-      const groundedResult = await searchViaGoogleGrounding(query)
-      if (groundedResult) {
-        return `[SYSTEM: WEB SEARCH RESULTS (Google Grounding)]\n${groundedResult}\n\n[INSTRUCTIONS]: Use this real-time information to answer the user accurately.`
-      }
+      logger.info(`web_search: Distilling ${contentSources.length} sources via local model on 5090...`)
+      const distillationPrompt = `Extract the key technical facts, dates, specifications, and details relevant to the query: "${query}" from the retrieved raw sources below.\n\n` +
+        `Raw Sources:\n${combinedRaw.substring(0, 10000)}\n\n` +
+        'Respond with a concise, factual bulleted summary citing the relevant sources. Do not include conversational filler.'
 
-      // Tier 2: Wikipedia Summary
-      let results = []
-      try {
-        const wikiSummary = await wiki.summary(query)
-        if (wikiSummary && wikiSummary.extract) {
-          results = [{
-            title: wikiSummary.title,
-            snippet: wikiSummary.extract,
-            link: wikiSummary.content_urls.desktop.page
-          }]
+      const distillRes = await queryOllama('/api/generate', {
+        prompt: distillationPrompt,
+        options: {
+          num_predict: 800,
+          temperature: 0.2
         }
-      } catch (wikiErr) {
-        logger.info(`Wikipedia fallback failed: ${wikiErr.message}`)
+      })
+
+      const distilledText = (distillRes?.response || distillRes?.message?.content || '').trim()
+      if (distilledText && distilledText.length > 50) {
+        return `[SYSTEM: WEB SEARCH RESULTS (Distilled Knowledge)]\n${distilledText}\n\n[INSTRUCTIONS]: Use this real-time distilled information to formulate your answer.`
       }
-
-      // Tier 3: Puppeteer Headless Browser
-      if (!results || results.length === 0) {
-        try {
-          logger.info(`Action: Spinning up headless Chromium for "${query}"...`)
-          results = await puppeteerSearch.performSearch(query)
-        } catch (pupErr) {
-          logger.error(`Puppeteer crawler failed: ${pupErr.message}`)
-        }
-      }
-
-      if (!results || results.length === 0) {
-        return `[SYSTEM: WEB SEARCH RETURNED NO RESULTS FOR "${query}". Use internal knowledge.]`
-      }
-
-      const searchResultsStr = results.slice(0, 5).map(r => `Title: ${r.title}\nSnippet: ${r.snippet || ''}\nLink: ${r.link}`).join('\n\n')
-
-      // Deep Enrichment: Read top link
-      const researchPromises = []
-      const limit = results.length > 3 ? 3 : results.length
-
-      for (let i = 0; i < limit; i++) {
-        researchPromises.push((async () => {
-          try {
-            const rawText = await fetchPageText(results[i].link, 15000)
-            if (rawText && rawText.length > 200) {
-              return `[Source: ${results[i].title}]\n${rawText.substring(0, 3000)}`
-            }
-          } catch (e) {
-            return null
-          }
-          return null
-        })())
-      }
-
-      const pageContents = await Promise.all(researchPromises)
-      const validContents = pageContents.filter(c => c !== null)
-
-      let fullContent = ''
-      if (validContents.length > 0) {
-        fullContent = '\n\nDETAILED PAGE ANALYSES:\n' + validContents.join('\n\n---\n\n')
-      }
-
-      return `[SYSTEM: WEB SEARCH RESULTS]\n${searchResultsStr}${fullContent}\n\n[INSTRUCTIONS]: Use this information to answer the user. Mention sources if relevant.`
-    } catch (err) {
-      logger.error(`web_search action failed: ${err.message}`)
-      return `[SYSTEM: Error performing web search: ${err.message}]`
+    } catch (distillErr) {
+      logger.warn(`web_search: Local distillation failed: ${distillErr.message}; using raw extracts`)
     }
+
+    // Fallback: Return raw excerpts directly
+    return `[SYSTEM: WEB SEARCH RESULTS (Raw Extracts)]\n${combinedRaw.substring(0, 4000)}\n\n[INSTRUCTIONS]: Use this real-time information to formulate your answer.`
   },
   searchViaGoogleGrounding
 }

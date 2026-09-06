@@ -36,10 +36,11 @@ describe('Summarize Utilities', () => {
       expect(shouldSkipUrl('https://discord.gg/abc')).toBe(true)
     })
 
-    test('skips Twitch, Tenor and Giphy links', () => {
+    test('skips Twitch, Tenor, Giphy, and Yelp links', () => {
       expect(shouldSkipUrl('https://twitch.tv/streamer')).toBe(true)
       expect(shouldSkipUrl('https://tenor.com/view/gif')).toBe(true)
       expect(shouldSkipUrl('https://giphy.com/gifs/funny')).toBe(true)
+      expect(shouldSkipUrl('https://www.yelp.com/biz/pho-mac-the-colony')).toBe(true)
     })
 
     test('allows normal article URLs', () => {

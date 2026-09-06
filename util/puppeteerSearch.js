@@ -23,7 +23,7 @@ async function performSearch (query) {
       timeout: 15000
     })
 
-    const results = await page.evaluate(() => {
+    const rawResults = await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll('.result'))
       return items.slice(0, 10).map(el => {
         const titleEl = el.querySelector('.result__title')
@@ -38,14 +38,31 @@ async function performSearch (query) {
           snippet: snippetEl ? snippetEl.innerText.trim() : '',
           link
         }
-      }).filter(r => r.title && r.snippet) // ensure it's a valid extraction
+      }).filter(r => r.title && r.snippet)
     })
+
+    const results = rawResults
+      .filter(r => !r.title.includes('Ad\n') && !r.link.includes('ad_provider='))
+      .map(r => {
+        let cleanLink = r.link
+        if (cleanLink.includes('uddg=')) {
+          try {
+            const u = new URL(cleanLink.startsWith('http') ? cleanLink : 'https://duckduckgo.com' + cleanLink)
+            cleanLink = decodeURIComponent(u.searchParams.get('uddg') || cleanLink)
+          } catch (e) {}
+        }
+        return {
+          title: r.title.replace(/\nAd\n.*/s, '').trim(),
+          snippet: r.snippet,
+          link: cleanLink
+        }
+      })
 
     logger.info(`Puppeteer correctly extracted ${results.length} search results for "${query}"`)
     return results
   } catch (e) {
     logger.error(`Puppeteer search threw an anomaly: ${e.message}`)
-    throw e
+    return []
   } finally {
     if (browser) {
       await browser.close().catch(() => {})
