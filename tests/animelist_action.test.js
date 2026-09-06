@@ -4,13 +4,17 @@ const googleCalendar = require('../util/actions/google_calendar')
 
 jest.mock('../util/malClient')
 jest.mock('../util/actions/google_calendar')
-jest.mock('../util/actions/anime_sync', () => ({
-  getAnimeDetails: jest.fn().mockImplementation(async (title) => ({
-    title: { english: title },
-    episodes: 28
-  })),
-  getStreamingPlatformInfo: jest.fn().mockReturnValue({ name: 'Crunchyroll', site: 'Crunchyroll', key: 'crunchyroll', emoji: '🟠' })
-}))
+jest.mock('../util/actions/anime_sync', () => {
+  const actual = jest.requireActual('../util/actions/anime_sync')
+  return {
+    ...actual,
+    getAnimeDetails: jest.fn().mockImplementation(async (title) => ({
+      title: { english: title },
+      episodes: 28
+    })),
+    getStreamingPlatformInfo: jest.fn().mockReturnValue({ name: 'Crunchyroll', site: 'Crunchyroll', key: 'crunchyroll', emoji: '🟠' })
+  }
+})
 jest.mock('../logger')
 
 describe('Built-in Action - animelist permissions', () => {

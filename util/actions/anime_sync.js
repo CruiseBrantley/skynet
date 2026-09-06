@@ -171,19 +171,284 @@ function getCrunchyrollInfo (media) {
 }
 
 /**
+ * Extract season or part number from a title string.
+ */
+function extractSeasonNumber (str) {
+  if (!str) return null
+  const m = str.match(/(?:season|cour|part)\s*(\d+)|s(\d+)|(\d+)(?:nd|rd|th|st)\s*season/i)
+  if (m) {
+    return parseInt(m[1] || m[2] || m[3], 10)
+  }
+  return null
+}
+
+/**
+ * Extract MAL ID from calendar event properties or description.
+ */
+function extractMalIdFromEvent (event) {
+  if (!event) return null
+  const idFromPrivate = event.extendedProperties?.private?.idMal || event.extendedProperties?.private?.mal_id
+  if (idFromPrivate && !isNaN(parseInt(idFromPrivate, 10))) {
+    return parseInt(idFromPrivate, 10)
+  }
+  if (event.description) {
+    const m = event.description.match(/myanimelist\.net\/anime\/(\d+)/i)
+    if (m) return parseInt(m[1], 10)
+  }
+  return null
+}
+
+/**
  * Robust title matching against existing calendar titles to prevent duplicate additions.
+ * Uses exact normalized matching, season number consistency, and whole-word token matching.
  */
 function isTitleOnCalendar (title, calendarTitles) {
-  if (!title || !Array.isArray(calendarTitles)) return false
-  const clean = title.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
-  const cleanWords = clean.split(/\s+/).filter(w => w.length > 2)
+  if (!title || !Array.isArray(calendarTitles) || calendarTitles.length === 0) return false
+
+  const titleSeason = extractSeasonNumber(title)
+  const cleanTitle = title.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
+  const titleWords = new Set(cleanTitle.split(/\s+/).filter(w => w.length > 2))
 
   return calendarTitles.some(ct => {
-    const cClean = ct.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
-    if (cClean === clean || cClean.includes(clean) || clean.includes(cClean)) return true
-    if (cleanWords.length >= 2 && cleanWords.every(w => cClean.includes(w))) return true
+    if (!ct) return false
+    const ctSeason = extractSeasonNumber(ct)
+    if (titleSeason !== null && ctSeason !== null && titleSeason !== ctSeason) {
+      return false
+    }
+
+    const cleanCt = ct.toLowerCase().replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '').replace(/[^a-z0-9]/g, ' ').trim()
+
+    if (cleanTitle === cleanCt) return true
+    if (cleanTitle.length >= 6 && cleanCt.includes(cleanTitle)) return true
+    if (cleanCt.length >= 6 && cleanTitle.includes(cleanCt)) return true
+
+    const ctWords = new Set(cleanCt.split(/\s+/).filter(w => w.length > 2))
+    if (titleWords.size === 0 || ctWords.size === 0) return false
+
+    let matchCount = 0
+    for (const w of titleWords) {
+      if (ctWords.has(w)) matchCount++
+    }
+
+    const minWords = Math.min(titleWords.size, ctWords.size)
+    const ratio = matchCount / minWords
+    if (minWords >= 3 && ratio >= 0.7) return true
+    if (minWords === 2 && matchCount === 2) return true
+
     return false
   })
+}
+
+/**
+ * Single source of truth for resolving anime metadata, titles, schedule, and recurrence.
+ */
+async function resolveAnimeSchedule (params = {}) {
+  const {
+    title,
+    animeId,
+    media: providedMedia,
+    animeInfo: providedAnimeInfo,
+    item: providedItem,
+    platformOverride,
+    episodesOverride
+  } = params
+
+  let media = providedMedia
+  const animeInfo = providedAnimeInfo
+
+  if (!media && !animeInfo) {
+    if (animeId || title) {
+      media = await getAnimeDetails(title, animeId)
+    }
+  }
+
+  const effectiveId = animeId || animeInfo?.id || media?.idMal || providedItem?.anime_id
+
+  // If AniList did not have an English title, try fetching MAL search/details for the official English title
+  let malEnglish = providedItem?.anime_title_eng || animeInfo?.alternative_titles?.en || animeInfo?.title
+  if (!media?.title?.english && !malEnglish && effectiveId) {
+    try {
+      const malClient = require('../malClient')
+      if (typeof malClient.searchAnime === 'function') {
+        const searched = await malClient.searchAnime(title || String(effectiveId))
+        if (searched?.title) {
+          malEnglish = searched.title
+        }
+      }
+    } catch (_) {}
+  }
+
+  const canonicalTitle = media?.title?.english || malEnglish || media?.title?.romaji || providedItem?.anime_title || title || 'Unknown Anime'
+  const romajiTitle = media?.title?.romaji || providedItem?.anime_title || title
+  const platformInfo = getStreamingPlatformInfo(media)
+  const platform = platformOverride || platformInfo?.key || platformInfo?.name || platformInfo?.site || 'crunchyroll'
+  const episodesCount = episodesOverride ? parseInt(episodesOverride, 10) : (media?.episodes || animeInfo?.episodes || 12)
+
+  const isUpcoming = media?.status === 'NOT_YET_RELEASED' ||
+    animeInfo?.status === 'not_yet_aired' ||
+    animeInfo?.status === 3 ||
+    providedItem?.anime_airing_status === 3
+
+  const hasBroadcastSchedule = Boolean(
+    media?.nextAiringEpisode?.airingAt ||
+    (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day)
+  )
+
+  const year = media?.startDate?.year || animeInfo?.start_season?.year || providedItem?.anime_season?.year
+  const month = media?.startDate?.month
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const monthStr = month ? monthNames[month - 1] : (animeInfo?.start_season?.season ? animeInfo.start_season.season.toUpperCase() : null)
+  const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
+
+  let startDate = null
+  let simulcastStr = 'Weekly Simulcast'
+
+  if (media?.nextAiringEpisode?.airingAt) {
+    const cst = formatCstSchedule(media.nextAiringEpisode.airingAt)
+    if (cst) {
+      startDate = cst.date
+      simulcastStr = cst.simulcastString
+    }
+  } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
+    startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+  } else {
+    startDate = new Date()
+  }
+
+  const calculatedEndDate = calculateSeriesEndDate(media, startDate, episodesCount)
+  const isContinuing = !calculatedEndDate && !media?.episodes && !animeInfo?.episodes
+  const recurrenceLabel = calculatedEndDate
+    ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
+    : (isContinuing ? 'Continuing Weekly' : `${episodesCount} episodes`)
+
+  return {
+    animeId: effectiveId,
+    canonicalTitle,
+    romajiTitle,
+    englishTitle: media?.title?.english || malEnglish,
+    coverImage: media?.coverImage?.large || animeInfo?.coverImage,
+    platformInfo,
+    platform,
+    episodesCount,
+    isUpcoming,
+    hasBroadcastSchedule,
+    pendingSchedule: isUpcoming && !hasBroadcastSchedule,
+    timeDesc,
+    startDate,
+    simulcastStr,
+    calculatedEndDate,
+    isContinuing,
+    recurrenceLabel,
+    link: platformInfo?.url || '',
+    media
+  }
+}
+
+/**
+ * Schedule or update an anime on Google Calendar.
+ * Handles duplicate detection (by MAL ID and by Title), deferred scheduling for unannounced air dates,
+ * and standard event parameters.
+ */
+async function scheduleAnimeOnCalendar (params = {}) {
+  const {
+    calendarTarget = process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release',
+    schedule,
+    existingEvents = [],
+    context = {},
+    bot = null,
+    channel = null
+  } = params
+
+  if (schedule.pendingSchedule) {
+    return {
+      success: true,
+      pendingSchedule: true,
+      timeDesc: schedule.timeDesc,
+      platform: schedule.platform,
+      canonicalTitle: schedule.canonicalTitle
+    }
+  }
+
+  let targetCalId = calendarTarget
+  try {
+    const targetCal = await googleCalendar.resolveCalendar(calendarTarget)
+    if (targetCal?.id) targetCalId = targetCal.id
+  } catch (_) {}
+
+  // Check existing events on calendar to avoid duplicate entries
+  // 1. By exact MAL ID
+  let existingEvent = null
+  if (schedule.animeId && existingEvents.length > 0) {
+    existingEvent = existingEvents.find(e => {
+      const eMalId = extractMalIdFromEvent(e)
+      return eMalId && String(eMalId) === String(schedule.animeId)
+    })
+  }
+
+  // 2. By Title if not matched by ID
+  if (!existingEvent && existingEvents.length > 0) {
+    existingEvent = existingEvents.find(e => {
+      return isTitleOnCalendar(schedule.canonicalTitle, [e.summary]) ||
+        (schedule.romajiTitle && isTitleOnCalendar(schedule.romajiTitle, [e.summary]))
+    })
+  }
+
+  // 3. Fallback to API findExistingEvent if existingEvents list wasn't provided
+  if (!existingEvent && existingEvents.length === 0) {
+    try {
+      existingEvent = await googleCalendar.findExistingEvent(targetCalId, schedule.canonicalTitle, schedule.animeId)
+    } catch (_) {}
+  }
+
+  const calParams = {
+    operation: existingEvent ? 'update_event' : 'create_event',
+    calendar: targetCalId,
+    summary: schedule.canonicalTitle,
+    streaming_service: schedule.platform,
+    seasonal_run: !schedule.isContinuing,
+    continuing: schedule.isContinuing,
+    episodes_count: schedule.episodesCount,
+    simulcast: schedule.simulcastStr,
+    start: schedule.startDate.toISOString(),
+    link: schedule.link,
+    mal_id: schedule.animeId,
+    idMal: schedule.animeId
+  }
+
+  if (existingEvent) {
+    calParams.event_id = existingEvent.id
+  }
+  if (schedule.calculatedEndDate) {
+    calParams.until = schedule.calculatedEndDate.toISOString()
+  }
+
+  let calResult
+  let isFailed = false
+  try {
+    const ActionExecutor = require('../ActionExecutor')
+    const actionRes = await ActionExecutor.executeAction('google_calendar', calParams, { ...context, isInteractive: true })
+    if (actionRes.success) {
+      calResult = actionRes.output || 'Success'
+    } else {
+      isFailed = true
+      calResult = actionRes.error || 'Calendar operation failed'
+    }
+  } catch (_) {
+    calResult = await googleCalendar.execute(bot, channel, calParams, { ...context, isInteractive: true })
+    isFailed = !calResult || (typeof calResult === 'string' && calResult.includes('FAILED'))
+  }
+
+  return {
+    success: !isFailed,
+    isUpdated: Boolean(existingEvent),
+    eventId: existingEvent?.id,
+    platform: schedule.platform,
+    simulcast: schedule.simulcastStr,
+    recurrence: schedule.recurrenceLabel,
+    canonicalTitle: schedule.canonicalTitle,
+    calResult,
+    error: isFailed ? calResult : null
+  }
 }
 
 /**
@@ -548,8 +813,11 @@ module.exports = {
 
       for (const event of eventsToAudit) {
         await new Promise(resolve => setTimeout(resolve, 150))
-        const malMatch = malItems.find(item => isTitleOnCalendar(item.anime_title, [event.summary]))
-        const idMal = malMatch ? malMatch.anime_id : (event.extendedProperties?.private?.idMal || null)
+        const eventMalId = extractMalIdFromEvent(event)
+        const malMatch = eventMalId
+          ? malItems.find(item => item.anime_id === eventMalId)
+          : malItems.find(item => isTitleOnCalendar(item.anime_title, [event.summary]))
+        const idMal = malMatch ? malMatch.anime_id : eventMalId
         try {
           const media = await module.exports.getAnimeDetails(event.summary, idMal)
           if (media && media.status === 'FINISHED' && !media.nextAiringEpisode) {
@@ -605,119 +873,92 @@ module.exports = {
           continue
         }
 
-        const canonicalTitle = media.title.english || media.title.romaji || title
+        const schedule = await resolveAnimeSchedule({
+          title,
+          animeId: item.anime_id,
+          media,
+          item
+        })
 
         // 1. Strictly filter out dubs (never add dub releases as separate/duplicate series)
-        if (isDubEntry(title) || isDubEntry(canonicalTitle)) {
-          results.push(`- 🚫 **${canonicalTitle}**: Dub release skipped (subtitles only).`)
+        if (isDubEntry(title) || isDubEntry(schedule.canonicalTitle)) {
+          results.push(`- 🚫 **${schedule.canonicalTitle}**: Dub release skipped (subtitles only).`)
           continue
         }
 
         // 2. Strictly filter out finished series (do not add completed series to calendar)
         if (media.status === 'FINISHED') {
-          results.push(`- ⏭️ **${canonicalTitle}**: Finished airing (not scheduled on calendar).`)
+          results.push(`- ⏭️ **${schedule.canonicalTitle}**: Finished airing (not scheduled on calendar).`)
           continue
         }
 
-        // 3. Check if already on calendar
-        if (isTitleOnCalendar(canonicalTitle, existingCalendarTitles) || isTitleOnCalendar(title, existingCalendarTitles)) {
+        // 3. Check if already on calendar (by MAL ID or title)
+        const isPresentById = existingCalendarEvents.some(e => {
+          const eMalId = extractMalIdFromEvent(e)
+          return eMalId && (eMalId === item.anime_id || (media.idMal && eMalId === media.idMal))
+        })
+        const isPresentByTitle =
+          isTitleOnCalendar(schedule.canonicalTitle, existingCalendarTitles) ||
+          isTitleOnCalendar(title, existingCalendarTitles) ||
+          (item.anime_title_eng && isTitleOnCalendar(item.anime_title_eng, existingCalendarTitles))
+
+        if (isPresentById || isPresentByTitle) {
           alreadyPresent.push({
-            title: canonicalTitle,
+            title: schedule.canonicalTitle,
             rawTitle: title,
             malId: media.idMal || item.anime_id,
             isUpcoming: item.anime_airing_status === 3
           })
-          results.push(`- ⏭️ **${canonicalTitle}**: Already present on calendar.`)
+          results.push(`- ⏭️ **${schedule.canonicalTitle}**: Already present on calendar.`)
           continue
         }
 
         // 4. If upcoming and broadcast schedule is not yet confirmed, defer calendar creation
-        const isUpcoming = item.anime_airing_status === 3 || media.status === 'NOT_YET_RELEASED'
-        const hasBroadcastSchedule = Boolean(
-          media.nextAiringEpisode?.airingAt ||
-          (media.startDate?.year && media.startDate?.month && media.startDate?.day)
-        )
-
-        if (isUpcoming && !hasBroadcastSchedule) {
-          const year = media.startDate?.year || item.anime_season?.year
-          const month = media.startDate?.month
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-          const monthStr = month ? monthNames[month - 1] : (item.anime_season?.season ? item.anime_season.season.toUpperCase() : null)
-          const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
+        if (schedule.pendingSchedule) {
           pendingBroadcast.push({
-            title: canonicalTitle,
-            timeDesc,
-            platform: getStreamingPlatformInfo(media).site
+            title: schedule.canonicalTitle,
+            timeDesc: schedule.timeDesc,
+            platform: schedule.platform
           })
-          results.push(`- ⏳ **${canonicalTitle}**: Premiere date unconfirmed (${timeDesc}) — pending broadcast schedule.`)
+          results.push(`- ⏳ **${schedule.canonicalTitle}**: Premiere date unconfirmed (${schedule.timeDesc}) — pending broadcast schedule.`)
           continue
         }
 
-        // 5. Resolve streaming service platform and link
-        const platformInfo = getStreamingPlatformInfo(media)
-
-        // Determine schedule
-        let startDate = null
-        let simulcastStr = 'Weekly Simulcast'
-
-        if (media.nextAiringEpisode?.airingAt) {
-          const cst = formatCstSchedule(media.nextAiringEpisode.airingAt)
-          if (cst) {
-            startDate = cst.date
-            simulcastStr = cst.simulcastString
-          }
-        } else if (media.startDate?.year && media.startDate?.month && media.startDate?.day) {
-          startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
-        } else {
-          startDate = new Date()
-        }
-
-        const episodesCount = media.episodes || 12
-        const calculatedEndDate = calculateSeriesEndDate(media, startDate, episodesCount)
-        const isContinuing = !calculatedEndDate && !media.episodes
-        const recurrenceLabel = calculatedEndDate
-          ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
-          : (isContinuing ? 'Continuing' : `${episodesCount} eps`)
-
         if (dryRun) {
-          results.push(`- 📝 **[DRY-RUN] Would Add:** **${canonicalTitle}** (Platform: ${platformInfo.emoji} ${platformInfo.site}, Recurrence: ${recurrenceLabel}, Simulcast: ${simulcastStr})`)
+          results.push(`- 📝 **[DRY-RUN] Would Add:** **${schedule.canonicalTitle}** (Platform: ${schedule.platformInfo?.emoji || '📺'} ${schedule.platform}, Recurrence: ${schedule.recurrenceLabel}, Simulcast: ${schedule.simulcastStr})`)
           continue
         }
 
         if (!canModifyCalendar) {
-          results.push(`- 📝 **[NEEDS WRITER ACCESS] Would Add:** **${canonicalTitle}** (Platform: ${platformInfo.emoji} ${platformInfo.site}, Recurrence: ${recurrenceLabel}, Simulcast: ${simulcastStr})`)
+          results.push(`- 📝 **[NEEDS WRITER ACCESS] Would Add:** **${schedule.canonicalTitle}** (Platform: ${schedule.platformInfo?.emoji || '📺'} ${schedule.platform}, Recurrence: ${schedule.recurrenceLabel}, Simulcast: ${schedule.simulcastStr})`)
           continue
         }
 
-        // Create on Google Calendar
+        // Create on Google Calendar using the shared scheduler
         try {
-          const eventParams = {
-            operation: 'create_event',
-            calendar: calendarTarget,
-            summary: canonicalTitle,
-            start: startDate.toISOString(),
-            streaming_service: platformInfo.key,
-            seasonal_run: !isContinuing,
-            continuing: isContinuing,
-            episodes_count: episodesCount,
-            simulcast: simulcastStr,
-            link: platformInfo.url || ''
-          }
-          if (calculatedEndDate) {
-            eventParams.until = calculatedEndDate.toISOString()
-          }
+          const calRes = await scheduleAnimeOnCalendar({
+            calendarTarget,
+            schedule,
+            existingEvents: existingCalendarEvents,
+            context,
+            bot,
+            channel
+          })
 
-          await googleCalendar.execute(bot, channel, eventParams, context)
-
-          addedToCalendar.push(`- ✅ **${canonicalTitle}** (${platformInfo.emoji} ${platformInfo.site}, ${simulcastStr}, ${recurrenceLabel})`)
-          results.push(`- ✅ **Added to Calendar:** **${canonicalTitle}** (${platformInfo.emoji} ${platformInfo.site}, ${simulcastStr}, ${recurrenceLabel})`)
+          if (calRes.success) {
+            addedToCalendar.push(`- ✅ **${schedule.canonicalTitle}** (${schedule.platformInfo?.emoji || '📺'} ${schedule.platform}, ${schedule.simulcastStr}, ${schedule.recurrenceLabel})`)
+            results.push(`- ✅ **Added to Calendar:** **${schedule.canonicalTitle}** (${schedule.platformInfo?.emoji || '📺'} ${schedule.platform}, ${schedule.simulcastStr}, ${schedule.recurrenceLabel})`)
+          } else {
+            syncErrors.push({ title: schedule.canonicalTitle, error: calRes.error || 'Calendar addition failed' })
+            results.push(`- ❌ **Failed to add ${schedule.canonicalTitle}:** ${calRes.error || 'Calendar addition failed'}`)
+          }
         } catch (err) {
           if (err.response?.status === 403) {
-            syncErrors.push({ title: canonicalTitle, error: 'Permission Required (needs writer access)' })
-            results.push(`- ⚠️ **Permission Required for ${canonicalTitle}:** Service account needs \`writer\` permission on calendar "${calendar.summary}".`)
+            syncErrors.push({ title: schedule.canonicalTitle, error: 'Permission Required (needs writer access)' })
+            results.push(`- ⚠️ **Permission Required for ${schedule.canonicalTitle}:** Service account needs \`writer\` permission on calendar "${calendar.summary}".`)
           } else {
-            syncErrors.push({ title: canonicalTitle, error: err.message })
-            results.push(`- ❌ **Failed to add ${canonicalTitle}:** ${err.message}`)
+            syncErrors.push({ title: schedule.canonicalTitle, error: err.message })
+            results.push(`- ❌ **Failed to add ${schedule.canonicalTitle}:** ${err.message}`)
           }
         }
       }
@@ -947,6 +1188,10 @@ module.exports = {
   getStreamingPlatformInfo,
   isDubEntry,
   isTitleOnCalendar,
+  extractSeasonNumber,
+  extractMalIdFromEvent,
+  resolveAnimeSchedule,
+  scheduleAnimeOnCalendar,
   truncateFutureOccurrences,
   detectAndApplyScheduleDrift,
   calculateSeriesEndDate

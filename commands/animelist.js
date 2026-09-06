@@ -233,93 +233,22 @@ module.exports = {
         if (shouldSyncCalendar) {
           try {
             const animeSync = require('../util/actions/anime_sync')
-            const googleCalendar = require('../util/actions/google_calendar')
-            const media = animeInfo?.media || await animeSync.getAnimeDetails(canonicalTitle, animeId)
-            const platformInfo = animeSync.getStreamingPlatformInfo(media)
+            const schedule = await animeSync.resolveAnimeSchedule({
+              title: canonicalTitle,
+              animeId,
+              animeInfo,
+              media: animeInfo?.media,
+              platformOverride,
+              episodesOverride
+            })
 
-            const chosenPlatform = platformOverride || platformInfo?.name || platformInfo?.site || 'Crunchyroll'
-            const episodesCount = episodesOverride || media?.episodes || 12
+            const calRes = await animeSync.scheduleAnimeOnCalendar({
+              calendarTarget: process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release',
+              schedule,
+              context: { isOwner: true, isInteractive: true, interaction }
+            })
 
-            const isUpcoming = media?.status === 'NOT_YET_RELEASED' || animeInfo?.status === 'not_yet_aired' || animeInfo?.status === 3
-            const hasBroadcastSchedule = Boolean(
-              media?.nextAiringEpisode?.airingAt ||
-              (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day)
-            )
-
-            if (isUpcoming && !hasBroadcastSchedule) {
-              const year = media?.startDate?.year || animeInfo?.start_season?.year
-              const month = media?.startDate?.month
-              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-              const monthStr = month ? monthNames[month - 1] : (animeInfo?.start_season?.season ? animeInfo.start_season.season.toUpperCase() : null)
-              const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
-              calendarResult = {
-                pendingSchedule: true,
-                timeDesc,
-                platform: chosenPlatform
-              }
-            } else {
-              let startDate = new Date()
-              let simulcastStr = 'Weekly Simulcast'
-
-              if (media?.nextAiringEpisode?.airingAt) {
-                const cst = animeSync.formatCstSchedule(media.nextAiringEpisode.airingAt)
-                if (cst) {
-                  startDate = cst.date
-                  simulcastStr = cst.simulcastString
-                }
-              } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
-                startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
-              }
-
-              const calculatedEndDate = animeSync.calculateSeriesEndDate(media, startDate, episodesCount)
-              const isContinuing = !calculatedEndDate && !episodesCount
-              const recurrenceLabel = calculatedEndDate
-                ? `Until ${calculatedEndDate.toISOString().split('T')[0]} (${episodesCount} eps)`
-                : (isContinuing ? 'Continuing Weekly' : `${episodesCount} episodes`)
-
-              // Check if an event already exists on Google Calendar for this anime to avoid duplicate entries
-              let existingEvent = null
-              try {
-                const targetCal = await googleCalendar.resolveCalendar(process.env.GOOGLE_CALENDAR_DEFAULT || 'Anime Release')
-                if (targetCal?.id) {
-                  existingEvent = await googleCalendar.findExistingEvent(targetCal.id, canonicalTitle, animeId)
-                }
-              } catch (findErr) {
-                logger.warn(`animelist: Failed to check for existing calendar event: ${findErr.message}`)
-              }
-
-              const calParams = {
-                operation: existingEvent ? 'update_event' : 'create_event',
-                summary: canonicalTitle,
-                streaming_service: chosenPlatform,
-                seasonal_run: !isContinuing,
-                continuing: isContinuing,
-                episodes_count: episodesCount,
-                simulcast: simulcastStr,
-                start: startDate.toISOString(),
-                link: platformInfo?.url || '',
-                mal_id: animeId
-              }
-              if (existingEvent) {
-                calParams.event_id = existingEvent.id
-              }
-              if (calculatedEndDate) {
-                calParams.until = calculatedEndDate.toISOString()
-              }
-
-              const calRes = await ActionExecutor.executeAction('google_calendar', calParams, { isOwner: true, isInteractive: true, interaction })
-
-              if (calRes.success) {
-                calendarResult = {
-                  platform: chosenPlatform,
-                  simulcast: simulcastStr,
-                  recurrence: recurrenceLabel,
-                  isUpdated: Boolean(existingEvent)
-                }
-              } else {
-                calendarResult = { error: calRes.error }
-              }
-            }
+            calendarResult = calRes
           } catch (calErr) {
             calendarResult = { error: calErr.message }
           }
