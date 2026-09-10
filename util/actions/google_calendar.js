@@ -507,8 +507,9 @@ module.exports = {
         if (newStart && !isNaN(newStart.getTime())) {
           const durationMin = parseInt(params.duration_minutes, 10) || 30
           const newEnd = params.end ? (chrono.parseDate(params.end) || new Date(Date.parse(params.end))) : new Date(newStart.getTime() + durationMin * 60_000)
-          patchBody.start = { dateTime: newStart.toISOString() }
-          patchBody.end = { dateTime: newEnd.toISOString() }
+          const timeZone = params.timeZone || params.timezone
+          patchBody.start = { dateTime: newStart.toISOString(), ...(timeZone ? { timeZone } : {}) }
+          patchBody.end = { dateTime: newEnd.toISOString(), ...(timeZone ? { timeZone } : {}) }
         }
       }
 

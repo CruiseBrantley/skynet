@@ -206,31 +206,9 @@ function formatCstSchedule (unixTimestamp) {
 }
 
 /**
- * Calculate the next UTC occurrence of a given UTC day of the week, hour, and minute.
- */
-function getNextUtcOccurrence (targetUtcDay, targetHour, targetMinute) {
-  const now = new Date()
-  for (let i = 0; i < 7; i++) {
-    const candidate = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + i,
-      targetHour,
-      targetMinute,
-      0
-    ))
-    if (candidate.getUTCDay() === targetUtcDay) {
-      if (candidate.getTime() < now.getTime() - 2 * 3600 * 1000) {
-        candidate.setUTCDate(candidate.getUTCDate() + 7)
-      }
-      return candidate
-    }
-  }
-  return null
-}
-
-/**
  * Convert broadcast day and time (e.g. from Jikan / JST) to the next upcoming Date.
+ * Relies on native ISO 8601 offset parsing and Intl timezones so the runtime handles
+ * timezone conversion cleanly without manual minute/offset math.
  */
 function getNextBroadcastDate (dayStr, timeStr, timezoneStr = 'Asia/Tokyo') {
   if (!dayStr) return null
@@ -253,32 +231,26 @@ function getNextBroadcastDate (dayStr, timeStr, timezoneStr = 'Asia/Tokyo') {
   const targetDay = daysMap[dayStr.toLowerCase().trim()]
   if (targetDay === undefined) return null
 
-  let targetHour = 14
-  let targetMinute = 0
-  let tzOffsetMinutes = 9 * 60 // JST default (Asia/Tokyo)
-  if (timezoneStr === 'Asia/Tokyo' || timezoneStr === 'JST') {
-    tzOffsetMinutes = 9 * 60
-  }
+  const timePart = (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim())) ? timeStr.trim().padStart(5, '0') : '23:00'
+  const offsetStr = '+09:00'
+  const now = new Date()
 
-  if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim())) {
-    const [h, m] = timeStr.trim().split(':').map(Number)
-    const totalLocalMinutes = h * 60 + m
-    let totalUtcMinutes = totalLocalMinutes - tzOffsetMinutes
-    let dayDelta = 0
-    if (totalUtcMinutes < 0) {
-      totalUtcMinutes += 24 * 60
-      dayDelta = -1
-    } else if (totalUtcMinutes >= 24 * 60) {
-      totalUtcMinutes -= 24 * 60
-      dayDelta = 1
+  // Find the matching weekday in the native broadcast timezone within the next 7 days
+  for (let i = 0; i < 7; i++) {
+    const candidateUtc = new Date(now.getTime() + i * 24 * 60 * 60 * 1000)
+    const ymdInTz = candidateUtc.toLocaleDateString('en-CA', { timeZone: timezoneStr })
+    const candidateDate = new Date(`${ymdInTz}T${timePart}:00${offsetStr}`)
+    const weekdayInTz = new Intl.DateTimeFormat('en-US', { timeZone: timezoneStr, weekday: 'short' }).format(candidateDate)
+    const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    if (shortDays.indexOf(weekdayInTz) === targetDay) {
+      if (candidateDate.getTime() < now.getTime() - 2 * 3600 * 1000) {
+        return new Date(candidateDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+      }
+      return candidateDate
     }
-    targetHour = Math.floor(totalUtcMinutes / 60)
-    targetMinute = totalUtcMinutes % 60
-    const utcDay = (targetDay + dayDelta + 7) % 7
-    return getNextUtcOccurrence(utcDay, targetHour, targetMinute)
   }
 
-  return getNextUtcOccurrence(targetDay, targetHour, targetMinute)
+  return null
 }
 
 const SUPPORTED_STREAMING_PLATFORMS = [
@@ -553,6 +525,7 @@ async function resolveAnimeSchedule (params = {}) {
     pendingSchedule,
     timeDesc,
     startDate,
+    timeZone: media?.broadcast?.timezone || 'Asia/Tokyo',
     simulcastStr,
     calculatedEndDate,
     isContinuing,
@@ -635,6 +608,7 @@ async function scheduleAnimeOnCalendar (params = {}) {
     episodes_count: schedule.episodesCount,
     simulcast: schedule.simulcastStr,
     start: schedule.startDate.toISOString(),
+    timeZone: schedule.timeZone || 'Asia/Tokyo',
     link: schedule.link,
     mal_id: schedule.animeId,
     idMal: schedule.animeId
