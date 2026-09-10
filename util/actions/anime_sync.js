@@ -3,10 +3,84 @@ const logger = require('../../logger')
 const googleCalendar = require('./google_calendar')
 
 const ANILIST_API = 'https://graphql.anilist.co'
+const JIKAN_API_BASE = 'https://api.jikan.moe/v4'
 const animeDetailsCache = new Map()
 
 /**
+ * Map Jikan REST API data to the normalized media structure.
+ */
+function mapJikanToMedia (data) {
+  if (!data) return null
+  const statusMap = {
+    'Currently Airing': 'RELEASING',
+    'Not yet aired': 'NOT_YET_RELEASED',
+    'Finished Airing': 'FINISHED'
+  }
+  const status = statusMap[data.status] || (data.airing ? 'RELEASING' : 'NOT_YET_RELEASED')
+  const externalLinks = (data.streaming || []).map(s => ({
+    site: s.name,
+    url: s.url,
+    language: null
+  }))
+
+  return {
+    id: data.mal_id,
+    idMal: data.mal_id,
+    title: {
+      romaji: data.title || null,
+      english: data.title_english || null,
+      native: data.title_japanese || null
+    },
+    status,
+    episodes: data.episodes || null,
+    format: data.type ? data.type.toUpperCase() : 'TV',
+    coverImage: {
+      large: data.images?.jpg?.large_image_url || data.images?.webp?.large_image_url || null
+    },
+    startDate: {
+      year: data.aired?.prop?.from?.year || null,
+      month: data.aired?.prop?.from?.month || null,
+      day: data.aired?.prop?.from?.day || null
+    },
+    endDate: {
+      year: data.aired?.prop?.to?.year || null,
+      month: data.aired?.prop?.to?.month || null,
+      day: data.aired?.prop?.to?.day || null
+    },
+    externalLinks,
+    broadcast: data.broadcast || null,
+    nextAiringEpisode: null
+  }
+}
+
+/**
+ * Fallback to Jikan API when AniList is disabled, rate limited, or unreachable.
+ */
+async function fetchJikanAnimeDetails (title, idMal = null) {
+  try {
+    let jikanData = null
+    if (idMal) {
+      const res = await axios.get(`${JIKAN_API_BASE}/anime/${parseInt(idMal, 10)}/full`, { timeout: 8000 })
+      jikanData = res.data?.data
+    } else if (title) {
+      const res = await axios.get(`${JIKAN_API_BASE}/anime`, {
+        params: { q: title, limit: 1 },
+        timeout: 8000
+      })
+      jikanData = res.data?.data?.[0]
+    }
+    if (jikanData) {
+      return mapJikanToMedia(jikanData)
+    }
+  } catch (err) {
+    logger.warn(`anime_sync: Jikan fallback failed for "${title || idMal}": ${err.message}`)
+  }
+  return null
+}
+
+/**
  * Query AniList GraphQL for anime airing schedule, status, and streaming links.
+ * Automatically falls back to Jikan REST API if AniList is unreachable or down.
  */
 async function getAnimeDetails (title, idMal = null) {
   if (!title && !idMal) return null
@@ -15,6 +89,7 @@ async function getAnimeDetails (title, idMal = null) {
     return animeDetailsCache.get(cacheKey)
   }
 
+  let media = null
   const query = `
     query ($search: String, $idMal: Int) {
       Media (search: $search, idMal: $idMal, type: ANIME) {
@@ -59,10 +134,8 @@ async function getAnimeDetails (title, idMal = null) {
         { query, variables },
         { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 10000 }
       )
-      const media = res.data?.data?.Media || null
-      animeDetailsCache.set(cacheKey, media)
-      if (title) animeDetailsCache.set(title.toLowerCase().trim(), media)
-      return media
+      media = res.data?.data?.Media || null
+      break
     } catch (err) {
       if (err.response?.status === 429 && attempt < 2) {
         const retryAfter = parseInt(err.response.headers?.['retry-after'], 10) || 5
@@ -71,10 +144,22 @@ async function getAnimeDetails (title, idMal = null) {
         continue
       }
       logger.warn(`anime_sync: AniList query failed for "${title || idMal}": ${err.message}`)
-      return null
+      break
     }
   }
-  return null
+
+  // Fallback to Jikan API if AniList is unreachable or returned no media
+  if (!media) {
+    media = await fetchJikanAnimeDetails(title, idMal)
+  }
+
+  if (media) {
+    animeDetailsCache.set(cacheKey, media)
+    if (title) animeDetailsCache.set(title.toLowerCase().trim(), media)
+    if (media.idMal) animeDetailsCache.set(`idmal:${media.idMal}`, media)
+  }
+
+  return media
 }
 
 /**
@@ -120,6 +205,82 @@ function formatCstSchedule (unixTimestamp) {
   }
 }
 
+/**
+ * Calculate the next UTC occurrence of a given UTC day of the week, hour, and minute.
+ */
+function getNextUtcOccurrence (targetUtcDay, targetHour, targetMinute) {
+  const now = new Date()
+  for (let i = 0; i < 7; i++) {
+    const candidate = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + i,
+      targetHour,
+      targetMinute,
+      0
+    ))
+    if (candidate.getUTCDay() === targetUtcDay) {
+      if (candidate.getTime() < now.getTime() - 2 * 3600 * 1000) {
+        candidate.setUTCDate(candidate.getUTCDate() + 7)
+      }
+      return candidate
+    }
+  }
+  return null
+}
+
+/**
+ * Convert broadcast day and time (e.g. from Jikan / JST) to the next upcoming Date.
+ */
+function getNextBroadcastDate (dayStr, timeStr, timezoneStr = 'Asia/Tokyo') {
+  if (!dayStr) return null
+  const daysMap = {
+    sunday: 0,
+    sundays: 0,
+    monday: 1,
+    mondays: 1,
+    tuesday: 2,
+    tuesdays: 2,
+    wednesday: 3,
+    wednesdays: 3,
+    thursday: 4,
+    thursdays: 4,
+    friday: 5,
+    fridays: 5,
+    saturday: 6,
+    saturdays: 6
+  }
+  const targetDay = daysMap[dayStr.toLowerCase().trim()]
+  if (targetDay === undefined) return null
+
+  let targetHour = 14
+  let targetMinute = 0
+  let tzOffsetMinutes = 9 * 60 // JST default (Asia/Tokyo)
+  if (timezoneStr === 'Asia/Tokyo' || timezoneStr === 'JST') {
+    tzOffsetMinutes = 9 * 60
+  }
+
+  if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim())) {
+    const [h, m] = timeStr.trim().split(':').map(Number)
+    const totalLocalMinutes = h * 60 + m
+    let totalUtcMinutes = totalLocalMinutes - tzOffsetMinutes
+    let dayDelta = 0
+    if (totalUtcMinutes < 0) {
+      totalUtcMinutes += 24 * 60
+      dayDelta = -1
+    } else if (totalUtcMinutes >= 24 * 60) {
+      totalUtcMinutes -= 24 * 60
+      dayDelta = 1
+    }
+    targetHour = Math.floor(totalUtcMinutes / 60)
+    targetMinute = totalUtcMinutes % 60
+    const utcDay = (targetDay + dayDelta + 7) % 7
+    return getNextUtcOccurrence(utcDay, targetHour, targetMinute)
+  }
+
+  return getNextUtcOccurrence(targetDay, targetHour, targetMinute)
+}
+
 const SUPPORTED_STREAMING_PLATFORMS = [
   { name: 'Crunchyroll', key: 'crunchyroll', pattern: /crunchyroll/i, emoji: '🟠', colorId: '6' },
   { name: 'HIDIVE', key: 'hidive', pattern: /hidive/i, emoji: '🔵', colorId: '9' },
@@ -140,10 +301,11 @@ function isDubEntry (title, language) {
 
 /**
  * Detect streaming service across all platforms, strictly prioritizing Japanese subtitled releases.
+ * If unknown, returns key 'unknown' / 'Streaming TBD' without falsely defaulting to Crunchyroll.
  */
 function getStreamingPlatformInfo (media) {
   if (!media || !Array.isArray(media.externalLinks)) {
-    return { name: 'Crunchyroll', site: 'Crunchyroll', key: 'crunchyroll', emoji: '🟠', url: null, colorId: '6' }
+    return { name: 'Streaming TBD', site: 'Streaming TBD', key: 'unknown', emoji: '📺', url: null, colorId: null }
   }
 
   for (const platform of SUPPORTED_STREAMING_PLATFORMS) {
@@ -161,7 +323,7 @@ function getStreamingPlatformInfo (media) {
     }
   }
 
-  return { name: 'Crunchyroll', site: 'Crunchyroll', key: 'crunchyroll', emoji: '🟠', url: null, colorId: '6' }
+  return { name: 'Streaming TBD', site: 'Streaming TBD', key: 'unknown', emoji: '📺', url: null, colorId: null }
 }
 
 // Alias for backwards-compatibility
@@ -309,7 +471,7 @@ async function resolveAnimeSchedule (params = {}) {
   const canonicalTitle = media?.title?.english || malEnglish || media?.title?.romaji || providedItem?.anime_title || title || 'Unknown Anime'
   const romajiTitle = media?.title?.romaji || providedItem?.anime_title || title
   const platformInfo = getStreamingPlatformInfo(media)
-  const platform = platformOverride || platformInfo?.key || platformInfo?.name || platformInfo?.site || 'crunchyroll'
+  const platform = platformOverride || (platformInfo?.key !== 'unknown' ? platformInfo?.key : null) || 'Streaming TBD'
   const episodesCount = episodesOverride
     ? parseInt(episodesOverride, 10)
     : (media?.episodes || animeInfo?.episodes || null)
@@ -319,41 +481,57 @@ async function resolveAnimeSchedule (params = {}) {
     animeInfo?.status === 3 ||
     providedItem?.anime_airing_status === 3
 
-  // For upcoming series:
-  // An upcoming series is ready to be scheduled on Google Calendar only when it is premiering
-  // within the current weekly cycle (<= 7 days) and has an exact confirmed broadcast timestamp.
-  // Upcoming anime releasing in future months/seasons (e.g. October 2026) are deferred
-  // to pending broadcast status so they don't clutter current calendars with unconfirmed dates.
-  const isAiringWithinWeek = Boolean(
-    media?.nextAiringEpisode?.airingAt &&
-    (media.nextAiringEpisode.airingAt * 1000 - Date.now() <= 7 * 24 * 60 * 60 * 1000)
-  )
-
-  const hasBroadcastSchedule = Boolean(
-    (!isUpcoming && (media?.nextAiringEpisode?.airingAt || media?.status === 'RELEASING' || providedItem?.anime_airing_status === 1)) ||
-    (isUpcoming && isAiringWithinWeek)
-  )
-
   const year = media?.startDate?.year || animeInfo?.start_season?.year || providedItem?.anime_season?.year
   const month = media?.startDate?.month
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   const monthStr = month ? monthNames[month - 1] : (animeInfo?.start_season?.season ? animeInfo.start_season.season.toUpperCase() : null)
-  const timeDesc = monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD')
+  const timeDesc = isUpcoming
+    ? (monthStr && year ? `${monthStr} ${year}` : (year ? String(year) : 'Date TBD'))
+    : 'Broadcast schedule unconfirmed'
 
   let startDate = null
   let simulcastStr = 'Weekly Simulcast'
+  let hasBroadcastSchedule = false
 
   if (media?.nextAiringEpisode?.airingAt) {
     const cst = formatCstSchedule(media.nextAiringEpisode.airingAt)
     if (cst) {
       startDate = cst.date
       simulcastStr = cst.simulcastString
+      const isWithinWeek = (media.nextAiringEpisode.airingAt * 1000 - Date.now() <= 7 * 24 * 60 * 60 * 1000)
+      hasBroadcastSchedule = !isUpcoming || isWithinWeek
+    }
+  } else if (media?.broadcast?.day) {
+    const nextAir = getNextBroadcastDate(media.broadcast.day, media.broadcast.time, media.broadcast.timezone)
+    if (nextAir) {
+      startDate = nextAir
+      const cst = formatCstSchedule(Math.floor(nextAir.getTime() / 1000))
+      simulcastStr = cst ? cst.simulcastString : `${media.broadcast.day} at ${media.broadcast.time || 'TBD'}`
+      const isWithinWeek = (nextAir.getTime() - Date.now() <= 7 * 24 * 60 * 60 * 1000)
+      hasBroadcastSchedule = !isUpcoming || isWithinWeek
     }
   } else if (media?.startDate?.year && media?.startDate?.month && media?.startDate?.day) {
-    startDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+    const premiereDate = new Date(Date.UTC(media.startDate.year, media.startDate.month - 1, media.startDate.day, 14, 0, 0))
+    const diffMs = premiereDate.getTime() - Date.now()
+    const diffDays = diffMs / (24 * 60 * 60 * 1000)
+    // If premiering within the current week (or started within the last 2 days)
+    if (diffDays >= -2 && diffDays <= 7) {
+      startDate = premiereDate
+      hasBroadcastSchedule = true
+    } else if (diffDays > 7) {
+      startDate = premiereDate
+      hasBroadcastSchedule = false
+    } else {
+      // Past air date (> 2 days ago) without active next episode or broadcast day: schedule is unconfirmed / in hiatus
+      startDate = null
+      hasBroadcastSchedule = false
+    }
   } else {
-    startDate = new Date()
+    startDate = null
+    hasBroadcastSchedule = false
   }
+
+  const pendingSchedule = !hasBroadcastSchedule
 
   const calculatedEndDate = calculateSeriesEndDate(media, startDate, episodesCount)
   const isContinuing = !calculatedEndDate && !media?.episodes && !animeInfo?.episodes
@@ -372,7 +550,7 @@ async function resolveAnimeSchedule (params = {}) {
     episodesCount,
     isUpcoming,
     hasBroadcastSchedule,
-    pendingSchedule: isUpcoming && !hasBroadcastSchedule,
+    pendingSchedule,
     timeDesc,
     startDate,
     simulcastStr,
@@ -739,8 +917,8 @@ function calculateSeriesEndDate (media, startDate, episodeCountOverride) {
       return new Date(Date.UTC(airDate.getUTCFullYear(), airDate.getUTCMonth(), airDate.getUTCDate(), 23, 59, 59))
     }
 
-    const baseDate = startDate instanceof Date ? startDate : (startDate ? new Date(startDate) : new Date())
-    if (!isNaN(baseDate.getTime())) {
+    const baseDate = startDate instanceof Date ? startDate : (startDate ? new Date(startDate) : null)
+    if (baseDate && !isNaN(baseDate.getTime())) {
       const finaleTime = baseDate.getTime() + (Math.max(0, totalEpisodes - 1) * 7 * 86400 * 1000)
       const airDate = new Date(finaleTime)
       return new Date(Date.UTC(airDate.getUTCFullYear(), airDate.getUTCMonth(), airDate.getUTCDate(), 23, 59, 59))
@@ -1267,5 +1445,8 @@ module.exports = {
   scheduleAnimeOnCalendar,
   truncateFutureOccurrences,
   detectAndApplyScheduleDrift,
-  calculateSeriesEndDate
+  calculateSeriesEndDate,
+  getNextBroadcastDate,
+  fetchJikanAnimeDetails,
+  clearAnimeDetailsCache: () => animeDetailsCache.clear()
 }

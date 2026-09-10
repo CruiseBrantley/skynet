@@ -78,7 +78,15 @@ describe("Slash Command: /animelist", () => {
       id: 56789,
       title: "Solo Leveling: Arise from the Shadow",
       coverImage: "https://example.com/cover.jpg",
-      episodes: 12
+      episodes: 12,
+      media: {
+        idMal: 56789,
+        title: { english: "Solo Leveling: Arise from the Shadow" },
+        status: "RELEASING",
+        episodes: 12,
+        nextAiringEpisode: { airingAt: 1790958600, episode: 1 },
+        externalLinks: [{ site: "Crunchyroll", url: "https://crunchyroll.com" }]
+      }
     })
     malClient.isAuthenticated.mockReturnValue(true)
     malClient.addAnime.mockResolvedValue({ success: true })
@@ -256,7 +264,15 @@ describe("Slash Command: /animelist", () => {
     malClient.searchAnime.mockResolvedValue({
       id: 60601,
       title: "As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 3",
-      episodes: 12
+      episodes: 12,
+      media: {
+        idMal: 60601,
+        title: { english: "As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 3" },
+        status: "RELEASING",
+        episodes: 12,
+        nextAiringEpisode: { airingAt: 1790958600, episode: 1 },
+        externalLinks: [{ site: "Crunchyroll", url: "https://crunchyroll.com" }]
+      }
     })
     malClient.isAuthenticated.mockReturnValue(true)
     malClient.addAnime.mockResolvedValue({ success: true })
@@ -352,6 +368,45 @@ describe("Slash Command: /animelist", () => {
       embeds: [expect.objectContaining({
         data: expect.objectContaining({
           description: expect.stringContaining("Premiere date unconfirmed (Oct 2026)")
+        })
+      })]
+    }))
+  })
+
+  test("add subcommand defers currently airing anime with unconfirmed broadcast schedule (hiatus / streaming TBD)", async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue("add")
+    mockInteraction.options.getString.mockImplementation((name) => {
+      if (name === "title") return "Steel Ball Run"
+      return null
+    })
+    mockInteraction.options.getBoolean.mockReturnValue(true)
+
+    malClient.searchAnime.mockResolvedValue({
+      id: 61469,
+      title: "Steel Ball Run: JoJo's Bizarre Adventure",
+      status: "currently_airing",
+      media: {
+        idMal: 61469,
+        title: { english: "Steel Ball Run: JoJo's Bizarre Adventure" },
+        status: "RELEASING",
+        startDate: { year: 2026, month: 3, day: 19 },
+        nextAiringEpisode: null,
+        broadcast: { day: null, time: null },
+        externalLinks: [{ site: "Netflix", url: "https://netflix.com" }]
+      }
+    })
+    malClient.isAuthenticated.mockReturnValue(true)
+    malClient.addAnime.mockResolvedValue({ success: true })
+    malClient.getPublicUrl.mockReturnValue("https://myanimelist.net/animelist/skynetanimelist")
+
+    await animelistCommand.execute(mockInteraction)
+
+    expect(malClient.addAnime).toHaveBeenCalledWith(61469, { status: "watching" })
+    expect(ActionExecutor.executeAction).not.toHaveBeenCalledWith("google_calendar", expect.anything(), expect.anything())
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          description: expect.stringContaining("Broadcast schedule unconfirmed")
         })
       })]
     }))

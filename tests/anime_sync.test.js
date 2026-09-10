@@ -8,7 +8,11 @@ jest.mock('../logger')
 
 describe('anime_sync action', () => {
   beforeEach(() => {
+    jest.restoreAllMocks()
     jest.clearAllMocks()
+    axios.get = jest.fn().mockResolvedValue({ data: {} })
+    axios.post = jest.fn().mockResolvedValue({ data: {} })
+    animeSync.clearAnimeDetailsCache?.()
     process.env.OWNER_ID = 'owner_123'
     process.env.MYANIMELIST_USERNAME = 'skynetanimelist'
     process.env.GOOGLE_CALENDAR_DEFAULT = 'Anime Release'
@@ -616,6 +620,117 @@ describe('anime_sync action', () => {
           }),
           expect.any(Object)
         )
+      })
+    })
+
+    describe('Jikan API fallback and broadcast scheduling', () => {
+      test('getAnimeDetails falls back to Jikan when AniList returns 403', async () => {
+        // AniList fails with 403
+        axios.post.mockRejectedValueOnce({
+          response: {
+            status: 403,
+            data: { errors: [{ message: 'AniList API temporarily disabled' }] }
+          }
+        })
+        // Jikan succeeds
+        axios.get.mockResolvedValueOnce({
+          data: {
+            data: {
+              mal_id: 61469,
+              title: 'Steel Ball Run: JoJo no Kimyou na Bouken',
+              title_english: 'Steel Ball Run: JoJo\'s Bizarre Adventure',
+              status: 'Currently Airing',
+              episodes: 24,
+              streaming: [
+                { name: 'Netflix', url: 'https://www.netflix.com/' }
+              ],
+              broadcast: { day: null, time: null }
+            }
+          }
+        })
+
+        const media = await animeSync.getAnimeDetails('Steel Ball Run', 61469)
+        expect(media).not.toBeNull()
+        expect(media.idMal).toBe(61469)
+        expect(media.title.english).toBe('Steel Ball Run: JoJo\'s Bizarre Adventure')
+        expect(media.status).toBe('RELEASING')
+        expect(media.externalLinks).toEqual([
+          { site: 'Netflix', url: 'https://www.netflix.com/', language: null }
+        ])
+      })
+
+      test('getStreamingPlatformInfo returns unknown / Streaming TBD when no streaming link matches', () => {
+        const noLinkMedia = { externalLinks: [] }
+        const info = animeSync.getStreamingPlatformInfo(noLinkMedia)
+        expect(info.key).toBe('unknown')
+        expect(info.name).toBe('Streaming TBD')
+        expect(info.colorId).toBeNull()
+
+        const nullMediaInfo = animeSync.getStreamingPlatformInfo(null)
+        expect(nullMediaInfo.key).toBe('unknown')
+        expect(nullMediaInfo.name).toBe('Streaming TBD')
+        expect(nullMediaInfo.colorId).toBeNull()
+      })
+
+      test('getNextBroadcastDate computes upcoming occurrence from JST day and time', () => {
+        // Sundays at 23:15 JST
+        const nextAir = animeSync.getNextBroadcastDate('Sundays', '23:15', 'Asia/Tokyo')
+        expect(nextAir).toBeInstanceOf(Date)
+        // 23:15 JST - 9 hours = 14:15 UTC
+        expect(nextAir.getUTCHours()).toBe(14)
+        expect(nextAir.getUTCMinutes()).toBe(15)
+        expect(nextAir.getUTCDay()).toBe(0) // Sunday
+      })
+
+      test('resolveAnimeSchedule marks series in hiatus or with unconfirmed broadcast as pendingSchedule', async () => {
+        // Steel Ball Run: currently airing on MAL, but no nextAiringEpisode and broadcast day is null
+        const sbrMedia = {
+          idMal: 61469,
+          title: { english: 'Steel Ball Run: JoJo\'s Bizarre Adventure' },
+          status: 'RELEASING',
+          episodes: 24,
+          externalLinks: [{ site: 'Netflix', url: 'https://netflix.com' }],
+          broadcast: { day: null, time: null },
+          nextAiringEpisode: null,
+          startDate: { year: 2026, month: 3, day: 19 } // Part 1 was in March (past)
+        }
+
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'Steel Ball Run',
+          animeId: 61469,
+          media: sbrMedia,
+          item: { anime_airing_status: 1 } // Watching on MAL
+        })
+
+        expect(schedule.platform).toBe('netflix')
+        expect(schedule.hasBroadcastSchedule).toBe(false)
+        expect(schedule.pendingSchedule).toBe(true)
+        expect(schedule.timeDesc).toBe('Broadcast schedule unconfirmed')
+        expect(schedule.startDate).toBeNull()
+      })
+
+      test('resolveAnimeSchedule schedules anime with confirmed broadcast from Jikan', async () => {
+        const opMedia = {
+          idMal: 21,
+          title: { english: 'One Piece' },
+          status: 'RELEASING',
+          episodes: null,
+          externalLinks: [{ site: 'Crunchyroll', url: 'https://crunchyroll.com/one-piece' }],
+          broadcast: { day: 'Sundays', time: '23:15', timezone: 'Asia/Tokyo' }
+        }
+
+        const schedule = await animeSync.resolveAnimeSchedule({
+          title: 'One Piece',
+          animeId: 21,
+          media: opMedia,
+          item: { anime_airing_status: 1 }
+        })
+
+        expect(schedule.platform).toBe('crunchyroll')
+        expect(schedule.hasBroadcastSchedule).toBe(true)
+        expect(schedule.pendingSchedule).toBe(false)
+        expect(schedule.startDate).toBeInstanceOf(Date)
+        expect(schedule.simulcastStr).toContain('Sunday')
       })
     })
   })

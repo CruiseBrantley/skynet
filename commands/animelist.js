@@ -275,7 +275,10 @@ module.exports = {
           if (calendarResult.error) {
             descLines.push(`⚠️ **Calendar:** Failed to schedule (${calendarResult.error})`)
           } else if (calendarResult.pendingSchedule) {
-            descLines.push(`⏳ **Google Calendar:** Premiere date unconfirmed (${calendarResult.timeDesc})\n   • Streaming on **${calendarResult.platform}**\n   • Will be automatically scheduled on Anime Release calendar once broadcast time is announced.`)
+            const timeInfo = calendarResult.timeDesc === 'Broadcast schedule unconfirmed'
+              ? 'Broadcast schedule unconfirmed'
+              : `Premiere date unconfirmed (${calendarResult.timeDesc})`
+            descLines.push(`⏳ **Google Calendar:** ${timeInfo}\n   • Streaming on **${calendarResult.platform}**\n   • Will be automatically scheduled on Anime Release calendar once broadcast time is announced.`)
           } else {
             const actionVerb = calendarResult.isUpdated ? 'Updated existing schedule on' : 'Scheduled on'
             descLines.push(`📅 **Google Calendar:** ${actionVerb} Anime Release calendar\n   • **Platform:** ${calendarResult.platform}\n   • **Schedule:** ${calendarResult.simulcast}\n   • **Run:** ${calendarResult.recurrence}`)
