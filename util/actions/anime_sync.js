@@ -55,25 +55,36 @@ function mapJikanToMedia (data) {
 
 /**
  * Fallback to Jikan API when AniList is disabled, rate limited, or unreachable.
+ * Retries with exponential backoff if Jikan rate limits (HTTP 429).
  */
 async function fetchJikanAnimeDetails (title, idMal = null) {
-  try {
-    let jikanData = null
-    if (idMal) {
-      const res = await axios.get(`${JIKAN_API_BASE}/anime/${parseInt(idMal, 10)}/full`, { timeout: 8000 })
-      jikanData = res.data?.data
-    } else if (title) {
-      const res = await axios.get(`${JIKAN_API_BASE}/anime`, {
-        params: { q: title, limit: 1 },
-        timeout: 8000
-      })
-      jikanData = res.data?.data?.[0]
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      let jikanData = null
+      if (idMal) {
+        const res = await axios.get(`${JIKAN_API_BASE}/anime/${parseInt(idMal, 10)}/full`, { timeout: 8000 })
+        jikanData = res.data?.data
+      } else if (title) {
+        const res = await axios.get(`${JIKAN_API_BASE}/anime`, {
+          params: { q: title, limit: 1 },
+          timeout: 8000
+        })
+        jikanData = res.data?.data?.[0]
+      }
+      if (jikanData) {
+        return mapJikanToMedia(jikanData)
+      }
+      return null
+    } catch (err) {
+      if (err.response?.status === 429 && attempt < 2) {
+        const waitMs = (attempt + 1) * 1500
+        logger.warn(`anime_sync: Jikan rate limited (429). Waiting ${waitMs}ms before retrying (attempt ${attempt + 1})...`)
+        await new Promise(resolve => setTimeout(resolve, waitMs))
+        continue
+      }
+      logger.warn(`anime_sync: Jikan fallback failed for "${title || idMal}": ${err.message}`)
+      return null
     }
-    if (jikanData) {
-      return mapJikanToMedia(jikanData)
-    }
-  } catch (err) {
-    logger.warn(`anime_sync: Jikan fallback failed for "${title || idMal}": ${err.message}`)
   }
   return null
 }
@@ -1090,11 +1101,40 @@ module.exports = {
 
       for (const item of toProcess) {
         const title = item.anime_title
-        await new Promise(resolve => setTimeout(resolve, 150))
+        const englishTitle = item.anime_title_eng
+
+        // 1. Check if already on calendar (by MAL ID or title) to save unnecessary external API calls
+        const isPresentById = activeCalendarEvents.some(e => {
+          const eMalId = extractMalIdFromEvent(e)
+          return eMalId && eMalId === item.anime_id
+        })
+        const isPresentByTitle =
+          isTitleOnCalendar(title, existingCalendarTitles) ||
+          (englishTitle && isTitleOnCalendar(englishTitle, existingCalendarTitles))
+
+        if (isPresentById || isPresentByTitle) {
+          alreadyPresent.push({
+            title: englishTitle || title,
+            rawTitle: title,
+            malId: item.anime_id,
+            isUpcoming: item.anime_airing_status === 3
+          })
+          results.push(`- ⏭️ **${englishTitle || title}**: Already present on calendar.`)
+          continue
+        }
+
+        // 2. Strictly filter out dubs (never add dub releases as separate/duplicate series)
+        if (isDubEntry(title) || isDubEntry(englishTitle)) {
+          results.push(`- 🚫 **${englishTitle || title}**: Dub release skipped (subtitles only).`)
+          continue
+        }
+
+        // 3. Query details only for NEW series not yet on the calendar
+        await new Promise(resolve => setTimeout(resolve, 350))
         const media = await module.exports.getAnimeDetails(title, item.anime_id)
 
         if (!media) {
-          results.push(`- ⚠️ **${title}**: Could not verify details on AniList.`)
+          results.push(`- ⚠️ **${title}**: Could not verify details (AniList/Jikan unavailable).`)
           continue
         }
 
@@ -1105,36 +1145,14 @@ module.exports = {
           item
         })
 
-        // 1. Strictly filter out dubs (never add dub releases as separate/duplicate series)
-        if (isDubEntry(title) || isDubEntry(schedule.canonicalTitle)) {
+        if (isDubEntry(schedule.canonicalTitle)) {
           results.push(`- 🚫 **${schedule.canonicalTitle}**: Dub release skipped (subtitles only).`)
           continue
         }
 
-        // 2. Strictly filter out finished series (do not add completed series to calendar)
+        // 4. Strictly filter out finished series (do not add completed series to calendar)
         if (media.status === 'FINISHED') {
           results.push(`- ⏭️ **${schedule.canonicalTitle}**: Finished airing (not scheduled on calendar).`)
-          continue
-        }
-
-        // 3. Check if already on calendar (by MAL ID or title)
-        const isPresentById = activeCalendarEvents.some(e => {
-          const eMalId = extractMalIdFromEvent(e)
-          return eMalId && (eMalId === item.anime_id || (media.idMal && eMalId === media.idMal))
-        })
-        const isPresentByTitle =
-          isTitleOnCalendar(schedule.canonicalTitle, existingCalendarTitles) ||
-          isTitleOnCalendar(title, existingCalendarTitles) ||
-          (item.anime_title_eng && isTitleOnCalendar(item.anime_title_eng, existingCalendarTitles))
-
-        if (isPresentById || isPresentByTitle) {
-          alreadyPresent.push({
-            title: schedule.canonicalTitle,
-            rawTitle: title,
-            malId: media.idMal || item.anime_id,
-            isUpcoming: item.anime_airing_status === 3
-          })
-          results.push(`- ⏭️ **${schedule.canonicalTitle}**: Already present on calendar.`)
           continue
         }
 
