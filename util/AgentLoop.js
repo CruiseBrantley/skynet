@@ -305,7 +305,10 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
 
       const { queryLocalOrRemote } = require('./ollama')
       const result = await queryLocalOrRemote('/api/chat', {
-        messages: [{ role: 'system', content: prompt }],
+        messages: [
+          { role: 'system', content: prompt },
+          { role: 'user', content: 'Analyze the conversation context above and provide your decision as JSON.' }
+        ],
         options: { temperature: 0.05 }
       })
 

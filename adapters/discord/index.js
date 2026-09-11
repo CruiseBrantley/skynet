@@ -217,19 +217,26 @@ class DiscordAdapter {
         mentionResolver.record(message.author.username, message.author.id, message.guildId)
         if (message.member?.nickname) mentionResolver.record(message.member.nickname, message.author.id, message.guildId)
 
+        const botId = this.client.user?.id
         const isDM = message.channel.type === ChannelType.DM || !message.guildId
-        const isDirectMention = Boolean(
-          (this.client.user?.id && message.mentions?.has?.(this.client.user.id, { ignoreEveryone: true, ignoreRoles: true })) ||
-          (this.client.user?.id && (message.content?.includes(`<@${this.client.user.id}>`) || message.content?.includes(`<@!${this.client.user.id}>`)))
+        const isUserMention = Boolean(
+          (botId && message.mentions?.has?.(botId, { ignoreEveryone: true, ignoreRoles: true })) ||
+          (botId && (message.content?.includes(`<@${botId}>`) || message.content?.includes(`<@!${botId}>`)))
         )
         const isReplyToBot = Boolean(
           message.reference &&
-          message.mentions?.repliedUser?.id === this.client.user?.id
+          message.mentions?.repliedUser?.id === botId
         )
-        const isMentioned = isDirectMention || isReplyToBot
+        const botMember = message.guild?.members?.me || (botId && message.guild?.members?.cache?.get(botId))
+        const isRoleMention = Boolean(
+          botId && message.mentions?.roles?.size && (
+            message.mentions.roles.some(role => role.tags?.bot_id === botId || (botMember && botMember.roles?.cache?.has(role.id)))
+          )
+        )
+        const isMentioned = isUserMention || isReplyToBot || isRoleMention
 
         if (isDM || isMentioned) {
-          logger.info(`DiscordAdapter: Handling ${isDM ? 'DM' : 'mention'} from @${message.author.username} in #${message.channel?.name || 'DM'}`)
+          logger.info(`DiscordAdapter: Handling ${isDM ? 'DM' : isRoleMention ? 'role-mention' : 'mention'} from @${message.author.username} in #${message.channel?.name || 'DM'}`)
           const chatCommand = require('../../commands/chat')
           if (chatCommand && typeof chatCommand.execute === 'function') {
             let typingInterval = null
@@ -280,9 +287,17 @@ class DiscordAdapter {
               }
             }
 
-            let cleanContent = (message.content || '').replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim()
-            if (!cleanContent && !message.attachments?.size) {
-              cleanContent = 'Hello!'
+            let cleanContent = (message.content || '').replace(new RegExp(`<@!?${botId}>`, 'g'), '')
+            if (isRoleMention && message.mentions?.roles) {
+              for (const [roleId, role] of message.mentions.roles) {
+                if (role.tags?.bot_id === botId || (botMember && botMember.roles?.cache?.has(roleId))) {
+                  cleanContent = cleanContent.replace(new RegExp(`<@&${roleId}>`, 'g'), '')
+                }
+              }
+            }
+            cleanContent = cleanContent.trim()
+            if (!cleanContent) {
+              cleanContent = message.attachments?.size ? 'What do you think of this?' : 'Hello!'
             }
             const preFetchedHistory = await fetchAndFormatContext(message.channel, this.client.user.id, 20, message.id)
 
