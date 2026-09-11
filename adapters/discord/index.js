@@ -89,6 +89,13 @@ class DiscordAdapter {
   }
 
   _attachEventListeners () {
+    // 0. Attach linkSummarize once to client
+    try {
+      linkSummarize(this.client)
+    } catch (e) {
+      logger.warn(`Failed to initialize linkSummarize: ${e.message}`)
+    }
+
     // 1. Proactive DM Channel Caching Fix for Discord.js v14 (CRITICAL GUARDRAIL)
     this.client.on('raw', async (packet) => {
       if (packet.t === 'MESSAGE_CREATE' && !packet.d.guild_id) {
@@ -210,20 +217,19 @@ class DiscordAdapter {
         mentionResolver.record(message.author.username, message.author.id, message.guildId)
         if (message.member?.nickname) mentionResolver.record(message.member.nickname, message.author.id, message.guildId)
 
-        // Legacy event hooks
-        try {
-          linkSummarize(this.client, message, this.core?.database)
-        } catch (e) {
-          logger.warn(`Event hook error: ${e.message}`)
-        }
-
         const isDM = message.channel.type === ChannelType.DM || !message.guildId
-        const isMentioned = Boolean(
+        const isDirectMention = Boolean(
           (this.client.user?.id && message.mentions?.has?.(this.client.user.id, { ignoreEveryone: true, ignoreRoles: true })) ||
           (this.client.user?.id && (message.content?.includes(`<@${this.client.user.id}>`) || message.content?.includes(`<@!${this.client.user.id}>`)))
         )
+        const isReplyToBot = Boolean(
+          message.reference &&
+          message.mentions?.repliedUser?.id === this.client.user?.id
+        )
+        const isMentioned = isDirectMention || isReplyToBot
 
         if (isDM || isMentioned) {
+          logger.info(`DiscordAdapter: Handling ${isDM ? 'DM' : 'mention'} from @${message.author.username} in #${message.channel?.name || 'DM'}`)
           const chatCommand = require('../../commands/chat')
           if (chatCommand && typeof chatCommand.execute === 'function') {
             let typingInterval = null
@@ -274,7 +280,10 @@ class DiscordAdapter {
               }
             }
 
-            const cleanContent = (message.content || '').replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim()
+            let cleanContent = (message.content || '').replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim()
+            if (!cleanContent && !message.attachments?.size) {
+              cleanContent = 'Hello!'
+            }
             const preFetchedHistory = await fetchAndFormatContext(message.channel, this.client.user.id, 20, message.id)
 
             let buffer = ''
