@@ -379,6 +379,7 @@ class DiscordAdapter {
               return responseMessage
             }
 
+            const isMessageOwner = Boolean(message.author?.id === process.env.OWNER_ID)
             const normalizedInteraction = {
               id: message.id,
               triggeringMessageId: message.id,
@@ -389,6 +390,9 @@ class DiscordAdapter {
               user: message.author,
               member: message.member,
               client: this.client,
+              isDM,
+              isOwner: isMessageOwner,
+              profileId: isMessageOwner ? 'sirian' : `user_${message.author.id}`,
               options: {
                 getString: (opt) => opt === 'message' ? cleanContent : null,
                 getAttachment: () => message.attachments?.first?.() || null,

@@ -468,15 +468,33 @@ function setupServer (coreOrBot, database) {
     if (session) {
       userId = session.userId
       authorName = session.displayName || session.username || 'User'
-      isOwner = Boolean(session.isOwner)
+      isOwner = Boolean(
+        session.isOwner ||
+        userId === process.env.OWNER_ID ||
+        session.username?.toLowerCase() === 'sirian' ||
+        session.displayName?.toLowerCase() === 'sirian'
+      )
+      if (isOwner && !userId) userId = process.env.OWNER_ID
       profileId = session.profileId || (isOwner ? 'sirian' : `user_${userId}`)
     } else {
-      // Unauthenticated / CLI direct invocation fallback
-      if (requestedUserId && (requestedUserId === process.env.OWNER_ID || requestedUserId === 'cli_owner')) {
+      // Unauthenticated / Localhost / CLI direct invocation fallback
+      const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1' || req.hostname === 'localhost'
+      if (requestedUserId && (requestedUserId === process.env.OWNER_ID || requestedUserId === 'cli_owner' || requestedUserId.toLowerCase() === 'sirian')) {
         userId = process.env.OWNER_ID
         isOwner = true
         profileId = 'sirian'
         authorName = author || process.env.OWNER_NAME || 'Sirian'
+      } else if (author && author.toLowerCase() === 'sirian') {
+        userId = process.env.OWNER_ID
+        isOwner = true
+        profileId = 'sirian'
+        authorName = 'Sirian'
+      } else if (isLocalhost) {
+        // Local machine browser connection defaults to bot owner
+        userId = process.env.OWNER_ID
+        isOwner = true
+        profileId = 'sirian'
+        authorName = author || 'Sirian'
       } else if (requestedUserId) {
         userId = requestedUserId
         isOwner = false
@@ -517,11 +535,15 @@ function setupServer (coreOrBot, database) {
       heartbeat = null
       const interaction = new NormalizedInteraction({
         clientId: 'web',
-        user: { id: userId || 'guest_user', username: authorName },
+        user: { id: isOwner ? process.env.OWNER_ID : (userId || 'guest_user'), username: authorName },
         channel: { id: `web_${profileId}`, name: `web_${profileId}` },
-        isOwner
+        isOwner,
+        isDM: true,
+        profileId
       })
       interaction.isOwner = isOwner
+      interaction.isDM = true
+      interaction.profileId = profileId
 
       if (stream) {
         interaction.streamToken = (token) => {
@@ -558,6 +580,7 @@ function setupServer (coreOrBot, database) {
         channelHistory,
         ollamaContext: {
           userId: isOwner ? process.env.OWNER_ID : userId,
+          isOwner,
           guildId: null
         },
         maxSteps: 25

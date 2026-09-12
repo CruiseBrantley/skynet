@@ -17,7 +17,10 @@ class NormalizedInteraction {
     client = null,
     options = {},
     raw = null,
-    handlers = {}
+    handlers = {},
+    isOwner = null,
+    isDM = null,
+    profileId = null
   } = {}) {
     this.clientId = clientId
     this.id = id
@@ -25,6 +28,7 @@ class NormalizedInteraction {
     this.customId = customId
     this.commandName = commandName
     this.user = user
+    this.userId = user?.id || null
     this.member = raw?.member || { user, displayName: user.displayName || user.username }
     this.guild = guild
     this.guildId = guildId || guild?.id || null
@@ -34,6 +38,26 @@ class NormalizedInteraction {
     this.raw = raw
     this.deferred = false
     this.replied = false
+    this.profileId = profileId || null
+    if (isOwner !== null) {
+      this.isOwner = Boolean(isOwner)
+    } else {
+      this.isOwner = Boolean(
+        user?.id === process.env.OWNER_ID ||
+        user?.username?.toLowerCase() === 'sirian' ||
+        profileId === 'sirian'
+      )
+    }
+    if (isDM !== null) {
+      this.isDM = Boolean(isDM)
+    } else {
+      this.isDM = Boolean(
+        !this.guildId ||
+        channel?.type === 1 ||
+        clientId === 'web' ||
+        clientId === 'cli'
+      )
+    }
 
     this._optionsMap = new Map()
     if (typeof options === 'object' && options !== null) {

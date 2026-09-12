@@ -25,6 +25,7 @@ describe('Owner-Only Host Tools & RBAC Suite', () => {
       expect(actionNames).not.toContain('host_read_file')
       expect(actionNames).not.toContain('host_write_file')
       expect(actionNames).not.toContain('host_exec')
+      expect(actionNames).not.toContain('update_avatar')
       expect(actionNames).toContain('web_search')
       expect(actionNames).toContain('read_state')
     })
@@ -35,12 +36,21 @@ describe('Owner-Only Host Tools & RBAC Suite', () => {
       expect(actionNames).toContain('host_read_file')
       expect(actionNames).toContain('host_write_file')
       expect(actionNames).toContain('host_exec')
+      expect(actionNames).toContain('update_avatar')
+    })
+
+    test('includes ownerOnly tools when profileId or username is sirian', () => {
+      const sirianActions = ActionExecutor.listActions({ profileId: 'sirian' })
+      const actionNames = sirianActions.map(a => a.name)
+      expect(actionNames).toContain('host_exec')
+      expect(actionNames).toContain('update_avatar')
     })
 
     test('AgentTurnManager.getToolCatalogPrompt excludes owner tools for non-owner', () => {
       const catalog = AgentTurnManager.getToolCatalogPrompt({ isOwner: false })
       expect(catalog).not.toContain('host_read_file')
       expect(catalog).not.toContain('host_exec')
+      expect(catalog).not.toContain('update_avatar')
       expect(catalog).toContain('read_state')
     })
 
@@ -49,12 +59,14 @@ describe('Owner-Only Host Tools & RBAC Suite', () => {
       expect(catalog).toContain('host_read_file')
       expect(catalog).toContain('host_write_file')
       expect(catalog).toContain('host_exec')
+      expect(catalog).toContain('update_avatar')
     })
 
     test('AgentTurnManager.getToolCatalogPrompt excludes owner tools in public guild even for owner', () => {
       const catalog = AgentTurnManager.getToolCatalogPrompt({ isOwner: true, isDM: false, guildId: 'guild-123' })
       expect(catalog).not.toContain('host_read_file')
       expect(catalog).not.toContain('host_exec')
+      expect(catalog).not.toContain('update_avatar')
     })
   })
 
@@ -120,6 +132,39 @@ describe('Owner-Only Host Tools & RBAC Suite', () => {
       expect(execResult.success).toBe(true)
       expect(execResult.output).toContain('skynet_rbac_verified')
       expect(execResult.output).toContain('exit code 0')
+    })
+
+    test('rejects update_avatar for non-owner', async () => {
+      const result = await ActionExecutor.executeAction('update_avatar', {}, {
+        userId: NON_OWNER_ID,
+        isOwner: false,
+        isDM: true
+      })
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Access Denied')
+    })
+
+    test('successfully calls client.user.setAvatar via update_avatar for owner', async () => {
+      const mockSetAvatar = jest.fn().mockResolvedValue(true)
+      const mockBot = {
+        client: {
+          user: {
+            setAvatar: mockSetAvatar
+          }
+        }
+      }
+
+      const result = await ActionExecutor.executeAction('update_avatar', {
+        image_path: 'frontend/public/icon.png'
+      }, {
+        bot: mockBot,
+        userId: OWNER_ID,
+        isOwner: true,
+        isDM: true
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockSetAvatar).toHaveBeenCalled()
     })
   })
 

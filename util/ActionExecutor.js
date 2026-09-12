@@ -76,7 +76,15 @@ class ActionExecutor {
   }
 
   listActions (options = {}) {
-    const isOwner = Boolean(options && (options.isOwner || options.userId === process.env.OWNER_ID))
+    const isOwner = Boolean(
+      options && (
+        options.isOwner ||
+        options.userId === process.env.OWNER_ID ||
+        options.profileId === 'sirian' ||
+        options.user?.id === process.env.OWNER_ID ||
+        options.user?.username?.toLowerCase() === 'sirian'
+      )
+    )
     const isPrivate = options && options.isPrivate !== undefined ? Boolean(options.isPrivate) : true
     return Object.values(this._actions)
       .filter(a => {
@@ -617,7 +625,9 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
       const isOwner = Boolean(
         safeContext.isOwner ||
         safeContext.userId === process.env.OWNER_ID ||
-        safeContext.user?.id === process.env.OWNER_ID
+        safeContext.user?.id === process.env.OWNER_ID ||
+        safeContext.profileId === 'sirian' ||
+        safeContext.user?.username?.toLowerCase() === 'sirian'
       )
       const isPrivate = Boolean(
         !safeContext.guildId ||

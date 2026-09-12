@@ -663,8 +663,14 @@ class AgentTurnManager {
 
     // Determine authorization scope for tool catalog and native tools schema
     const isOwner = Boolean(
+      interaction.isOwner ||
+      ollamaContext?.isOwner ||
       interaction.user?.id === process.env.OWNER_ID ||
-      interaction.userId === process.env.OWNER_ID
+      interaction.userId === process.env.OWNER_ID ||
+      ollamaContext?.userId === process.env.OWNER_ID ||
+      interaction.user?.username?.toLowerCase() === 'sirian' ||
+      interaction.profileId === 'sirian' ||
+      (interaction.channel?.id && String(interaction.channel.id).includes('sirian'))
     )
     const isPrivate = !interaction.guildId || interaction.isDM || interaction.clientId === 'web' || interaction.clientId === 'cli'
     const availableToolsSchema = typeof ActionExecutor.getOllamaToolsSchema === 'function'
