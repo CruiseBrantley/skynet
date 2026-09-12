@@ -94,7 +94,7 @@ describe('queryCodeCapableModel Routing', () => {
 
     // MUST call Gemini API
     expect(axios.post).toHaveBeenCalledWith(
-      expect.stringContaining('https://generativelanguage.googleapis.com/v1/models/gemini-3.7-flash:generateContent'),
+      expect.stringContaining('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent'),
       expect.anything(),
       expect.anything()
     )

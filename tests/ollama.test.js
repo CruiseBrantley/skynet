@@ -94,14 +94,14 @@ describe('Ollama Fallback Hierarchy', () => {
 
     axios.post
       .mockRejectedValueOnce(err503)
-      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-3.7-flash' }] } }] } })
+      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-2.5-flash' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
 
-    expect(result.message.content).toBe('from-3.7-flash')
+    expect(result.message.content).toBe('from-2.5-flash')
     expect(axios.post).toHaveBeenCalledTimes(2)
     expect(axios.post.mock.calls[0][0]).toContain('gemini-3.8-flash')
-    expect(axios.post.mock.calls[1][0]).toContain('gemini-3.7-flash')
+    expect(axios.post.mock.calls[1][0]).toContain('gemini-2.5-flash')
   })
 })
 
