@@ -94,6 +94,55 @@ class ActionExecutor {
   }
 
   /**
+   * Parses schema definitions in both object format and string shorthand
+   * (e.g. "string — description", "string[] — array of items").
+   * @param {object|string} def
+   * @returns {{ type: string, description: string, enum?: Array<string>, items?: object, required?: boolean }}
+   */
+  static parseSchemaDefinition (def) {
+    if (!def) return { type: 'string', description: '' }
+    if (typeof def === 'object' && def !== null) {
+      const type = def.type || 'string'
+      const description = def.description || ''
+      const res = { type, description }
+      if (def.enum && Array.isArray(def.enum)) res.enum = def.enum
+      if (def.required) res.required = true
+      if (type === 'array') {
+        res.items = def.items || { type: 'string' }
+      }
+      return res
+    }
+    if (typeof def === 'string') {
+      const match = def.match(/^([a-zA-Z0-9_[\]]+)\s*(?:[—–\-:]\s*(.*))?$/)
+      if (match) {
+        const rawType = match[1].toLowerCase()
+        const description = (match[2] || '').trim()
+        let type = 'string'
+        let items = null
+        if (rawType.endsWith('[]') || rawType === 'array' || rawType === 'list') {
+          type = 'array'
+          items = { type: rawType.startsWith('number') ? 'number' : (rawType.startsWith('object') ? 'object' : 'string') }
+        } else if (rawType === 'number' || rawType === 'int' || rawType === 'integer' || rawType === 'float') {
+          type = 'number'
+        } else if (rawType === 'boolean' || rawType === 'bool') {
+          type = 'boolean'
+        } else if (rawType === 'object') {
+          type = 'object'
+        }
+        const res = { type, description: description || def }
+        if (items) res.items = items
+        return res
+      }
+      return { type: 'string', description: def }
+    }
+    return { type: 'string', description: String(def) }
+  }
+
+  parseSchemaDefinition (def) {
+    return ActionExecutor.parseSchemaDefinition(def)
+  }
+
+  /**
    * Converts registered actions into standard JSON schema tool definitions
    * compatible with Ollama and OpenAI function calling API.
    * @param {object} options
@@ -106,13 +155,17 @@ class ActionExecutor {
       const required = []
 
       if (a.schema && typeof a.schema === 'object') {
-        for (const [key, def] of Object.entries(a.schema)) {
+        for (const [key, rawDef] of Object.entries(a.schema)) {
+          const def = ActionExecutor.parseSchemaDefinition(rawDef)
           properties[key] = {
-            type: def.type || 'string',
-            description: def.description || ''
+            type: def.type,
+            description: def.description
           }
           if (def.enum && Array.isArray(def.enum)) {
             properties[key].enum = def.enum
+          }
+          if (def.items) {
+            properties[key].items = def.items
           }
           if (def.required) {
             required.push(key)

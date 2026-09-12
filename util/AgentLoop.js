@@ -535,21 +535,19 @@ Rules:
 - If all systems are healthy and no maintenance, remediation, or task scheduling is needed, respond with exactly: NOOP
 - If you notice repetitive errors, misconfigured triggers, or system issues, proactively remediate using available actions (e.g. manage_triggers, trigger_self_healing, modify_action, remember, schedule).
 - DO NOT delete or overwrite actions that currently have an active proposal in [PENDING SELF-HEALING REPAIRS].
-- Format: <<<RUN_COMMAND: {"command": "...", ...}>>>
+- Format: Invoke the relevant tool via tool calls.
 - DO NOT attempt to search the web, play music, or generate images speculatively.
 - MEMORY UPDATE RULE: When storing information, check the LONG-TERM MEMORY section first. If you see an existing key that relates to what you're about to remember, use the SAME key with the updated value instead of creating a new one.
 
 Available Core Commands:
 - manage_triggers: Enable, disable, create, or delete watchdog triggers.
-  Schema: <<<RUN_COMMAND: {"command": "manage_triggers", "action": "disable", "trigger_id": "host_ram"}>>>
 - trigger_self_healing: Formulate a code repair proposal for a broken command or action.
-  Schema: <<<RUN_COMMAND: {"command": "trigger_self_healing", "target_type": "action", "name": "action_name", "error": "details"}>>>
 - remember / forget / recall / recall_keys: Manage key-value long-term memory.
 - schedule / cancel_task: Manage timed background jobs.
 - create_action / modify_action / delete_action: Manage dynamic Discord actions.
 
 After your tool call, briefly explain WHY (one sentence). Example:
-<<<RUN_COMMAND: {"command": "remember", "key": "server.last_health_check", "value": "2026-08-24", "ttl_days": 7}>>>
+invoke remember with key "server.last_health_check", value "2026-08-24", ttl_days 7
 Reason: Recording health check timestamp for diagnostics.`
 
     const messages = [
@@ -561,8 +559,14 @@ Reason: Recording health check timestamp for diagnostics.`
     let result
     try {
       const { queryLocalOrRemote } = require('./ollama')
+      const actionExecutor = require('./ActionExecutor')
+      const tools = typeof actionExecutor.getOllamaToolsSchema === 'function'
+        ? actionExecutor.getOllamaToolsSchema({ isOwner: true, isPrivate: true })
+        : []
+
       result = await queryLocalOrRemote('/api/chat', {
         messages,
+        ...(tools.length > 0 ? { tools } : {}),
         options: {
           num_ctx: 8192,
           temperature: 0.3
@@ -582,18 +586,58 @@ Reason: Recording health check timestamp for diagnostics.`
     }
 
     // ── Parse and execute tool call(s) ────────────────────────────────────
-    const commandMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/)
-    if (!commandMatch) {
-      logger.info('AgentLoop: Response contained no valid RUN_COMMAND block — treating as NOOP.')
+    let cmdData = null
+
+    // 1. Native tool_calls
+    const nativeCalls = result?.message?.tool_calls
+    if (Array.isArray(nativeCalls) && nativeCalls.length > 0) {
+      const tc = nativeCalls[0]
+      const fn = tc.function || tc
+      const name = (fn.name || tc.name || '').trim().toLowerCase()
+      let args = fn.arguments || tc.arguments || {}
+      if (typeof args === 'string') {
+        try { args = JSON.parse(jsonrepair(args)) } catch (_) { args = {} }
+      }
+      cmdData = { command: name, ...args, arguments: args }
+    }
+
+    // 2. Structured JSON block: {"tool_calls": [...]}
+    if (!cmdData && (content.includes('tool_calls') || content.includes('{"command"') || content.includes('{"name"'))) {
+      try {
+        const firstBrace = content.indexOf('{')
+        const lastBrace = content.lastIndexOf('}')
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          const parsed = JSON.parse(jsonrepair(content.substring(firstBrace, lastBrace + 1)))
+          if (parsed.tool_calls && Array.isArray(parsed.tool_calls) && parsed.tool_calls[0]) {
+            const first = parsed.tool_calls[0]
+            cmdData = { command: first.name || first.command, ...(first.arguments || first.params || {}) }
+          } else if (parsed.command || parsed.name) {
+            cmdData = parsed
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. RUN_COMMAND tag fallback
+    if (!cmdData) {
+      const commandMatch = content.match(/<<<RUN_COMMAND:\s*([\s\S]*?)>>>/)
+      if (commandMatch) {
+        try {
+          const rawJson = commandMatch[1].trim()
+          const firstBrace = rawJson.indexOf('{')
+          if (firstBrace !== -1) {
+            cmdData = JSON.parse(jsonrepair(rawJson.substring(firstBrace)))
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!cmdData || (!cmdData.command && !cmdData.name)) {
+      logger.info('AgentLoop: Response contained no valid tool action — treating as NOOP.')
       return
     }
 
     try {
-      const rawJson = commandMatch[1].trim()
-      const firstBrace = rawJson.indexOf('{')
-      if (firstBrace === -1) throw new Error('No JSON body found in RUN_COMMAND')
-      const cmdData = JSON.parse(jsonrepair(rawJson.substring(firstBrace)))
-
       const actionDescription = await this._executeCommand(cmdData)
       if (actionDescription) {
         const entry = `[${now}] depth:${loopDepth} → ${actionDescription}`
@@ -614,7 +658,7 @@ Reason: Recording health check timestamp for diagnostics.`
        */
   async _executeCommand (cmdData, guildId = null) {
     const { getParam } = require('./commandHelper')
-    const cmd = (cmdData.command || '').trim()
+    const cmd = (cmdData.command || cmdData.name || '').trim()
 
     if (cmd === 'remember') {
       const key = getParam(cmdData, 'key')

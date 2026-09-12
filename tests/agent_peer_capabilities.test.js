@@ -165,4 +165,50 @@ describe('Agent Peer Capabilities Suite', () => {
     expect(result.executedTools).toHaveLength(1)
     expect(result.executedTools[0].name).toBe('read_state')
   })
+
+  test('6. parseSchemaDefinition parses shorthand string schemas and arrays into valid JSON Schema', () => {
+    const parsedStr = ActionExecutor.parseSchemaDefinition('string — the poll question')
+    expect(parsedStr.type).toBe('string')
+    expect(parsedStr.description).toBe('the poll question')
+
+    const parsedArray = ActionExecutor.parseSchemaDefinition('string[] — array of choices')
+    expect(parsedArray.type).toBe('array')
+    expect(parsedArray.items).toEqual({ type: 'string' })
+    expect(parsedArray.description).toBe('array of choices')
+
+    const parsedNum = ActionExecutor.parseSchemaDefinition('number — duration in hours')
+    expect(parsedNum.type).toBe('number')
+
+    const parsedBool = ActionExecutor.parseSchemaDefinition('boolean — whether multiselect is enabled')
+    expect(parsedBool.type).toBe('boolean')
+
+    const parsedObj = ActionExecutor.parseSchemaDefinition({ type: 'number', description: 'explicit obj', enum: [1, 2] })
+    expect(parsedObj.type).toBe('number')
+    expect(parsedObj.enum).toEqual([1, 2])
+  })
+
+  test('7. commandHelper.getParam extracts parameters from native OpenAI/Ollama arguments structure', () => {
+    const { getParam } = require('../util/commandHelper')
+    const nativeCmd = {
+      command: 'remember',
+      arguments: {
+        key: 'user.fav_color',
+        value: 'blue'
+      }
+    }
+
+    expect(getParam(nativeCmd, 'key')).toBe('user.fav_color')
+    expect(getParam(nativeCmd, 'value')).toBe('blue')
+
+    // Semantic fallback via arguments
+    const scheduleCmd = {
+      command: 'schedule',
+      arguments: {
+        payload: 'Reminder text',
+        target: '123456'
+      }
+    }
+    expect(getParam(scheduleCmd, 'message')).toBe('Reminder text')
+    expect(getParam(scheduleCmd, 'channel')).toBe('123456')
+  })
 })

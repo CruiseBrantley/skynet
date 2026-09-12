@@ -188,9 +188,12 @@ class AgentTurnManager {
     for (const a of actions) {
       let paramsSummary = '{}'
       if (a.schema && typeof a.schema === 'object') {
-        const entries = Object.entries(a.schema).map(([k, v]) => {
-          const type = v.type || 'string'
-          const desc = v.description ? ' (' + v.description + ')' : ''
+        const entries = Object.entries(a.schema).map(([k, rawDef]) => {
+          const parsed = typeof ActionExecutor.parseSchemaDefinition === 'function'
+            ? ActionExecutor.parseSchemaDefinition(rawDef)
+            : rawDef
+          const type = parsed.type || 'string'
+          const desc = parsed.description ? ' (' + parsed.description + ')' : ''
           return '"' + k + '": "<' + type + desc + '>"'
         })
         paramsSummary = '{ ' + entries.join(', ') + ' }'

@@ -543,8 +543,12 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
 
   let effectiveCommandsContext = commandsContext
   if (!effectiveCommandsContext) {
-    const ActionExecutor = require('./ActionExecutor')
-    effectiveCommandsContext = 'Available Tools & Actions:\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+    if (options.tools && Array.isArray(options.tools) && options.tools.length > 0) {
+      effectiveCommandsContext = 'Tools and actions are available via native function calls.'
+    } else {
+      const ActionExecutor = require('./ActionExecutor')
+      effectiveCommandsContext = 'Available Tools & Actions:\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+    }
   }
 
   // Stable prefix for maximum Ollama KV-cache reuse on RTX 5090

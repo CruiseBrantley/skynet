@@ -15,9 +15,12 @@ function getParam (cmdData, key) {
   // 1. Direct match
   if (cmdData[key] !== undefined) return cmdData[key]
 
-  // 2. Nested params match
+  // 2. Nested params or arguments match
   if (cmdData.params && typeof cmdData.params === 'object' && cmdData.params[key] !== undefined) {
     return cmdData.params[key]
+  }
+  if (cmdData.arguments && typeof cmdData.arguments === 'object' && cmdData.arguments[key] !== undefined) {
+    return cmdData.arguments[key]
   }
 
   // 3. Common semantic fallbacks for specific keys
@@ -34,6 +37,7 @@ function getParam (cmdData, key) {
     for (const fallbackKey of fallbacks[key]) {
       if (cmdData[fallbackKey] !== undefined) return cmdData[fallbackKey]
       if (cmdData.params?.[fallbackKey] !== undefined) return cmdData.params[fallbackKey]
+      if (cmdData.arguments?.[fallbackKey] !== undefined) return cmdData.arguments[fallbackKey]
     }
   }
 
