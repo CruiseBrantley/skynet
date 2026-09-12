@@ -20,7 +20,7 @@ module.exports = {
     }
   },
   execute: async (bot, channel, params = {}, context = {}) => {
-    const rawCmd = (params.command || '').trim()
+    const rawCmd = (params.command || params.cmd || params.command_arg || '').trim()
     if (!rawCmd) {
       return '[SYSTEM: Error: "command" parameter is required.]'
     }

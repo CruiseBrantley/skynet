@@ -332,8 +332,7 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
 
     expect(evalResult.isSufficient).toBe(false)
     expect(evalResult.isPending).toBe(true)
-    expect(evalResult.reason).toContain("Assistant output raw unexecuted command syntax")
-    expect(evalResult.suggestedAction).toContain("Execute read_system_file")
+    expect(evalResult.reason).toMatch(/unexecuted.*command/i)
   })
 
   test("evaluatePendingWork detects mid-turn intent promise without tool execution", async () => {
@@ -361,5 +360,133 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(evalResult.isPending).toBe(true)
     expect(evalResult.reason).toContain("Assistant stated intent to inspect")
     expect(evalResult.suggestedAction).toContain("Execute read_system_file")
+  })
+
+  test("extractToolCalls handles unclosed RUN_COMMAND tags without trailing >>>", () => {
+    const raw = '<<<RUN_COMMAND: {"command": "host_exec", "params": {"command": "ls frontend/public"}}'
+    const res = turnManager.extractToolCalls(raw)
+    expect(res).toHaveLength(1)
+    expect(res[0].name).toBe("host_exec")
+    expect(res[0].arguments.command).toBe("ls frontend/public")
+  })
+
+  test("extractToolCalls disambiguates duplicate command keys correctly", () => {
+    const raw = '<<<RUN_COMMAND: {"command": "host_exec", "command": "ls frontend/public/ 2>/dev/null || ls frontend/ 2>/dev/null | head -30"}'
+    const res = turnManager.extractToolCalls(raw)
+    expect(res).toHaveLength(1)
+    expect(res[0].name).toBe("host_exec")
+    expect(res[0].arguments.command).toContain("ls frontend/public/")
+  })
+
+  test("extractToolCalls parses named RUN_COMMAND format", () => {
+    const raw = '<<<RUN_COMMAND: host_exec {"command": "git status"}>>>'
+    const res = turnManager.extractToolCalls(raw)
+    expect(res).toHaveLength(1)
+    expect(res[0].name).toBe("host_exec")
+    expect(res[0].arguments.command).toBe("git status")
+  })
+
+  test("evaluatePendingWork deterministically rejects unexecuted commands without querying LLM", async () => {
+    const mockQuery = jest.fn()
+    turnManager.queryOllamaWithContext = mockQuery
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: '<<<RUN_COMMAND: {"command": "host_exec", "command": "ls"}',
+      channelHistory: {
+        messages: [{ role: "user", content: "List the files" }]
+      }
+    })
+
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.reason).toContain("leaked unexecuted tool command syntax")
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  test("evaluatePendingWork strips <think> tags from coordinator response and extracts JSON", async () => {
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: '<think>Let me evaluate if <<<RUN_COMMAND: {"command": "test"}> is sufficient</think>{"is_sufficient": true, "reason": "All tasks complete"}'
+      }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [{ name: "read_system_file" }],
+      assistantText: "Here is the content of the file you requested.",
+      channelHistory: {
+        messages: [{ role: "user", content: "Show me the file" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(true)
+    expect(evalResult.isPending).toBe(false)
+    expect(evalResult.reason).toBe("All tasks complete")
+  })
+
+  test("executeTurn suppresses raw unexecuted command syntax when retries are exhausted", async () => {
+    const rawLeakedCommand = '<<<RUN_COMMAND: {"command": "host_exec", "command": "ls"}>>>'
+    const mockQuery = jest.fn()
+      // Step 1: Model outputs leaked command, coordinator says insufficient
+      .mockResolvedValueOnce({
+        message: { role: "assistant", content: rawLeakedCommand }
+      })
+      // Step 2 (retry 1): Model repeats command
+      .mockResolvedValueOnce({
+        message: { role: "assistant", content: rawLeakedCommand }
+      })
+      // Step 3 (retry 2): Model repeats command again
+      .mockResolvedValueOnce({
+        message: { role: "assistant", content: rawLeakedCommand }
+      })
+
+    turnManager.queryOllamaWithContext = mockQuery
+    // Force extractToolCalls to return [] to simulate Case A with leaked raw text
+    jest.spyOn(turnManager, "extractToolCalls").mockReturnValue([])
+
+    const channelHistory = {
+      messages: [
+        { role: "system", content: "System prompt" },
+        { role: "user", content: "What files exist?" }
+      ]
+    }
+
+    const result = await turnManager.executeTurn({
+      interaction: mockInteraction,
+      database: mockDatabase,
+      channelHistory,
+      ollamaContext: {}
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.replyContent).not.toContain("<<<RUN_COMMAND")
+    expect(result.replyContent).toContain("unable to complete the requested actions")
+  })
+
+  test("executeToolCall interprets raw shell command as host_exec for owner in private context", async () => {
+    process.env.OWNER_ID = "user-789"
+    const execSpy = jest.spyOn(ActionExecutor, "executeAction").mockResolvedValue({
+      success: true,
+      output: "file1.txt\nfile2.txt"
+    })
+
+    const result = await turnManager.executeToolCall({
+      name: "ls frontend/public/ | head -20",
+      args: {},
+      interaction: mockInteraction,
+      database: mockDatabase,
+      sharedState: {}
+    })
+
+    expect(result.success).toBe(true)
+    expect(execSpy).toHaveBeenCalledWith(
+      "host_exec",
+      expect.objectContaining({ command: "ls frontend/public/ | head -20" }),
+      expect.anything()
+    )
+    execSpy.mockRestore()
   })
 })

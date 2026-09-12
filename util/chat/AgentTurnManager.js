@@ -43,9 +43,20 @@ class AgentTurnManager {
   async evaluatePendingWork ({ ollamaContext, executedTools = [], assistantText = '', channelHistory }) {
     const trimmed = (assistantText || '').trim()
 
+    // Deterministic check: Leaked command syntax or unexecuted tool tags are NEVER a sufficient final response
+    if (/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(trimmed)) {
+      logger.info('AgentTurnManager: Deterministic pending check: Assistant leaked unexecuted command syntax.')
+      return {
+        isPending: true,
+        isSufficient: false,
+        reason: 'Assistant leaked unexecuted tool command syntax instead of answering the question',
+        suggestedAction: 'Execute the command or provide a natural answer without command tags'
+      }
+    }
+
     // If assistant is explicitly asking the user a clarifying question or confirmation, it is waiting for user input
     if (trimmed.endsWith('?') || /\b(do you want me to|would you like me to|should i|which option|please confirm)\b/i.test(trimmed)) {
-      return { isPending: false, reason: 'Waiting for user input' }
+      return { isPending: false, isSufficient: true, reason: 'Waiting for user input' }
     }
 
     // Universal AI Turn Coordinator Reflection:
@@ -77,25 +88,49 @@ class AgentTurnManager {
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
       const evalResp = await queryFn(evaluationPrompt, { ...ollamaContext, isCodeTask: false }, this.botName)
       const evalContent = evalResp?.message?.content || ''
-      const evalJsonMatch = evalContent.match(/\{[\s\S]*\}/)
+      const cleanedContent = (evalContent || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 
-      if (evalJsonMatch) {
-        const parsed = JSON.parse(jsonrepair(evalJsonMatch[0]))
-        const isSufficient = typeof parsed.is_sufficient === 'boolean'
-          ? parsed.is_sufficient
-          : (typeof parsed.has_pending_work === 'boolean' ? !parsed.has_pending_work : true)
-        const isPending = !isSufficient || Boolean(parsed.has_pending_work)
+      const jsonCandidateMatches = cleanedContent.match(/\{[\s\S]*?\}/g) || (cleanedContent ? [cleanedContent] : [])
+      for (const rawCandidate of jsonCandidateMatches) {
+        try {
+          const parsed = JSON.parse(jsonrepair(rawCandidate))
+          if (typeof parsed.is_sufficient === 'boolean' || typeof parsed.has_pending_work === 'boolean') {
+            const isSufficient = typeof parsed.is_sufficient === 'boolean'
+              ? parsed.is_sufficient
+              : !parsed.has_pending_work
+            const isPending = !isSufficient || Boolean(parsed.has_pending_work)
 
-        logger.info(`AgentTurnManager: LLM Coordinator evaluation: is_sufficient=${isSufficient} (${parsed.reason || 'no reason'})`)
-        return {
-          isPending,
-          isSufficient,
-          reason: parsed.reason || (isPending ? 'Turn Coordinator determined response is insufficient' : 'Sufficient reply'),
-          suggestedAction: parsed.suggested_action
-        }
+            logger.info(`AgentTurnManager: LLM Coordinator evaluation: is_sufficient=${isSufficient} (${parsed.reason || 'no reason'})`)
+            return {
+              isPending,
+              isSufficient,
+              reason: parsed.reason || (isPending ? 'Turn Coordinator determined response is insufficient' : 'Sufficient reply'),
+              suggestedAction: parsed.suggested_action
+            }
+          }
+        } catch (e) {}
       }
     } catch (evalErr) {
       logger.warn(`AgentTurnManager: LLM Coordinator evaluation failed: ${evalErr.message}`)
+    }
+
+    // Heuristic fallbacks if LLM evaluation was unavailable or unparseable:
+    if (/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(trimmed)) {
+      return {
+        isPending: true,
+        isSufficient: false,
+        reason: 'Assistant leaked unexecuted command syntax instead of answering the question',
+        suggestedAction: 'Execute the command or provide a natural answer without command tags'
+      }
+    }
+
+    if (trimmed.length === 0 || /^(I will|Let me|I'm going to|Checking|Inspecting)[^.!?]*\.\.\.?$/i.test(trimmed)) {
+      return {
+        isPending: true,
+        isSufficient: false,
+        reason: 'Assistant gave intermediate intent without answering the question',
+        suggestedAction: 'Answer the question directly or execute the required action'
+      }
     }
 
     return { isPending: false, isSufficient: true, reason: 'Default completion' }
@@ -108,6 +143,10 @@ class AgentTurnManager {
     const trimmed = (params.assistantText || '').trim()
     const isActionTask = Boolean(params.ollamaContext?.isCodeTask)
     const hasTools = (params.executedTools || []).length > 0
+
+    if (/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(trimmed)) {
+      return true
+    }
 
     if (!hasTools && !isActionTask) {
       return false
@@ -177,12 +216,28 @@ class AgentTurnManager {
     if (!text || typeof text !== 'string') return []
     const results = []
 
-    // 1. Check for <<<RUN_COMMAND: {...}>>> tags (supports multiple tags)
-    const runCommandRegex = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:\s*(\{[\s\S]*?\})\s*>>>/g
+    // Helper: Disambiguate duplicate keys like {"command": "host_exec", "command": "ls ..."}
+    const disambiguateDuplicateKeys = (rawJson) => {
+      let result = rawJson
+      for (const key of ['command', 'tool', 'action', 'name']) {
+        const keyRegex = new RegExp(`(["']${key}["']\\s*:)`, 'gi')
+        let count = 0
+        result = result.replace(keyRegex, (match) => {
+          count++
+          return count > 1 ? `"${key}_arg":` : match
+        })
+      }
+      return result
+    }
+
+    // 1. Check for <<<RUN_COMMAND: {...}>>> tags (supports multiple tags and unclosed tags at boundaries)
+    const runCommandRegex = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:?\s*(\{[\s\S]*?)(?:>>>|(?=<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd])|$)/g
     let match
     while ((match = runCommandRegex.exec(text)) !== null) {
       try {
-        const parsed = JSON.parse(jsonrepair(match[1]))
+        const rawJsonBlock = match[1].trim()
+        const repaired = jsonrepair(disambiguateDuplicateKeys(rawJsonBlock))
+        const parsed = JSON.parse(repaired)
         const name = (parsed.command || parsed.tool || parsed.action || parsed.name || '').trim().replace(/^\/+/, '').toLowerCase()
         const args = parsed.params || parsed.arguments || parsed.args || { ...parsed }
         delete args.command
@@ -193,11 +248,35 @@ class AgentTurnManager {
         delete args.arguments
         delete args.args
 
+        if (args.command_arg && !args.command) args.command = args.command_arg
+        if (args.tool_arg && !args.tool) args.tool = args.tool_arg
+        if (args.action_arg && !args.action) args.action = args.action_arg
+        if (args.name_arg && !args.name) args.name = args.name_arg
+        if (args.cmd && !args.command) args.command = args.cmd
+
         if (name) {
           results.push({ name, arguments: args, rawMatch: match[0] })
         }
       } catch (e) {
         logger.warn('AgentTurnManager: Failed to parse RUN_COMMAND tag: ' + e.message)
+      }
+    }
+
+    if (results.length > 0) return results
+
+    // 1b. Check for named RUN_COMMAND format: <<<RUN_COMMAND: <name> {...}>>>
+    const namedCommandRegex = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]:?\s*([a-zA-Z0-9_-]+)\s*(\{[\s\S]*?)(?:>>>|(?=<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd])|$)/g
+    let namedMatch
+    while ((namedMatch = namedCommandRegex.exec(text)) !== null) {
+      try {
+        const name = namedMatch[1].trim().replace(/^\/+/, '').toLowerCase()
+        const repaired = jsonrepair(disambiguateDuplicateKeys(namedMatch[2].trim()))
+        const args = JSON.parse(repaired)
+        if (name) {
+          results.push({ name, arguments: args, rawMatch: namedMatch[0] })
+        }
+      } catch (e) {
+        logger.warn('AgentTurnManager: Failed to parse named RUN_COMMAND tag: ' + e.message)
       }
     }
 
@@ -230,7 +309,7 @@ class AgentTurnManager {
     let xmlMatch
     while ((xmlMatch = xmlRegex.exec(text)) !== null) {
       try {
-        const parsed = JSON.parse(jsonrepair(xmlMatch[1].trim()))
+        const parsed = JSON.parse(jsonrepair(disambiguateDuplicateKeys(xmlMatch[1].trim())))
         const name = (parsed.name || parsed.command || parsed.tool || '').trim().replace(/^\/+/, '').toLowerCase()
         const args = parsed.arguments || parsed.params || {}
         if (name) {
@@ -247,16 +326,22 @@ class AgentTurnManager {
     const trimmed = text.trim()
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       try {
-        const parsed = JSON.parse(jsonrepair(trimmed))
+        const repaired = jsonrepair(disambiguateDuplicateKeys(trimmed))
+        const parsed = JSON.parse(repaired)
         const name = (parsed.command || parsed.tool || parsed.action || parsed.name || '').trim().replace(/^\/+/, '').toLowerCase()
         if (name) {
-          const args = parsed.params || parsed.arguments || { ...parsed }
+          const args = parsed.params || parsed.arguments || parsed.args || { ...parsed }
           delete args.command
           delete args.tool
           delete args.action
           delete args.name
           delete args.params
           delete args.arguments
+          delete args.args
+
+          if (args.command_arg && !args.command) args.command = args.command_arg
+          if (args.cmd && !args.command) args.command = args.cmd
+
           results.push({ name, arguments: args, rawMatch: trimmed })
         }
       } catch (e) {}
@@ -269,8 +354,8 @@ class AgentTurnManager {
    * Executes a single tool call with full context, telemetry, and error reporting.
    */
   async executeToolCall ({ name, args, interaction, database, sharedState }) {
-    const rawCmdName = name.toLowerCase()
-    const isAction = ActionExecutor.hasAction
+    let rawCmdName = name.toLowerCase()
+    let isAction = ActionExecutor.hasAction
       ? ActionExecutor.hasAction(rawCmdName)
       : Boolean(ActionExecutor._actions?.[rawCmdName] || (typeof ActionExecutor.listActions === 'function' && ActionExecutor.listActions().some(a => a.name === rawCmdName)) || typeof ActionExecutor.executeAction === 'function')
     const targetCmd = interaction.client?.commands?.get ? interaction.client.commands.get(rawCmdName) : null
@@ -302,7 +387,22 @@ class AgentTurnManager {
     }
 
     if (!isAction && !targetCmd) {
-      return { success: false, error: 'Unknown tool or command: "' + rawCmdName + '".' }
+      const isOwner = Boolean(
+        interaction.user?.id === process.env.OWNER_ID ||
+        interaction.userId === process.env.OWNER_ID
+      )
+      const isPrivate = !interaction.guildId || interaction.isDM || interaction.clientId === 'web' || interaction.clientId === 'cli'
+      if ((isOwner || isPrivate) && (/\b(ls|cd|git|find|grep|cat|npm|node|head|tail|echo|pwd|rm|cp|mv|curl|which|sh|zsh|bash)\b/i.test(rawCmdName) || /[|&;><]/.test(rawCmdName))) {
+        logger.info(`AgentTurnManager: Interpreting unrecognized tool "${rawCmdName}" as host_exec invocation`)
+        args = {
+          command: args?.command || args?.cmd || args?.command_arg || rawCmdName,
+          cwd: args?.cwd
+        }
+        rawCmdName = 'host_exec'
+        isAction = true
+      } else {
+        return { success: false, error: 'Unknown tool or command: "' + rawCmdName + '".' }
+      }
     }
 
     const visualActions = ['send_embed', 'send_poll', 'send_message', 'send_thread', 'add_reaction', 'remove_reaction']
@@ -553,20 +653,20 @@ class AgentTurnManager {
         const pendingEval = await this.evaluatePendingWork({
           ollamaContext,
           executedTools,
-          assistantText: finalReplyContent,
+          assistantText: finalReplyContent || rawContent,
           channelHistory
         })
 
         if (pendingEval.isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
           pendingPromptCount++
-          logger.info(`AgentTurnManager: Pending work or insufficient response detected at step ${step + 1} ("${finalReplyContent.slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to complete work (retry #${pendingPromptCount}).`)
-          channelHistory.messages.push({ role: 'assistant', content: finalReplyContent })
+          logger.info(`AgentTurnManager: Pending work or insufficient response detected at step ${step + 1} ("${(finalReplyContent || rawContent).slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to complete work (retry #${pendingPromptCount}).`)
+          channelHistory.messages.push({ role: 'assistant', content: finalReplyContent || rawContent })
 
           let directive = `[SYSTEM COORDINATOR FEEDBACK: Your previous reply was determined to be insufficient or incomplete. Reason: ${pendingEval.reason}.`
           if (pendingEval.suggestedAction) {
             directive += ` Action required: ${pendingEval.suggestedAction}.`
           } else {
-            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete and proper response to the user.'
+            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete and proper response to the user without command syntax.'
           }
           directive += ']'
 
@@ -575,6 +675,12 @@ class AgentTurnManager {
             content: directive
           })
           continue
+        }
+
+        // If retries exhausted or step limit reached, but response is still pending or contains command syntax
+        if (pendingEval.isPending || /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(finalReplyContent)) {
+          logger.warn(`AgentTurnManager: Step ${step + 1} produced insufficient response or leaked tool syntax after retries. Suppressing invalid final reply.`)
+          finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
         }
 
         if (finalReplyContent) {
