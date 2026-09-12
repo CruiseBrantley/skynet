@@ -67,7 +67,7 @@ module.exports = {
           { name: `Active Commands (${commands.filter(c => c.enabled).length})`, value: activeList, inline: false },
           { name: `Disabled Commands (${commands.filter(c => !c.enabled).length})`, value: disabledList, inline: false }
         )
-        .setFooter({ text: 'Use <<<RUN_COMMAND: {"command": "manage_command", "action": "set_scope", "name": "command_name", "guild_id": "global"}>>>' })
+        .setFooter({ text: 'Use /manage_command set_scope <command_name> global' })
 
       if (channel && typeof channel.send === 'function') {
         await channel.send({ embeds: [embed] }).catch(() => {})

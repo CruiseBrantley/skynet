@@ -320,7 +320,7 @@ async function execute (interaction, database) {
 
       let effectiveSystemPrompt = enhancedSystemPrompt
       if (isCodeTask) {
-        effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE & ERROR REMEDIATION SYNTHESIS]\nIf creating, fixing, or patching a Discord slash command or internal action, you MUST emit the executable tool tag in your response:\nFor slash commands: <<<RUN_COMMAND: {"command": "create_slash_command", "name": "command_name", "description": "...", "code": "..."}>>>\nNEVER output conversational promises like "Fixing it now" or "Let me check" without executing the tool in the same turn.'
+        effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE & ERROR REMEDIATION SYNTHESIS]\nIf creating, fixing, or patching a Discord slash command or internal action, you MUST invoke create_slash_command or create_action via tool calls in your response.\nNEVER output conversational promises like "Fixing it now" or "Let me check" without executing the tool in the same turn.'
 
         // Auto-inject existing source code of any command or action mentioned in conversation or recent error
         try {

@@ -57,7 +57,7 @@ module.exports = {
           steps: params.steps
         })
 
-        return `[SYSTEM: Successfully created multi-step workflow "${wf.name}" (${wf.id}) with ${wf.steps.length} steps!\nUse <<<RUN_COMMAND: {"command": "manage_workflows", "action": "run", "name": "${wf.name}"}>>> to test or execute it.]`
+        return `[SYSTEM: Successfully created multi-step workflow "${wf.name}" (${wf.id}) with ${wf.steps.length} steps!\nInvoke manage_workflows with action "run" and name "${wf.name}" to test or execute it.]`
       } catch (err) {
         return `[SYSTEM: Failed to create workflow: ${err.message}]`
       }

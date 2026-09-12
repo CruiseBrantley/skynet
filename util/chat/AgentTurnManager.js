@@ -180,11 +180,7 @@ class AgentTurnManager {
     const lines = [
       '### TOOL-USE PROTOCOL & REGISTERED TOOLS ###',
       'You have direct access to internal tools and Discord actions.',
-      'When you need information or need to take an action, output a single structured tool call block:',
-      '```json',
-      '{"tool_calls": [{"name": "tool_name", "arguments": {"param1": "value1"}}]}',
-      '```',
-      'Or output: <<<RUN_COMMAND: {"command": "tool_name", "params": {"param1": "value1"}}>>>',
+      'When you need information or need to take an action, invoke the relevant tool natively using tool calls.',
       '',
       'Available tools:'
     ]
@@ -204,7 +200,7 @@ class AgentTurnManager {
 
     lines.push('\nCRITICAL REACT INSTRUCTIONS:')
     lines.push('1. Never output conversational promises (e.g. "Fixing now...", "Let me update...", "Retrying...") as standalone text without executing the tool in the same message.')
-    lines.push('2. If you need to perform an action or retrieve data, call the tool IMMEDIATELY using `<<<RUN_COMMAND: {"command": "...", ...}>>>`.')
+    lines.push('2. If you need to perform an action or retrieve data, call the tool IMMEDIATELY using a tool call.')
     lines.push('3. Only provide plain conversational text when all tool execution is complete and you are delivering the final result.')
     return lines.join('\n')
   }
@@ -755,7 +751,7 @@ class AgentTurnManager {
           if (pendingEval.suggestedAction) {
             directive += ` Action required: ${pendingEval.suggestedAction}.`
           } else {
-            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete, grounded response to the user without command syntax.'
+            directive += ' If an action or tool is needed, invoke the required tool now. Otherwise, provide a complete, grounded response to the user.'
           }
           directive += ']'
 
