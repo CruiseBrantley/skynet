@@ -477,24 +477,27 @@ function setupServer (coreOrBot, database) {
       if (isOwner && !userId) userId = process.env.OWNER_ID
       profileId = session.profileId || (isOwner ? 'sirian' : `user_${userId}`)
     } else {
-      // Unauthenticated / Localhost / CLI direct invocation fallback
-      const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1' || req.hostname === 'localhost'
+      // Unauthenticated / Localhost / LAN / CLI direct invocation fallback
+      const isLan = req.ip?.startsWith('192.168.') || req.ip?.startsWith('10.') || req.ip?.startsWith('::ffff:192.168.') || req.ip?.startsWith('::ffff:10.')
+      const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1'
+      const requestedProfile = req.body?.profileId || req.query?.profileId
+
       if (requestedUserId && (requestedUserId === process.env.OWNER_ID || requestedUserId === 'cli_owner' || requestedUserId.toLowerCase() === 'sirian')) {
         userId = process.env.OWNER_ID
         isOwner = true
         profileId = 'sirian'
         authorName = author || process.env.OWNER_NAME || 'Sirian'
-      } else if (author && author.toLowerCase() === 'sirian') {
+      } else if ((author && author.toLowerCase() === 'sirian') || requestedProfile === 'sirian') {
         userId = process.env.OWNER_ID
         isOwner = true
         profileId = 'sirian'
-        authorName = 'Sirian'
-      } else if (isLocalhost) {
-        // Local machine browser connection defaults to bot owner
+        authorName = author && author !== 'Guest' ? author : 'Sirian'
+      } else if (isLocalhost || isLan) {
+        // Local machine or LAN connection defaults to bot owner
         userId = process.env.OWNER_ID
         isOwner = true
         profileId = 'sirian'
-        authorName = author || 'Sirian'
+        authorName = author && author !== 'Guest' ? author : 'Sirian'
       } else if (requestedUserId) {
         userId = requestedUserId
         isOwner = false

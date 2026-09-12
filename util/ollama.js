@@ -130,6 +130,58 @@ async function consumeOllamaStream (responseStream, onToken = null) {
  * @param {object} options - Optional flags (e.g. { allowCloudFallback: false })
  * @returns {Promise<object>} The normalized response data
  */
+function convertToolsToGemini (tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return null
+
+  const functionDeclarations = []
+  for (const tool of tools) {
+    const fn = tool.function || tool
+    if (!fn || !fn.name) continue
+
+    const geminiParams = {
+      type: 'OBJECT',
+      properties: {},
+      required: Array.isArray(fn.parameters?.required) ? fn.parameters.required : []
+    }
+
+    if (fn.parameters?.properties && typeof fn.parameters.properties === 'object') {
+      for (const [propName, propDef] of Object.entries(fn.parameters.properties)) {
+        const rawType = (propDef.type || 'string').toUpperCase()
+        let geminiType = 'STRING'
+        if (rawType === 'NUMBER' || rawType === 'FLOAT') geminiType = 'NUMBER'
+        else if (rawType === 'INTEGER' || rawType === 'INT') geminiType = 'INTEGER'
+        else if (rawType === 'BOOLEAN' || rawType === 'BOOL') geminiType = 'BOOLEAN'
+        else if (rawType === 'ARRAY' || rawType === 'LIST') geminiType = 'ARRAY'
+        else if (rawType === 'OBJECT') geminiType = 'OBJECT'
+
+        const propertySchema = {
+          type: geminiType,
+          description: propDef.description || ''
+        }
+
+        if (geminiType === 'ARRAY') {
+          propertySchema.items = {
+            type: (propDef.items?.type || 'string').toUpperCase() === 'OBJECT' ? 'OBJECT' : 'STRING'
+          }
+        }
+        if (Array.isArray(propDef.enum)) {
+          propertySchema.enum = propDef.enum
+        }
+
+        geminiParams.properties[propName] = propertySchema
+      }
+    }
+
+    functionDeclarations.push({
+      name: fn.name,
+      description: fn.description || `Execute action ${fn.name}`,
+      parameters: geminiParams
+    })
+  }
+
+  return functionDeclarations.length > 0 ? [{ functionDeclarations }] : null
+}
+
 async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null, options = {}) {
   logger.info(`queryOllama: Entry [Level ${fallbackLevel}] for ${endpoint}`)
   // Handle backwards compatibility for boolean isBackup -> backup is now Gemini (Level 2)
@@ -210,8 +262,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
     }
 
-    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-    const candidateModels = [primaryModel, 'gemini-3.7-flash'].filter((v, i, a) => a.indexOf(v) === i)
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+    const candidateModels = [primaryModel, 'gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].filter((v, i, a) => a.indexOf(v) === i)
 
     let geminiContents = []
     if (payload.messages) {
@@ -251,26 +303,56 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       geminiContents = [{ role: 'user', parts: [{ text: payload.prompt }] }]
     }
 
+    const geminiTools = convertToolsToGemini(payload.tools)
+
     let lastError = null
     for (const modelName of candidateModels) {
       try {
         logger.info(`Triggering Level 2 fallback: ${modelName} for ${endpoint}`)
+        const requestBody = {
+          contents: geminiContents,
+          ...(geminiTools ? { tools: geminiTools } : {})
+        }
+
         const response = await axios.post(
           `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`,
-          {
-            contents: geminiContents
-          },
+          requestBody,
           {
             timeout: timeoutMs
           }
         )
 
-        if (response.data.candidates && response.data.candidates[0]?.content?.parts?.[0]) {
-          const content = response.data.candidates[0].content.parts[0].text
-          if (endpoint === '/api/generate') {
-            return { response: content }
+        const candidate = response.data?.candidates?.[0]
+        if (candidate && Array.isArray(candidate.content?.parts)) {
+          let textContent = ''
+          const toolCalls = []
+
+          for (const part of candidate.content.parts) {
+            if (part.text) {
+              textContent += (textContent ? '\n' : '') + part.text
+            }
+            if (part.functionCall) {
+              toolCalls.push({
+                type: 'function',
+                function: {
+                  name: part.functionCall.name,
+                  arguments: part.functionCall.args || {}
+                }
+              })
+            }
           }
-          return { message: { role: 'assistant', content } }
+
+          if (endpoint === '/api/generate') {
+            return { response: textContent }
+          }
+
+          return {
+            message: {
+              role: 'assistant',
+              content: textContent,
+              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+            }
+          }
         }
         throw new Error(`Invalid response structure from Gemini API (${modelName})`)
       } catch (err) {
@@ -544,10 +626,11 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
   let effectiveCommandsContext = commandsContext
   if (!effectiveCommandsContext) {
     if (options.tools && Array.isArray(options.tools) && options.tools.length > 0) {
-      effectiveCommandsContext = 'Tools and actions are available via native function calls.'
+      const toolNames = options.tools.map(t => t.function?.name || t.name).filter(Boolean).join(', ')
+      effectiveCommandsContext = `Active tools registered for native function calls: ${toolNames}. You can execute any of these directly via native tool calling.`
     } else {
       const ActionExecutor = require('./ActionExecutor')
-      effectiveCommandsContext = 'Available Tools & Actions:\n' + ActionExecutor.listActions().map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+      effectiveCommandsContext = 'Available Tools & Actions:\n' + ActionExecutor.listActions({ isOwner, isPrivate: isDM }).map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
     }
   }
 
