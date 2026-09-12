@@ -72,7 +72,8 @@ class AgentTurnManager {
             '1. "is_sufficient: false" if the Assistant states intent to do work, inspect, check, or fix something (e.g., "I will inspect...", "Let me check...", "I need to look at...", "I will start with..."), but stopped with text commentary without executing the action tool in this turn.\n' +
             '2. "is_sufficient: false" if the Assistant output raw/malformed tool command syntax (e.g. <<<RUN_COMMAND...>>> or unparsed JSON) instead of natural dialogue or an executed tool.\n' +
             '3. "is_sufficient: false" if the user request requires an action or inspection and the Assistant only provided intermediate commentary without completing the task.\n' +
-            '4. "is_sufficient: true" ONLY when the Assistant has fully answered/resolved the request, OR when the Assistant is actively blocked and asking the user a direct clarifying question.\n' +
+            '4. "is_sufficient: false" (Grounding Failure) if tools were executed to retrieve files, inspect code, or fetch data, but the proposed reply contradicts, ignores, or fails to use the facts from the tool observations.\n' +
+            '5. "is_sufficient: true" ONLY when the Assistant has fully and accurately answered/resolved the request using the tool observations, OR when the Assistant is actively blocked and asking the user a direct clarifying question.\n' +
             'Respond ONLY with a valid JSON object matching this schema:\n' +
             '{"is_sufficient": boolean, "reason": "brief explanation", "suggested_action": "what tool, inspection, or step to run next if insufficient"}'
         },
@@ -81,7 +82,7 @@ class AgentTurnManager {
           content: `[USER REQUEST]:\n${userPrompt.substring(0, 500)}\n\n` +
             `[TOOLS EXECUTED SO FAR]:\n${executedNames}\n\n` +
             `[ASSISTANT PROPOSED REPLY]:\n${trimmed.substring(0, 800)}\n\n` +
-            'Is the proposed reply complete and sufficient, or did the assistant stop prematurely, state unexecuted intent, leak command syntax, or leave work pending?'
+            'Is the proposed reply complete, grounded in the tool observations, and sufficient, or did the assistant stop prematurely, state unexecuted intent, leak command syntax, or leave work pending?'
         }
       ]
 
@@ -209,12 +210,59 @@ class AgentTurnManager {
   }
 
   /**
-   * Extracts one or more structured tool calls from raw model text.
-   * Handles {"tool_calls": [...]}, <tool_call> blocks, <<<RUN_COMMAND>>>, and raw JSON.
+   * Sanitizes and compacts tool observations to protect LLM context windows
+   * and strip ANSI control characters.
    */
-  extractToolCalls (text) {
-    if (!text || typeof text !== 'string') return []
+  static sanitizeObservation (rawOutput, { maxLength = 3000 } = {}) {
+    if (!rawOutput) return '(No output produced)'
+    let text = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
+
+    // Strip ANSI terminal color and control escape codes
+    // eslint-disable-next-line no-control-regex
+    text = text.replace(/\u001b\[[0-9;]*m/g, '')
+
+    // Smart head-and-tail compacting for large outputs
+    if (text.length > maxLength) {
+      const headSize = Math.floor(maxLength * 0.7)
+      const tailSize = Math.floor(maxLength * 0.25)
+      const omitted = text.length - headSize - tailSize
+      text = text.substring(0, headSize) +
+        `\n\n... [Output Truncated: ${omitted.toLocaleString()} characters omitted to preserve context window] ...\n\n` +
+        text.substring(text.length - tailSize)
+    }
+
+    return text.trim()
+  }
+
+  /**
+   * Extracts one or more structured tool calls from raw model text or native response.
+   * Handles native responseData.message.tool_calls, {"tool_calls": [...]}, <tool_call> blocks, <<<RUN_COMMAND>>>, and raw JSON.
+   */
+  extractToolCalls (text, responseData = null) {
     const results = []
+
+    // 0. Check native tool_calls from responseData (Ollama / OpenAI standard)
+    const nativeCalls = responseData?.message?.tool_calls
+    if (Array.isArray(nativeCalls) && nativeCalls.length > 0) {
+      for (const tc of nativeCalls) {
+        const fn = tc.function || tc
+        const name = (fn.name || tc.name || '').trim().replace(/^\/+/, '').toLowerCase()
+        let args = fn.arguments || tc.arguments || {}
+        if (typeof args === 'string') {
+          try {
+            args = JSON.parse(jsonrepair(args))
+          } catch (e) {
+            args = {}
+          }
+        }
+        if (name) {
+          results.push({ name, arguments: args, rawMatch: JSON.stringify(tc) })
+        }
+      }
+      if (results.length > 0) return results
+    }
+
+    if (!text || typeof text !== 'string') return []
 
     // Helper: Disambiguate duplicate keys like {"command": "host_exec", "command": "ls ..."}
     const disambiguateDuplicateKeys = (rawJson) => {
@@ -614,6 +662,16 @@ class AgentTurnManager {
     let pendingPromptCount = 0
     let finalReplyContent = ''
 
+    // Determine authorization scope for tool catalog and native tools schema
+    const isOwner = Boolean(
+      interaction.user?.id === process.env.OWNER_ID ||
+      interaction.userId === process.env.OWNER_ID
+    )
+    const isPrivate = !interaction.guildId || interaction.isDM || interaction.clientId === 'web' || interaction.clientId === 'cli'
+    const availableToolsSchema = typeof ActionExecutor.getOllamaToolsSchema === 'function'
+      ? ActionExecutor.getOllamaToolsSchema({ isOwner, isPrivate })
+      : []
+
     const tracker = new ActionProgressTracker({ botName: this.botName })
     if (!sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
       await interaction.showStatus(`${this.botName} is thinking...`).catch(() => {})
@@ -628,13 +686,18 @@ class AgentTurnManager {
         interaction.streamToken.reset()
       }
 
-      const streamCallback = interaction.streamToken || interaction.onToken || null
+      // Stream Isolation: During tool planning turns, isolate streaming from primary message
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
+      const turnContext = {
+        ...ollamaContext,
+        tools: availableToolsSchema
+      }
+
       const responseData = await queryFn(
         [...channelHistory.messages],
-        ollamaContext,
+        turnContext,
         this.botName,
-        streamCallback
+        null // Suppress direct message streaming during planning/tool execution
       )
 
       if (!responseData || !responseData.message) {
@@ -642,13 +705,39 @@ class AgentTurnManager {
       }
 
       const rawContent = responseData.message.content || ''
-      const toolCalls = this.extractToolCalls(rawContent)
+      const toolCalls = this.extractToolCalls(rawContent, responseData)
 
       // ─────────────────────────────────────────────────────────────
       // Case A: Model output has NO tool calls -> Final Answer Turn
       // ─────────────────────────────────────────────────────────────
       if (toolCalls.length === 0) {
-        finalReplyContent = rawContent.replace(COMMAND_REGEX, '').trim()
+        let candidateReply = rawContent.replace(COMMAND_REGEX, '').trim()
+
+        // If tools executed without a visual action, but model stopped with empty text, trigger dedicated synthesis
+        if (executedTools.length > 0 && !sharedState.visualActionExecuted && !candidateReply) {
+          logger.info(`AgentTurnManager: Step ${step + 1} concluded tool execution. Entering dedicated synthesis phase.`)
+          channelHistory.messages.push({
+            role: 'user',
+            content: '[SYSTEM DIRECTIVE: All requested actions and inspections are complete. You are now in the FINAL SYNTHESIS phase. Formulate a direct, grounded, and comprehensive response to the user based on the tool observations. Do not output any more tool calls or command tags.]'
+          })
+
+          if (typeof interaction.resetStream === 'function') {
+            interaction.resetStream()
+          } else if (typeof interaction.streamToken?.reset === 'function') {
+            interaction.streamToken.reset()
+          }
+
+          const synthStream = interaction.streamToken || interaction.onToken || null
+          const synthResponse = await queryFn(
+            [...channelHistory.messages],
+            { ...ollamaContext, tools: [] },
+            this.botName,
+            synthStream
+          )
+          candidateReply = (synthResponse?.message?.content || '').replace(COMMAND_REGEX, '').trim()
+        }
+
+        finalReplyContent = candidateReply
 
         const pendingEval = await this.evaluatePendingWork({
           ollamaContext,
@@ -659,14 +748,14 @@ class AgentTurnManager {
 
         if (pendingEval.isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
           pendingPromptCount++
-          logger.info(`AgentTurnManager: Pending work or insufficient response detected at step ${step + 1} ("${(finalReplyContent || rawContent).slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to complete work (retry #${pendingPromptCount}).`)
+          logger.info(`AgentTurnManager: Pending work, ungrounded reply, or insufficient response detected at step ${step + 1} ("${(finalReplyContent || rawContent).slice(0, 80)}..."). Reason: ${pendingEval.reason}. Prompting model to complete work (retry #${pendingPromptCount}).`)
           channelHistory.messages.push({ role: 'assistant', content: finalReplyContent || rawContent })
 
-          let directive = `[SYSTEM COORDINATOR FEEDBACK: Your previous reply was determined to be insufficient or incomplete. Reason: ${pendingEval.reason}.`
+          let directive = `[SYSTEM COORDINATOR FEEDBACK: Your previous reply was determined to be insufficient, incomplete, or ungrounded. Reason: ${pendingEval.reason}.`
           if (pendingEval.suggestedAction) {
             directive += ` Action required: ${pendingEval.suggestedAction}.`
           } else {
-            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete and proper response to the user without command syntax.'
+            directive += ' If an action or tool is needed, execute it using <<<RUN_COMMAND: {"command": "...", ...}>>>. Otherwise, provide a complete, grounded response to the user without command syntax.'
           }
           directive += ']'
 
@@ -679,8 +768,12 @@ class AgentTurnManager {
 
         // If retries exhausted or step limit reached, but response is still pending or contains command syntax
         if (pendingEval.isPending || /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(finalReplyContent)) {
-          logger.warn(`AgentTurnManager: Step ${step + 1} produced insufficient response or leaked tool syntax after retries. Suppressing invalid final reply.`)
-          finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
+          if (!finalReplyContent && sharedState.visualActionExecuted) {
+            // Intentional silent completion for visual actions (e.g. embed/poll displayed)
+          } else {
+            logger.warn(`AgentTurnManager: Step ${step + 1} produced insufficient response or leaked tool syntax after retries. Suppressing invalid final reply.`)
+            finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
+          }
         }
 
         if (finalReplyContent) {
@@ -770,10 +863,11 @@ class AgentTurnManager {
           await interaction.showStatus(statusText).catch(() => {})
         }
 
-        // Feed structured tool observation back into context
+        // Sanitize observation and feed back into context
+        const sanitizedOutput = AgentTurnManager.sanitizeObservation(executionResult.output)
         channelHistory.messages.push({
           role: 'user',
-          content: `[TOOL OBSERVATION for "${toolCall.name}"]:\n${executionResult.output}\n\nReview this result. If more tools are needed to fulfill the user's request, call them now. Otherwise, synthesize your complete response.`
+          content: `[TOOL OBSERVATION for "${toolCall.name}"]:\n${sanitizedOutput}\n\nReview this result. If more tools are needed to fulfill the user's request, call them now. Otherwise, synthesize your complete response.`
         })
       }
     }

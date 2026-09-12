@@ -93,6 +93,48 @@ class ActionExecutor {
       }))
   }
 
+  /**
+   * Converts registered actions into standard JSON schema tool definitions
+   * compatible with Ollama and OpenAI function calling API.
+   * @param {object} options
+   * @returns {Array<object>}
+   */
+  getOllamaToolsSchema (options = {}) {
+    const actions = this.listActions(options)
+    return actions.map(a => {
+      const properties = {}
+      const required = []
+
+      if (a.schema && typeof a.schema === 'object') {
+        for (const [key, def] of Object.entries(a.schema)) {
+          properties[key] = {
+            type: def.type || 'string',
+            description: def.description || ''
+          }
+          if (def.enum && Array.isArray(def.enum)) {
+            properties[key].enum = def.enum
+          }
+          if (def.required) {
+            required.push(key)
+          }
+        }
+      }
+
+      return {
+        type: 'function',
+        function: {
+          name: a.name,
+          description: a.description || `Execute action ${a.name}`,
+          parameters: {
+            type: 'object',
+            properties,
+            ...(required.length > 0 ? { required } : {})
+          }
+        }
+      }
+    })
+  }
+
   // ─── Classification ──────────────────────────────────────────────────────────
 
   /**

@@ -44,7 +44,47 @@ async function checkOllamaOnline (url, endpoint) {
 async function consumeOllamaStream (responseStream, onToken = null) {
   let fullContent = ''
   let fullThinking = ''
+  const fullToolCalls = []
+  const toolCallsByIndex = {}
   let buffer = ''
+
+  const processChunk = (parsed) => {
+    if (parsed.message?.thinking) {
+      fullThinking += parsed.message.thinking
+    }
+    if (parsed.message?.content) {
+      fullContent += parsed.message.content
+      if (typeof onToken === 'function') {
+        onToken(parsed.message.content)
+      }
+    }
+    if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
+      for (const tc of parsed.message.tool_calls) {
+        if (tc.index !== undefined) {
+          const idx = tc.index
+          if (!toolCallsByIndex[idx]) {
+            toolCallsByIndex[idx] = { ...tc, function: { ...(tc.function || {}) } }
+          } else {
+            if (tc.function?.name) toolCallsByIndex[idx].function.name = (toolCallsByIndex[idx].function.name || '') + tc.function.name
+            if (tc.function?.arguments) {
+              const prevArgs = toolCallsByIndex[idx].function.arguments || ''
+              toolCallsByIndex[idx].function.arguments = typeof tc.function.arguments === 'string'
+                ? prevArgs + tc.function.arguments
+                : tc.function.arguments
+            }
+          }
+        } else {
+          fullToolCalls.push(tc)
+        }
+      }
+    }
+    if (parsed.response) {
+      fullContent += parsed.response
+      if (typeof onToken === 'function') {
+        onToken(parsed.response)
+      }
+    }
+  }
 
   for await (const chunk of responseStream) {
     buffer += chunk.toString('utf8')
@@ -55,21 +95,7 @@ async function consumeOllamaStream (responseStream, onToken = null) {
       if (!line.trim()) continue
       try {
         const parsed = JSON.parse(line)
-        if (parsed.message?.thinking) {
-          fullThinking += parsed.message.thinking
-        }
-        if (parsed.message?.content) {
-          fullContent += parsed.message.content
-          if (typeof onToken === 'function') {
-            onToken(parsed.message.content)
-          }
-        }
-        if (parsed.response) {
-          fullContent += parsed.response
-          if (typeof onToken === 'function') {
-            onToken(parsed.response)
-          }
-        }
+        processChunk(parsed)
       } catch (e) {}
     }
   }
@@ -77,24 +103,18 @@ async function consumeOllamaStream (responseStream, onToken = null) {
   if (buffer && buffer.trim()) {
     try {
       const parsed = JSON.parse(buffer)
-      if (parsed.message?.thinking) {
-        fullThinking += parsed.message.thinking
-      }
-      if (parsed.message?.content) {
-        fullContent += parsed.message.content
-        if (typeof onToken === 'function') onToken(parsed.message.content)
-      }
-      if (parsed.response) {
-        fullContent += parsed.response
-        if (typeof onToken === 'function') onToken(parsed.response)
-      }
+      processChunk(parsed)
     } catch (e) {}
   }
+
+  const indexedCalls = Object.values(toolCallsByIndex)
+  const allToolCalls = [...fullToolCalls, ...indexedCalls]
 
   return {
     message: {
       role: 'assistant',
       content: fullContent,
+      ...(allToolCalls.length > 0 ? { tool_calls: allToolCalls } : {}),
       ...(fullThinking ? { thinking: fullThinking } : {})
     }
   }
@@ -314,7 +334,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
     if (isStream) {
       const data = await consumeOllamaStream(response.data, onToken)
-      if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+      if (data && data.message && (
+        (typeof data.message.content === 'string' && data.message.content.trim().length > 0) ||
+        (Array.isArray(data.message.tool_calls) && data.message.tool_calls.length > 0)
+      )) {
         logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
         return data
       }
@@ -363,7 +386,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       if (data.message.thinking) {
         logger.info(`Remote Model [${remoteModel}] Thinking from ${remoteHost}: ${data.message.thinking.substring(0, 150)}...`)
       }
-      if (typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+      if (
+        (typeof data.message.content === 'string' && data.message.content.trim().length > 0) ||
+        (Array.isArray(data.message.tool_calls) && data.message.tool_calls.length > 0)
+      ) {
         logger.info(`queryOllama: Level 0 Chat Success from ${remoteHost}`)
         return data
       }
@@ -546,6 +572,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
     return queryCodeCapableModel('/api/chat', {
       messages: processedMessages,
       think,
+      ...(options.tools && Array.isArray(options.tools) && options.tools.length > 0 ? { tools: options.tools } : {}),
       options: {
         num_ctx: numCtx,
         num_predict: -1,
@@ -560,6 +587,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
     const result = await queryOllama('/api/chat', {
       messages: processedMessages,
       think,
+      ...(options.tools && Array.isArray(options.tools) && options.tools.length > 0 ? { tools: options.tools } : {}),
       options: {
         num_ctx: numCtx,
         num_predict: -1, // -1 in Ollama = unlimited generation (runs until natural EOS)
@@ -663,7 +691,7 @@ async function queryCodeCapableModel (endpoint, payload, onToken = null) {
 
       if (isStream) {
         const data = await consumeOllamaStream(response.data, onToken)
-        if (data?.message?.content) return data
+        if (data?.message?.content || (Array.isArray(data?.message?.tool_calls) && data.message.tool_calls.length > 0)) return data
       }
 
       const data = response.data
@@ -680,17 +708,20 @@ async function queryCodeCapableModel (endpoint, payload, onToken = null) {
       }
 
       // If think: true produced empty content, retry once with think: false
-      if ((!content || content.length === 0) && enhancedPayload.think !== false) {
+      if ((!content || content.length === 0) && (!data?.message?.tool_calls || data.message.tool_calls.length === 0) && enhancedPayload.think !== false) {
         logger.warn(`queryCodeCapableModel: Remote Model [${remoteModel}] produced empty content with think: true. Retrying with think: false...`)
         const noThinkPayload = { ...enhancedPayload, think: false, stream: false }
         const retryResp = await axios.post(remoteUrl, noThinkPayload, { timeout: 180000 })
         const retryData = retryResp.data
-        if (retryData && retryData.message && typeof retryData.message.content === 'string' && retryData.message.content.trim().length > 0) {
+        if (retryData && retryData.message && ((typeof retryData.message.content === 'string' && retryData.message.content.trim().length > 0) || (Array.isArray(retryData.message.tool_calls) && retryData.message.tool_calls.length > 0))) {
           return retryData
         }
       }
 
-      if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+      if (data && data.message && (
+        (typeof data.message.content === 'string' && data.message.content.trim().length > 0) ||
+        (Array.isArray(data.message.tool_calls) && data.message.tool_calls.length > 0)
+      )) {
         return data
       }
       if (data && data.response && data.response.trim().length > 0) {
