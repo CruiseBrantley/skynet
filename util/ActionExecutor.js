@@ -704,6 +704,10 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
         }
       }
 
+      if (typeof output === 'object' && output !== null && 'success' in output) {
+        return { ...output, output }
+      }
+
       return { success: true, output }
     } catch (err) {
       logger.error(`ActionExecutor: Action "${name}" failed: ${err.message}`)

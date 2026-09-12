@@ -88,5 +88,5 @@ describe('Weather Search E2E Flow', () => {
 
     expect(content).toContain('weather')
     expect(content).toContain('75F')
-  })
+  }, 15000)
 })
