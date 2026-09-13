@@ -94,6 +94,40 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(call2.embeds[0].data.description).toContain('🏳️ Unflagged tile **D1**')
   })
 
+  test('correctly handles column F for reveal (F1) and flag (FF1, flag F1)', async () => {
+    const replyMock = jest.fn().mockResolvedValue({})
+    // 1. Reveal F1
+    const mockInteractionReveal = {
+      channelId: 'test_chan',
+      options: { getString: jest.fn().mockReturnValue('F1') },
+      reply: replyMock
+    }
+    await command.execute(mockInteractionReveal)
+    const state = await agentMemory.get('minesweeper.test_chan')
+    const parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.revealed[0][5]).toBe(true)
+
+    // 2. Flag F8 with FF8
+    const mockInteractionFlagFF = {
+      channelId: 'test_chan',
+      options: { getString: jest.fn().mockReturnValue('FF8') },
+      reply: replyMock
+    }
+    await command.execute(mockInteractionFlagFF)
+    const callFlag = replyMock.mock.calls[1][0]
+    expect(callFlag.embeds[0].data.description).toContain('🚩 Flagged tile **F8**')
+
+    // 3. Flag F7 with "flag F7"
+    const mockInteractionFlagWord = {
+      channelId: 'test_chan',
+      options: { getString: jest.fn().mockReturnValue('flag F7') },
+      reply: replyMock
+    }
+    await command.execute(mockInteractionFlagWord)
+    const callFlagWord = replyMock.mock.calls[2][0]
+    expect(callFlagWord.embeds[0].data.description).toContain('🚩 Flagged tile **F7**')
+  })
+
   test('resets game with action reset by posting a new message and leaving existing board untouched', async () => {
     const editMock = jest.fn().mockResolvedValue({})
     const replyMock = jest.fn().mockResolvedValue({ id: 'new_msg_456' })

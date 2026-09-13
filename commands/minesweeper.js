@@ -127,36 +127,46 @@ function parseAction (rawInput) {
   }
 
   let isFlag = false
-  let coord = input
+  let text = input
 
-  if (coord.startsWith('flag')) {
+  if (text.includes('flag') || text.includes('🚩')) {
     isFlag = true
-    coord = coord.replace(/^flag\s*/, '')
-  } else if (coord.endsWith('flag')) {
-    isFlag = true
-    coord = coord.replace(/\s*flag$/, '')
-  } else if (coord.startsWith('f')) {
-    isFlag = true
-    coord = coord.slice(1).trim()
-  } else if (coord.endsWith('f')) {
-    isFlag = true
-    coord = coord.slice(0, -1).trim()
+    text = text.replace(/flag/g, '').replace(/🚩/g, '')
   }
 
-  coord = coord.replace(/\s+/g, '')
-  const colMatch = coord.match(/[a-h]/)
-  const rowMatch = coord.match(/[1-8]/)
+  text = text.replace(/\s+/g, '')
 
-  if (!colMatch || !rowMatch) return { type: 'invalid' }
-
-  const col = colMatch[0].charCodeAt(0) - 97
+  const rowMatch = text.match(/[1-8]/)
+  if (!rowMatch) return { type: 'invalid' }
   const row = parseInt(rowMatch[0], 10) - 1
+
+  const letters = text.replace(/[1-8]/g, '')
+
+  let colChar = null
+
+  if (letters.length === 1) {
+    if (letters >= 'a' && letters <= 'h') {
+      colChar = letters
+    }
+  } else if (letters.length === 2) {
+    if (letters.includes('f')) {
+      isFlag = true
+      const remaining = letters.replace('f', '')
+      if (remaining >= 'a' && remaining <= 'h') {
+        colChar = remaining
+      }
+    }
+  }
+
+  if (!colChar) return { type: 'invalid' }
+
+  const col = colChar.charCodeAt(0) - 97
 
   return {
     type: isFlag ? 'flag' : 'reveal',
     row,
     col,
-    coordLabel: `${colMatch[0].toUpperCase()}${rowMatch[0]}`
+    coordLabel: `${colChar.toUpperCase()}${rowMatch[0]}`
   }
 }
 
