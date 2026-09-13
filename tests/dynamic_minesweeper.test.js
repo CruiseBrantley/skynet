@@ -124,5 +124,50 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(replyMock).toHaveBeenCalled()
     expect(replyMock.mock.calls[0][0].content).toContain('Minesweeper Controls')
   })
-})
 
+  test('edits existing board message and deletes interacting slash command', async () => {
+    const editMock = jest.fn().mockResolvedValue({})
+    const mockBoardMsg = {
+      id: 'existing_board_msg_123',
+      edit: editMock
+    }
+
+    const deferReplyMock = jest.fn().mockResolvedValue({})
+    const deleteReplyMock = jest.fn().mockResolvedValue({})
+
+    const mockInteraction = {
+      channelId: 'test_chan',
+      options: { getString: jest.fn().mockReturnValue('C3') },
+      channel: {
+        messages: {
+          fetch: jest.fn().mockImplementation((id) => {
+            if (id === 'existing_board_msg_123') return Promise.resolve(mockBoardMsg)
+            return Promise.resolve(null)
+          })
+        }
+      },
+      deferReply: deferReplyMock,
+      deleteReply: deleteReplyMock
+    }
+
+    // Seed state with existing messageId
+    await agentMemory.set('minesweeper.test_chan', {
+      board: null,
+      revealed: Array.from({ length: 8 }, () => Array(8).fill(false)),
+      flagged: Array.from({ length: 8 }, () => Array(8).fill(false)),
+      gameOver: false,
+      won: false,
+      moves: 0,
+      messageId: 'existing_board_msg_123'
+    })
+
+    await command.execute(mockInteraction)
+
+    // Verify existing message was edited in place
+    expect(editMock).toHaveBeenCalled()
+
+    // Verify incoming slash command was deferred and deleted
+    expect(deferReplyMock).toHaveBeenCalled()
+    expect(deleteReplyMock).toHaveBeenCalled()
+  })
+})

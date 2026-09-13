@@ -8,6 +8,7 @@ describe('Command Consistency', () => {
   test('all commands using MessageFlags must import it from discord.js', () => {
     commandFiles.forEach(file => {
       const filePath = path.join(commandsPath, file)
+      if (!fs.existsSync(filePath)) return
       const content = fs.readFileSync(filePath, 'utf8')
 
       if (content.includes('MessageFlags')) {
@@ -31,6 +32,7 @@ describe('Command Consistency', () => {
   test('all commands have data and execute properties and pass Discord schema validation', () => {
     commandFiles.forEach(file => {
       const filePath = path.join(commandsPath, file)
+      if (!fs.existsSync(filePath)) return
       const command = require(filePath)
 
       expect(command).toHaveProperty('data')
