@@ -29,7 +29,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(callArg.embeds).toBeDefined()
     expect(callArg.embeds[0].data.title).toContain('Minesweeper')
     expect(callArg.embeds[0].data.description).toContain('🎯 ┃ 🇦 🇧 🇨 🇩 🇪 🇫 🇬 🇭')
-    expect(callArg.embeds[0].data.description).toContain('❶ ┃ ⬛')
+    expect(callArg.embeds[0].data.description).toContain('1️⃣ ┃ ⬛')
     expect(callArg.embeds[0].data.description).toContain('💣 **Mines Left:** `10`')
     expect(callArg.components).toEqual([])
   })
