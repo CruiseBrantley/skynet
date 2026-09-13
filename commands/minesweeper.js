@@ -241,7 +241,6 @@ function buildEmbed (game, notice = '') {
 }
 
 module.exports = {
-  guildId: '160135882274373633',
   data: new SlashCommandBuilder()
     .setName('minesweeper')
     .setDescription('Play interactive Minesweeper in Discord')
