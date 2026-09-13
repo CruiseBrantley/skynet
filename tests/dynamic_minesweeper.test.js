@@ -94,16 +94,33 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(call2.embeds[0].data.description).toContain('🏳️ Unflagged tile **D1**')
   })
 
-  test('resets game with action reset', async () => {
-    const replyMock = jest.fn().mockResolvedValue({})
+  test('resets game with action reset by posting a new message and leaving existing board untouched', async () => {
+    const editMock = jest.fn().mockResolvedValue({})
+    const replyMock = jest.fn().mockResolvedValue({ id: 'new_msg_456' })
     const mockInteraction = {
       channelId: 'test_chan',
       options: { getString: jest.fn().mockReturnValue('reset') },
+      channel: {
+        messages: {
+          fetch: jest.fn().mockResolvedValue({ id: 'old_msg_123', edit: editMock })
+        }
+      },
       reply: replyMock
     }
 
+    await agentMemory.set('minesweeper.test_chan', {
+      board: null,
+      revealed: Array.from({ length: 8 }, () => Array(8).fill(false)),
+      flagged: Array.from({ length: 8 }, () => Array(8).fill(false)),
+      gameOver: true,
+      won: false,
+      moves: 5,
+      messageId: 'old_msg_123'
+    })
+
     await command.execute(mockInteraction)
     expect(replyMock).toHaveBeenCalled()
+    expect(editMock).not.toHaveBeenCalled()
     const call = replyMock.mock.calls[0][0]
     expect(call.embeds[0].data.description).toContain('🔄 Started a fresh game!')
   })
@@ -122,15 +139,15 @@ describe('Dynamic Slash Command: /minesweeper', () => {
   })
 
   test('handles buttons for new game and help', async () => {
-    const updateMock = jest.fn().mockResolvedValue({})
+    const replyNewMock = jest.fn().mockResolvedValue({ id: 'btn_msg_id' })
     const mockButtonInteraction = {
       customId: 'minesweeper_new',
       channelId: 'test_chan',
-      update: updateMock
+      reply: replyNewMock
     }
 
     await command.handleButton(mockButtonInteraction)
-    expect(updateMock).toHaveBeenCalled()
+    expect(replyNewMock).toHaveBeenCalled()
 
     const replyMock = jest.fn().mockResolvedValue({})
     const mockHelpInteraction = {

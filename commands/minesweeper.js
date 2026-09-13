@@ -246,11 +246,13 @@ module.exports = {
     const memKey = 'minesweeper.' + (interaction.channelId || 'dm')
     if (customId === 'minesweeper_new') {
       const game = newGame()
-      game.messageId = interaction.message?.id || null
-      await agentMemory.set(memKey, game, 30)
-      const embed = buildEmbed(game, 'Started a fresh Minesweeper game! Reveal a tile with `/minesweeper action:D1`')
+      const embed = buildEmbed(game, '🎮 Started a fresh Minesweeper game! Reveal a tile with `/minesweeper action:D1`')
       const components = buildComponents()
-      await interaction.update({ embeds: [embed], components }).catch(() => {})
+      const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true }).catch(() => {})
+      if (reply?.id) {
+        game.messageId = reply.id
+        await agentMemory.set(memKey, game, 30)
+      }
     } else if (customId === 'minesweeper_help') {
       await interaction.reply({
         content: '📌 **Minesweeper Controls:**\n• **Reveal tile**: `/minesweeper action:D1` or `action:1D`\n• **Flag tile**: `/minesweeper action:FD1`, `action:1DF`, or `action:flag D1`\n• **New game**: `/minesweeper action:new`',
@@ -271,30 +273,11 @@ module.exports = {
     }
 
     let game = raw
+    let isNewGame = false
+
     if (!game || !Array.isArray(game.revealed) || !Array.isArray(game.flagged)) {
       game = newGame()
-    }
-
-    // Locate the original/initial board message in this channel
-    let boardMsg = null
-    if (game.messageId && interaction.channel?.messages?.fetch) {
-      boardMsg = await interaction.channel.messages.fetch(game.messageId).catch(() => null)
-    }
-
-    // Fallback: look for the most recent minesweeper message from the bot in this channel
-    if (!boardMsg && interaction.channel?.messages?.fetch) {
-      const recent = await interaction.channel.messages.fetch({ limit: 15 }).catch(() => null)
-      if (recent) {
-        const botId = interaction.client?.user?.id || '558428214805135370'
-        const existing = recent.find(m =>
-          m.author?.id === botId &&
-          m.embeds?.[0]?.title?.includes('Minesweeper')
-        )
-        if (existing) {
-          boardMsg = existing
-          game.messageId = existing.id
-        }
-      }
+      isNewGame = true
     }
 
     const actionRaw = interaction.options?.getString?.('action')
@@ -305,10 +288,9 @@ module.exports = {
       if (!parsed || parsed.type === 'invalid') {
         notice = `⚠️ Invalid tile format: \`${actionRaw}\`. Use \`D1\`, \`1D\`, or \`FD1\` to flag.`
       } else if (parsed.type === 'reset') {
-        const currentMsgId = game.messageId
         game = newGame()
-        game.messageId = currentMsgId
-        notice = '🔄 Started a fresh game!'
+        isNewGame = true
+        notice = '🔄 Started a fresh game! Reveal a tile with `/minesweeper action:D1`'
         await agentMemory.set(memKey, game, 30)
       } else if (game.gameOver) {
         notice = '⚠️ Game is already over! Start a new game with `/minesweeper action:new`.'
@@ -354,12 +336,41 @@ module.exports = {
           await agentMemory.set(memKey, game, 30)
         }
       }
+    } else if (game.gameOver) {
+      game = newGame()
+      isNewGame = true
+      notice = '🎮 Started a fresh game! Reveal a tile with `/minesweeper action:D1`'
+      await agentMemory.set(memKey, game, 30)
+    }
+
+    // Locate the active board message in this channel ONLY if continuing an existing game
+    let boardMsg = null
+    if (!isNewGame) {
+      if (game.messageId && interaction.channel?.messages?.fetch) {
+        boardMsg = await interaction.channel.messages.fetch(game.messageId).catch(() => null)
+      }
+
+      // Fallback: look for the most recent minesweeper message from the bot in this channel
+      if (!boardMsg && interaction.channel?.messages?.fetch) {
+        const recent = await interaction.channel.messages.fetch({ limit: 15 }).catch(() => null)
+        if (recent) {
+          const botId = interaction.client?.user?.id || '558428214805135370'
+          const existing = recent.find(m =>
+            m.author?.id === botId &&
+            m.embeds?.[0]?.title?.includes('Minesweeper')
+          )
+          if (existing) {
+            boardMsg = existing
+            game.messageId = existing.id
+          }
+        }
+      }
     }
 
     const embed = buildEmbed(game, notice)
     const components = buildComponents()
 
-    if (boardMsg) {
+    if (!isNewGame && boardMsg) {
       // 1. Immediately acknowledge the slash command
       await interaction.deferReply().catch(() => {})
 
@@ -373,7 +384,7 @@ module.exports = {
         logger.warn(`Failed to delete slash command interaction: ${err.message}`)
       })
     } else {
-      // No initial message found: post the initial board message and track its ID
+      // New game or no initial message found: post a new board message and track its ID
       const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true })
       if (reply?.id) {
         game.messageId = reply.id
