@@ -178,8 +178,19 @@ class AgentMemory {
   set (key, value, ttlDays = 30, guildId = null) {
     const scope = scopeFor(key)
     const entryGuildId = scope === 'global' ? null : (guildId || null)
+    let storedValue
+    if (typeof value === 'object' && value !== null) {
+      try {
+        storedValue = JSON.stringify(value)
+      } catch (_) {
+        storedValue = String(value)
+      }
+    } else {
+      storedValue = String(value)
+    }
+
     this._data[key] = {
-      value: String(value),
+      value: storedValue,
       updatedAt: Date.now(),
       ttlDays,
       guildId: entryGuildId // null = global, string = server-specific
@@ -206,6 +217,13 @@ class AgentMemory {
     const entry = this._data[key]
     if (!entry) return null
     if (entry.guildId !== null && entry.guildId !== guildId) return null
+    if (typeof entry.value === 'string' && (entry.value.startsWith('{') || entry.value.startsWith('['))) {
+      try {
+        return JSON.parse(entry.value)
+      } catch (_) {
+        return entry.value
+      }
+    }
     return entry.value
   }
 
