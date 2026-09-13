@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js')
+const { SlashCommandBuilder } = require('discord.js')
 const { SafeEmbedBuilder: EmbedBuilder } = require('../util/discordFormatter')
 const agentMemory = require('../util/AgentMemory')
 const logger = require('../logger')
@@ -8,14 +8,15 @@ const COLS = 8
 const MINES = 10
 
 const COL_HEADERS = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭']
-const ROW_HEADERS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
+const ROW_HEADERS = ['❶', '❷', '❸', '❹', '❺', '❻', '❼', '❽']
 const NUM_EMOJIS = ['⬜', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
 const TILE = {
   hidden: '⬛',
   empty: '⬜',
   flag: '🚩',
   mine: '💣',
-  exploded: '💥'
+  exploded: '💥',
+  falseFlag: '❌'
 }
 
 function createEmptyBoard () {
@@ -25,10 +26,16 @@ function createEmptyBoard () {
 function placeMines (firstRow = -1, firstCol = -1) {
   const board = createEmptyBoard()
   let placed = 0
+
+  const isSafeZone = (r, c) => {
+    if (firstRow === -1 || firstCol === -1) return false
+    return Math.abs(r - firstRow) <= 1 && Math.abs(c - firstCol) <= 1
+  }
+
   while (placed < MINES) {
     const r = Math.floor(Math.random() * ROWS)
     const c = Math.floor(Math.random() * COLS)
-    if ((r === firstRow && c === firstCol) || board[r][c] === -1) continue
+    if (isSafeZone(r, c) || board[r][c] === -1) continue
     board[r][c] = -1
     placed++
   }
@@ -155,14 +162,18 @@ function parseAction (rawInput) {
 
 function renderBoard (game) {
   const lines = []
-  lines.push('⬛ ' + COL_HEADERS.join(' '))
+  lines.push('🎯 ┃ ' + COL_HEADERS.join(' '))
 
   for (let r = 0; r < ROWS; r++) {
-    const rowItems = [ROW_HEADERS[r]]
+    const rowItems = []
     for (let c = 0; c < COLS; c++) {
       let icon = TILE.hidden
       if (game.flagged[r][c]) {
-        icon = TILE.flag
+        if (game.gameOver && !game.won && game.board && game.board[r][c] !== -1) {
+          icon = TILE.falseFlag
+        } else {
+          icon = TILE.flag
+        }
       } else if (!game.revealed[r][c]) {
         icon = TILE.hidden
       } else if (game.board && game.board[r][c] === -1) {
@@ -175,26 +186,14 @@ function renderBoard (game) {
       }
       rowItems.push(icon)
     }
-    lines.push(rowItems.join(' '))
+    lines.push(`${ROW_HEADERS[r]} ┃ ${rowItems.join(' ')}`)
   }
 
   return lines.join('\n')
 }
 
 function buildComponents () {
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('minesweeper_new')
-      .setLabel('New Game')
-      .setEmoji('🔄')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId('minesweeper_help')
-      .setLabel('How to Play')
-      .setEmoji('❓')
-      .setStyle(ButtonStyle.Secondary)
-  )
-  return [row]
+  return []
 }
 
 function buildEmbed (game, notice = '') {
@@ -207,25 +206,27 @@ function buildEmbed (game, notice = '') {
     statusText = `💥 **BOOM! GAME OVER!** Stumbled on a mine on move ${game.moves}.`
   }
 
-  let description = boardStr
-  if (statusText) {
-    description += `\n\n${statusText}`
-  }
-  if (notice && !statusText) {
-    description += `\n\n${notice}`
-  }
-
   const flagCount = Array.isArray(game.flagged)
     ? game.flagged.reduce((acc, row) => acc + (Array.isArray(row) ? row.filter(Boolean).length : 0), 0)
     : 0
   const remainingMines = Math.max(MINES - flagCount, 0)
 
+  const hud = `💣 **Mines Left:** \`${remainingMines}\`  •  🚩 **Flags:** \`${flagCount}\`  •  👟 **Moves:** \`${game.moves}\``
+
+  let description = `${hud}\n\n${boardStr}`
+  if (statusText) {
+    description += `\n\n${statusText}`
+  }
+  if (notice && !statusText) {
+    description += `\n\n> ${notice}`
+  }
+
   return new EmbedBuilder()
     .setTitle('🎮 Minesweeper')
     .setDescription(description)
-    .setColor(game.won ? 0x2ECC71 : game.gameOver ? 0xE74C3C : 0x3498DB)
+    .setColor(game.won ? 0x2ECC71 : game.gameOver ? 0xE74C3C : 0x5865F2)
     .setFooter({
-      text: `8×8 | 💣 Mines: ${remainingMines} | Moves: ${game.moves} | Reveal: D1 or 1D | Flag: FD1 | Reset: new`
+      text: '8×8 Grid | Reveal: D1 or 1D | Flag: FD1 or 1DF | Reset: /minesweeper action:new'
     })
 }
 
@@ -247,12 +248,12 @@ module.exports = {
       const game = newGame()
       game.messageId = interaction.message?.id || null
       await agentMemory.set(memKey, game, 30)
-      const embed = buildEmbed(game, '🎮 Started a fresh Minesweeper game! Reveal a tile with `/minesweeper action:D1`')
+      const embed = buildEmbed(game, 'Started a fresh Minesweeper game! Reveal a tile with `/minesweeper action:D1`')
       const components = buildComponents()
       await interaction.update({ embeds: [embed], components }).catch(() => {})
     } else if (customId === 'minesweeper_help') {
       await interaction.reply({
-        content: '📌 **Minesweeper Controls:**\n• **Reveal tile**: `/minesweeper action:D1` or `action:1D`\n• **Flag tile**: `/minesweeper action:FD1`, `action:1DF`, or `action:flag D1`\n• **New game**: `/minesweeper action:new` or click **New Game** below.',
+        content: '📌 **Minesweeper Controls:**\n• **Reveal tile**: `/minesweeper action:D1` or `action:1D`\n• **Flag tile**: `/minesweeper action:FD1`, `action:1DF`, or `action:flag D1`\n• **New game**: `/minesweeper action:new`',
         ephemeral: true
       }).catch(() => {})
     }
@@ -310,7 +311,7 @@ module.exports = {
         notice = '🔄 Started a fresh game!'
         await agentMemory.set(memKey, game, 30)
       } else if (game.gameOver) {
-        notice = '⚠️ Game is already over! Click **New Game** or type `/minesweeper action:new` to play again.'
+        notice = '⚠️ Game is already over! Start a new game with `/minesweeper action:new`.'
       } else if (parsed.type === 'flag') {
         const { row, col, coordLabel } = parsed
         if (game.revealed[row][col]) {

@@ -15,7 +15,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(typeof command.handleButton).toBe('function')
   })
 
-  test('initializes new game on empty action', async () => {
+  test('initializes new game on empty action with circled row badges and separator', async () => {
     const replyMock = jest.fn().mockResolvedValue({})
     const mockInteraction = {
       channelId: 'test_chan',
@@ -28,8 +28,10 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     const callArg = replyMock.mock.calls[0][0]
     expect(callArg.embeds).toBeDefined()
     expect(callArg.embeds[0].data.title).toContain('Minesweeper')
-    expect(callArg.embeds[0].data.description).toContain('🇦 🇧 🇨 🇩 🇪 🇫 🇬 🇭')
-    expect(callArg.components).toBeDefined()
+    expect(callArg.embeds[0].data.description).toContain('🎯 ┃ 🇦 🇧 🇨 🇩 🇪 🇫 🇬 🇭')
+    expect(callArg.embeds[0].data.description).toContain('❶ ┃ ⬛')
+    expect(callArg.embeds[0].data.description).toContain('💣 **Mines Left:** `10`')
+    expect(callArg.components).toEqual([])
   })
 
   test('reveals a cell with coordinates in either order (D1 or 1D)', async () => {
@@ -50,6 +52,23 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     }
     await command.execute(mockInteraction2)
     expect(replyMock).toHaveBeenCalledTimes(2)
+  })
+
+  test('guarantees safe 0-tile opening on first click', async () => {
+    const replyMock = jest.fn().mockResolvedValue({})
+    const mockInteraction = {
+      channelId: 'test_chan',
+      options: { getString: jest.fn().mockReturnValue('D4') },
+      reply: replyMock
+    }
+
+    await command.execute(mockInteraction)
+    const state = await agentMemory.get('minesweeper.test_chan')
+    const parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.board[3][3]).toBe(0)
+    // Safe zone around (3,3) ensures multiple tiles are revealed
+    const revealedCount = parsedState.revealed.flat().filter(Boolean).length
+    expect(revealedCount).toBeGreaterThanOrEqual(9)
   })
 
   test('flags and unflags a cell with FD1 and 1DF', async () => {
