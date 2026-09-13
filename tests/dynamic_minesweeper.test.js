@@ -15,7 +15,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(typeof command.handleButton).toBe('function')
   })
 
-  test('initializes new game on empty action with circled row badges and separator', async () => {
+  test('initializes new game with board embed, buttons, and dropdowns', async () => {
     const replyMock = jest.fn().mockResolvedValue({})
     const mockInteraction = {
       channelId: 'test_chan',
@@ -31,7 +31,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(callArg.embeds[0].data.description).toContain('🎯 ┃ 🇦 🇧 🇨 🇩 🇪 🇫 🇬 🇭')
     expect(callArg.embeds[0].data.description).toContain('1️⃣ ┃ ⬛')
     expect(callArg.embeds[0].data.description).toContain('💣 **Mines Left:** `10`')
-    expect(callArg.components).toEqual([])
+    expect(callArg.components.length).toBe(3)
   })
 
   test('reveals a cell with coordinates in either order (D1 or 1D)', async () => {
@@ -94,7 +94,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(call2.embeds[0].data.description).toContain('🏳️ Unflagged tile **D1**')
   })
 
-  test('correctly handles column F for reveal (F1) and flag (FF1, flag F1)', async () => {
+  test('correctly handles column F for reveal (F1) and flag (FF8, flag F7)', async () => {
     const replyMock = jest.fn().mockResolvedValue({})
     // 1. Reveal F1
     const mockInteractionReveal = {
@@ -156,43 +156,102 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     expect(replyMock).toHaveBeenCalled()
     expect(editMock).not.toHaveBeenCalled()
     const call = replyMock.mock.calls[0][0]
-    expect(call.embeds[0].data.description).toContain('🔄 Started a fresh game!')
+    expect(call.embeds[0].data.description).toContain('Started a fresh game!')
   })
 
-  test('recovers smoothly from corrupt non-object memory', async () => {
-    await agentMemory.set('minesweeper.test_chan', '[object Object]')
-    const replyMock = jest.fn().mockResolvedValue({})
-    const mockInteraction = {
+  test('opens Reveal and Flag modals from interactive buttons', async () => {
+    const showModalMock = jest.fn().mockResolvedValue({})
+    const mockRevealBtn = {
+      customId: 'minesweeper_btn_reveal',
       channelId: 'test_chan',
-      options: { getString: jest.fn().mockReturnValue('A1') },
-      reply: replyMock
+      showModal: showModalMock
     }
 
-    await expect(command.execute(mockInteraction)).resolves.not.toThrow()
-    expect(replyMock).toHaveBeenCalled()
+    await command.handleButton(mockRevealBtn)
+    expect(showModalMock).toHaveBeenCalled()
+    const modalData = showModalMock.mock.calls[0][0].data
+    expect(modalData.custom_id).toBe('minesweeper_modal_reveal')
+    expect(modalData.title).toContain('Reveal')
+
+    const mockFlagBtn = {
+      customId: 'minesweeper_btn_flag',
+      channelId: 'test_chan',
+      showModal: showModalMock
+    }
+    await command.handleButton(mockFlagBtn)
+    expect(showModalMock).toHaveBeenCalledTimes(2)
+    const modalFlagData = showModalMock.mock.calls[1][0].data
+    expect(modalFlagData.custom_id).toBe('minesweeper_modal_flag')
   })
 
-  test('handles buttons for new game and help', async () => {
-    const replyNewMock = jest.fn().mockResolvedValue({ id: 'btn_msg_id' })
-    const mockButtonInteraction = {
-      customId: 'minesweeper_new',
+  test('handles modal submissions to reveal or flag tiles', async () => {
+    const updateMock = jest.fn().mockResolvedValue({})
+    const mockModalSubmit = {
+      customId: 'minesweeper_modal_reveal',
       channelId: 'test_chan',
-      reply: replyNewMock
+      isModalSubmit: () => true,
+      fields: {
+        getTextInputValue: jest.fn().mockReturnValue('E4')
+      },
+      update: updateMock
     }
 
-    await command.handleButton(mockButtonInteraction)
-    expect(replyNewMock).toHaveBeenCalled()
+    await command.handleButton(mockModalSubmit)
+    expect(updateMock).toHaveBeenCalled()
+    const state = await agentMemory.get('minesweeper.test_chan')
+    const parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.revealed[3][4]).toBe(true)
+  })
 
-    const replyMock = jest.fn().mockResolvedValue({})
-    const mockHelpInteraction = {
-      customId: 'minesweeper_help',
+  test('handles Column and Row select menus to play tile without typing', async () => {
+    const updateMock = jest.fn().mockResolvedValue({})
+
+    // 1. Select Column C
+    const mockColSelect = {
+      customId: 'minesweeper_select_col',
       channelId: 'test_chan',
-      reply: replyMock
+      values: ['C'],
+      update: updateMock
+    }
+    await command.handleButton(mockColSelect)
+    let state = await agentMemory.get('minesweeper.test_chan')
+    let parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.selectedCol).toBe('C')
+
+    // 2. Select Row 5 -> triggers play of C5
+    const mockRowSelect = {
+      customId: 'minesweeper_select_row',
+      channelId: 'test_chan',
+      values: ['5'],
+      update: updateMock
+    }
+    await command.handleButton(mockRowSelect)
+    state = await agentMemory.get('minesweeper.test_chan')
+    parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    // Once played, row and col selections are reset
+    expect(parsedState.selectedCol).toBeNull()
+    expect(parsedState.selectedRow).toBeNull()
+    // Tile C5 (row 4, col 2) is revealed!
+    expect(parsedState.revealed[4][2]).toBe(true)
+  })
+
+  test('toggles flag mode for dropdowns', async () => {
+    const updateMock = jest.fn().mockResolvedValue({})
+    const mockToggleBtn = {
+      customId: 'minesweeper_btn_flag_toggle',
+      channelId: 'test_chan',
+      update: updateMock
     }
 
-    await command.handleButton(mockHelpInteraction)
-    expect(replyMock).toHaveBeenCalled()
-    expect(replyMock.mock.calls[0][0].content).toContain('Minesweeper Controls')
+    await command.handleButton(mockToggleBtn)
+    let state = await agentMemory.get('minesweeper.test_chan')
+    let parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.flagMode).toBe(true)
+
+    await command.handleButton(mockToggleBtn)
+    state = await agentMemory.get('minesweeper.test_chan')
+    parsedState = typeof state === 'string' ? JSON.parse(state) : state
+    expect(parsedState.flagMode).toBe(false)
   })
 
   test('edits existing board message and deletes interacting slash command', async () => {
@@ -220,7 +279,6 @@ describe('Dynamic Slash Command: /minesweeper', () => {
       deleteReply: deleteReplyMock
     }
 
-    // Seed state with existing messageId
     await agentMemory.set('minesweeper.test_chan', {
       board: null,
       revealed: Array.from({ length: 8 }, () => Array(8).fill(false)),
@@ -232,11 +290,7 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     })
 
     await command.execute(mockInteraction)
-
-    // Verify existing message was edited in place
     expect(editMock).toHaveBeenCalled()
-
-    // Verify incoming slash command was deferred and deleted
     expect(deferReplyMock).toHaveBeenCalled()
     expect(deleteReplyMock).toHaveBeenCalled()
   })

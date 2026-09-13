@@ -1,4 +1,13 @@
-const { SlashCommandBuilder } = require('discord.js')
+const {
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} = require('discord.js')
 const { SafeEmbedBuilder: EmbedBuilder } = require('../util/discordFormatter')
 const agentMemory = require('../util/AgentMemory')
 const logger = require('../logger')
@@ -68,7 +77,10 @@ function newGame () {
     won: false,
     moves: 0,
     explodedR: -1,
-    explodedC: -1
+    explodedC: -1,
+    flagMode: false,
+    selectedCol: null,
+    selectedRow: null
   }
 }
 
@@ -116,6 +128,59 @@ function checkWin (game) {
       }
     }
   }
+}
+
+function applyAction (game, parsed) {
+  if (game.gameOver) {
+    return '⚠️ Game is already over! Start a new game with `/minesweeper action:new`.'
+  }
+
+  if (parsed.type === 'flag') {
+    const { row, col, coordLabel } = parsed
+    if (game.revealed[row][col]) {
+      return `⚠️ Cannot flag **${coordLabel}** — it is already revealed.`
+    }
+    game.flagged[row][col] = !game.flagged[row][col]
+    return game.flagged[row][col]
+      ? `🚩 Flagged tile **${coordLabel}**.`
+      : `🏳️ Unflagged tile **${coordLabel}**.`
+  }
+
+  if (parsed.type === 'reveal') {
+    const { row, col, coordLabel } = parsed
+    if (game.flagged[row][col]) {
+      return `🚩 Tile **${coordLabel}** is flagged. Unflag it first with \`F${coordLabel}\`.`
+    }
+    if (game.revealed[row][col]) {
+      return `ℹ️ Tile **${coordLabel}** is already revealed.`
+    }
+
+    if (!game.board) {
+      game.board = placeMines(row, col)
+    }
+
+    game.moves++
+
+    if (game.board[row][col] === -1) {
+      game.gameOver = true
+      game.explodedR = row
+      game.explodedC = col
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (game.board[r][c] === -1) {
+            game.revealed[r][c] = true
+          }
+        }
+      }
+      return ''
+    } else {
+      floodReveal(game, row, col)
+      checkWin(game)
+      return ''
+    }
+  }
+
+  return ''
 }
 
 function parseAction (rawInput) {
@@ -202,8 +267,64 @@ function renderBoard (game) {
   return lines.join('\n')
 }
 
-function buildComponents () {
-  return []
+function buildComponents (game) {
+  if (!game || game.gameOver) {
+    return []
+  }
+
+  const isFlagOn = Boolean(game.flagMode)
+
+  // Row 1: Action & Toggle Buttons
+  const buttonRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('minesweeper_btn_reveal')
+      .setLabel('⛏️ Reveal (Type)')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('minesweeper_btn_flag')
+      .setLabel('🚩 Flag (Type)')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('minesweeper_btn_flag_toggle')
+      .setLabel(isFlagOn ? '🚩 Mode: Flag ON' : '⛏️ Mode: Dig')
+      .setStyle(isFlagOn ? ButtonStyle.Danger : ButtonStyle.Secondary)
+  )
+
+  // Row 2: Column Dropdown
+  const colMenu = new StringSelectMenuBuilder()
+    .setCustomId('minesweeper_select_col')
+    .setPlaceholder(game.selectedCol ? `Selected Column: ${game.selectedCol}` : '🎯 Select Column (A – H)...')
+    .addOptions(
+      COL_HEADERS.map((emoji, i) => {
+        const letter = String.fromCharCode(65 + i)
+        return {
+          label: `Column ${letter}`,
+          value: letter,
+          emoji,
+          default: game.selectedCol === letter
+        }
+      })
+    )
+  const colRow = new ActionRowBuilder().addComponents(colMenu)
+
+  // Row 3: Row Dropdown
+  const rowMenu = new StringSelectMenuBuilder()
+    .setCustomId('minesweeper_select_row')
+    .setPlaceholder(game.selectedRow ? `Selected Row: ${game.selectedRow}` : '🔢 Select Row (1 – 8)...')
+    .addOptions(
+      ROW_HEADERS.map((emoji, i) => {
+        const num = String(i + 1)
+        return {
+          label: `Row ${num}`,
+          value: num,
+          emoji,
+          default: game.selectedRow === num
+        }
+      })
+    )
+  const rowSelectRow = new ActionRowBuilder().addComponents(rowMenu)
+
+  return [buttonRow, colRow, rowSelectRow]
 }
 
 function buildEmbed (game, notice = '') {
@@ -236,8 +357,184 @@ function buildEmbed (game, notice = '') {
     .setDescription(description)
     .setColor(game.won ? 0x2ECC71 : game.gameOver ? 0xE74C3C : 0x5865F2)
     .setFooter({
-      text: '8×8 Grid | Reveal: D1 or 1D | Flag: FD1 or 1DF | Reset: /minesweeper action:new'
+      text: '8×8 Grid | ⛏️ Tap Dig/Flag or Pick Col+Row below | Reset: /minesweeper action:new'
     })
+}
+
+async function handleInteraction (interaction) {
+  const customId = interaction.customId
+  if (!customId || !customId.startsWith('minesweeper')) return
+
+  const memKey = 'minesweeper.' + (interaction.channelId || 'dm')
+  let raw = await agentMemory.get(memKey)
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw)
+    } catch (_) {
+      raw = null
+    }
+  }
+  const game = raw || newGame()
+
+  // 1. Button: Open Reveal Modal
+  if (customId === 'minesweeper_btn_reveal') {
+    const modal = new ModalBuilder()
+      .setCustomId('minesweeper_modal_reveal')
+      .setTitle('⛏️ Reveal Tile')
+    const input = new TextInputBuilder()
+      .setCustomId('minesweeper_input_coord')
+      .setLabel('Coordinates to Reveal (e.g. D1, 1D, F1)')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('D1')
+      .setMinLength(2)
+      .setMaxLength(4)
+      .setRequired(true)
+    modal.addComponents(new ActionRowBuilder().addComponents(input))
+    if (typeof interaction.showModal === 'function') {
+      await interaction.showModal(modal).catch(() => {})
+    }
+    return
+  }
+
+  // 2. Button: Open Flag Modal
+  if (customId === 'minesweeper_btn_flag') {
+    const modal = new ModalBuilder()
+      .setCustomId('minesweeper_modal_flag')
+      .setTitle('🚩 Flag / Unflag Tile')
+    const input = new TextInputBuilder()
+      .setCustomId('minesweeper_input_coord')
+      .setLabel('Coordinates to Flag (e.g. D1, 1D, F1)')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('D1')
+      .setMinLength(2)
+      .setMaxLength(4)
+      .setRequired(true)
+    modal.addComponents(new ActionRowBuilder().addComponents(input))
+    if (typeof interaction.showModal === 'function') {
+      await interaction.showModal(modal).catch(() => {})
+    }
+    return
+  }
+
+  // 3. Button: Toggle Flag Mode for Dropdowns
+  if (customId === 'minesweeper_btn_flag_toggle') {
+    game.flagMode = !game.flagMode
+    await agentMemory.set(memKey, game, 30)
+    const notice = game.flagMode
+      ? '🚩 Dropdown Flag Mode is **ON** — selecting Col + Row will flag/unflag that tile.'
+      : '⛏️ Dropdown Dig Mode is **ON** — selecting Col + Row will reveal that tile.'
+    const embed = buildEmbed(game, notice)
+    const components = buildComponents(game)
+    if (typeof interaction.update === 'function') {
+      await interaction.update({ embeds: [embed], components }).catch(() => {})
+    }
+    return
+  }
+
+  // 4. Modal Submission: Reveal or Flag
+  if (interaction.isModalSubmit?.() || customId.startsWith('minesweeper_modal')) {
+    const coordVal = interaction.fields?.getTextInputValue?.('minesweeper_input_coord') || ''
+    const isFlagModal = customId === 'minesweeper_modal_flag'
+    const fullAction = isFlagModal ? `flag ${coordVal}` : coordVal
+    const parsed = parseAction(fullAction)
+    let notice = ''
+
+    if (!parsed || parsed.type === 'invalid') {
+      notice = `⚠️ Invalid tile format: \`${coordVal}\`. Use \`D1\`, \`1D\`, or \`F1\`.`
+    } else {
+      notice = applyAction(game, parsed)
+      await agentMemory.set(memKey, game, 30)
+    }
+
+    const embed = buildEmbed(game, notice)
+    const components = buildComponents(game)
+    if (typeof interaction.update === 'function') {
+      await interaction.update({ embeds: [embed], components }).catch(async () => {
+        if (typeof interaction.reply === 'function' && !interaction.replied && !interaction.deferred) {
+          await interaction.reply({ embeds: [embed], components, ephemeral: true }).catch(() => {})
+        }
+      })
+    }
+    return
+  }
+
+  // 5. Dropdown Selection: Column
+  if (customId === 'minesweeper_select_col') {
+    const selectedCol = interaction.values?.[0]
+    game.selectedCol = selectedCol
+    let notice = ''
+
+    if (game.selectedCol && game.selectedRow) {
+      const coordStr = `${game.selectedCol}${game.selectedRow}`
+      const actionType = game.flagMode ? 'flag' : 'reveal'
+      const parsed = {
+        type: actionType,
+        row: parseInt(game.selectedRow, 10) - 1,
+        col: game.selectedCol.charCodeAt(0) - 65,
+        coordLabel: coordStr
+      }
+      notice = applyAction(game, parsed)
+      game.selectedCol = null
+      game.selectedRow = null
+      await agentMemory.set(memKey, game, 30)
+    } else {
+      await agentMemory.set(memKey, game, 30)
+      notice = `Selected Column **${game.selectedCol}**. Now pick a Row below.`
+    }
+
+    const embed = buildEmbed(game, notice)
+    const components = buildComponents(game)
+    if (typeof interaction.update === 'function') {
+      await interaction.update({ embeds: [embed], components }).catch(() => {})
+    }
+    return
+  }
+
+  // 6. Dropdown Selection: Row
+  if (customId === 'minesweeper_select_row') {
+    const selectedRow = interaction.values?.[0]
+    game.selectedRow = selectedRow
+    let notice = ''
+
+    if (game.selectedCol && game.selectedRow) {
+      const coordStr = `${game.selectedCol}${game.selectedRow}`
+      const actionType = game.flagMode ? 'flag' : 'reveal'
+      const parsed = {
+        type: actionType,
+        row: parseInt(game.selectedRow, 10) - 1,
+        col: game.selectedCol.charCodeAt(0) - 65,
+        coordLabel: coordStr
+      }
+      notice = applyAction(game, parsed)
+      game.selectedCol = null
+      game.selectedRow = null
+      await agentMemory.set(memKey, game, 30)
+    } else {
+      await agentMemory.set(memKey, game, 30)
+      notice = `Selected Row **${game.selectedRow}**. Now pick a Column above.`
+    }
+
+    const embed = buildEmbed(game, notice)
+    const components = buildComponents(game)
+    if (typeof interaction.update === 'function') {
+      await interaction.update({ embeds: [embed], components }).catch(() => {})
+    }
+    return
+  }
+
+  // Legacy fallback button
+  if (customId === 'minesweeper_new') {
+    const freshGame = newGame()
+    const embed = buildEmbed(freshGame, '🎮 Started a fresh Minesweeper game!')
+    const components = buildComponents(freshGame)
+    if (typeof interaction.reply === 'function') {
+      const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true }).catch(() => {})
+      if (reply?.id) {
+        freshGame.messageId = reply.id
+        await agentMemory.set(memKey, freshGame, 30)
+      }
+    }
+  }
 }
 
 module.exports = {
@@ -250,25 +547,8 @@ module.exports = {
         .setRequired(false)
     ),
 
-  handleButton: async (interaction) => {
-    const customId = interaction.customId
-    const memKey = 'minesweeper.' + (interaction.channelId || 'dm')
-    if (customId === 'minesweeper_new') {
-      const game = newGame()
-      const embed = buildEmbed(game, '🎮 Started a fresh Minesweeper game! Reveal a tile with `/minesweeper action:D1`')
-      const components = buildComponents()
-      const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true }).catch(() => {})
-      if (reply?.id) {
-        game.messageId = reply.id
-        await agentMemory.set(memKey, game, 30)
-      }
-    } else if (customId === 'minesweeper_help') {
-      await interaction.reply({
-        content: '📌 **Minesweeper Controls:**\n• **Reveal tile**: `/minesweeper action:D1` or `action:1D`\n• **Flag tile**: `/minesweeper action:FD1`, `action:1DF`, or `action:flag D1`\n• **New game**: `/minesweeper action:new`',
-        ephemeral: true
-      }).catch(() => {})
-    }
-  },
+  handleButton: handleInteraction,
+  handleInteraction,
 
   execute: async (interaction) => {
     const memKey = 'minesweeper.' + (interaction.channelId || 'dm')
@@ -299,56 +579,18 @@ module.exports = {
       } else if (parsed.type === 'reset') {
         game = newGame()
         isNewGame = true
-        notice = '🔄 Started a fresh game! Reveal a tile with `/minesweeper action:D1`'
+        notice = '🔄 Started a fresh game! Tap **Reveal** or pick Col+Row below.'
         await agentMemory.set(memKey, game, 30)
       } else if (game.gameOver) {
         notice = '⚠️ Game is already over! Start a new game with `/minesweeper action:new`.'
-      } else if (parsed.type === 'flag') {
-        const { row, col, coordLabel } = parsed
-        if (game.revealed[row][col]) {
-          notice = `⚠️ Cannot flag **${coordLabel}** — it is already revealed.`
-        } else {
-          game.flagged[row][col] = !game.flagged[row][col]
-          notice = game.flagged[row][col]
-            ? `🚩 Flagged tile **${coordLabel}**.`
-            : `🏳️ Unflagged tile **${coordLabel}**.`
-          await agentMemory.set(memKey, game, 30)
-        }
-      } else if (parsed.type === 'reveal') {
-        const { row, col, coordLabel } = parsed
-        if (game.flagged[row][col]) {
-          notice = `🚩 Tile **${coordLabel}** is flagged. Unflag it first with \`F${coordLabel}\`.`
-        } else if (game.revealed[row][col]) {
-          notice = `ℹ️ Tile **${coordLabel}** is already revealed.`
-        } else {
-          if (!game.board) {
-            game.board = placeMines(row, col)
-          }
-
-          game.moves++
-
-          if (game.board[row][col] === -1) {
-            game.gameOver = true
-            game.explodedR = row
-            game.explodedC = col
-            for (let r = 0; r < ROWS; r++) {
-              for (let c = 0; c < COLS; c++) {
-                if (game.board[r][c] === -1) {
-                  game.revealed[r][c] = true
-                }
-              }
-            }
-          } else {
-            floodReveal(game, row, col)
-            checkWin(game)
-          }
-          await agentMemory.set(memKey, game, 30)
-        }
+      } else {
+        notice = applyAction(game, parsed)
+        await agentMemory.set(memKey, game, 30)
       }
     } else if (game.gameOver) {
       game = newGame()
       isNewGame = true
-      notice = '🎮 Started a fresh game! Reveal a tile with `/minesweeper action:D1`'
+      notice = '🎮 Started a fresh game! Tap **Reveal** or pick Col+Row below.'
       await agentMemory.set(memKey, game, 30)
     }
 
@@ -359,7 +601,6 @@ module.exports = {
         boardMsg = await interaction.channel.messages.fetch(game.messageId).catch(() => null)
       }
 
-      // Fallback: look for the most recent minesweeper message from the bot in this channel
       if (!boardMsg && interaction.channel?.messages?.fetch) {
         const recent = await interaction.channel.messages.fetch({ limit: 15 }).catch(() => null)
         if (recent) {
@@ -377,23 +618,19 @@ module.exports = {
     }
 
     const embed = buildEmbed(game, notice)
-    const components = buildComponents()
+    const components = buildComponents(game)
 
     if (!isNewGame && boardMsg) {
-      // 1. Immediately acknowledge the slash command
       await interaction.deferReply().catch(() => {})
 
-      // 2. Update the initial minesweeper message in place
       await boardMsg.edit({ embeds: [embed], components }).catch(err => {
         logger.error(`Failed to update minesweeper board message: ${err.message}`)
       })
 
-      // 3. Delete the interacting slash command so the channel remains clean
       await interaction.deleteReply().catch(err => {
         logger.warn(`Failed to delete slash command interaction: ${err.message}`)
       })
     } else {
-      // New game or no initial message found: post a new board message and track its ID
       const reply = await interaction.reply({ embeds: [embed], components, fetchReply: true })
       if (reply?.id) {
         game.messageId = reply.id
