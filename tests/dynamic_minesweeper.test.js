@@ -107,6 +107,11 @@ describe('Dynamic Slash Command: /minesweeper', () => {
     const parsedState = typeof state === 'string' ? JSON.parse(state) : state
     expect(parsedState.revealed[0][5]).toBe(true)
 
+    // Ensure test target cells are unrevealed before testing flagging
+    parsedState.revealed[7][5] = false
+    parsedState.revealed[6][5] = false
+    await agentMemory.set('minesweeper.test_chan', parsedState)
+
     // 2. Flag F8 with FF8
     const mockInteractionFlagFF = {
       channelId: 'test_chan',

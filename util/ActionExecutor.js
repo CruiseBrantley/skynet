@@ -282,22 +282,79 @@ Example output:
       logger.warn(`ActionExecutor: Classification failed (${e.message}). Falling back to send_message.`)
       // Extract channel mentions even on fallback
       const channelMatch = task.description.match(/<#(\d+)>/)
+      const rawContent = task.description.replace(/<#\d+>/g, '').trim()
       return {
         action: 'send_message',
         override_channel_id: channelMatch?.[1] || null,
-        params: { content: task.description.replace(/<#\d+>/g, '').trim() }
+        params: { content: ActionExecutor.interpolateTaskContent(rawContent, task) }
       }
     }
+  }
+
+  /**
+   * Cleans and dynamically interpolates scheduled task messages.
+   * Extracts clean quoted messages from prompt instructions and evaluates dynamic day counts (e.g. Day [N]).
+   * @param {string} content
+   * @param {object} task
+   * @returns {string}
+   */
+  static interpolateTaskContent (content, task = {}) {
+    if (!content || typeof content !== 'string') return ''
+    let text = content.trim()
+
+    // 1. If wrapped in instruction text like: Send this exact message to @User: "..." (notes)
+    const quoteMatch = text.match(/["“]([\s\S]+?)["”]/)
+    if (quoteMatch && /\b(send|remind|message)\b/i.test(text.substring(0, quoteMatch.index + 5))) {
+      text = quoteMatch[1].trim()
+    }
+
+    // 2. Interpolate dynamic day counts like Day [N], Day {N}, Day [day]
+    if (/\[N\]|\{N\}|\[day\]|\{day\}/i.test(text)) {
+      const fullContext = `${task.description || ''} ${JSON.stringify(task.params || '')} ${content}`
+      let startDate = null
+
+      if (task.params?.startDate) {
+        startDate = new Date(task.params.startDate)
+      } else if (task.startDate) {
+        startDate = new Date(task.startDate)
+      } else {
+        const isoMatch = fullContext.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+        if (isoMatch) {
+          startDate = new Date(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10) - 1, parseInt(isoMatch[3], 10))
+        } else {
+          const monthMatch = fullContext.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(\d{1,2})\b/i)
+          if (monthMatch) {
+            const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+            const monthIdx = monthNames.indexOf(monthMatch[1].toLowerCase().substring(0, 3))
+            const dayNum = parseInt(monthMatch[2], 10)
+            const currentYear = new Date().getFullYear()
+            if (monthIdx !== -1 && !isNaN(dayNum)) {
+              startDate = new Date(currentYear, monthIdx, dayNum)
+            }
+          }
+        }
+      }
+
+      if (startDate && !isNaN(startDate.getTime())) {
+        const now = new Date()
+        const startMidnight = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+        const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const diffDays = Math.floor((nowMidnight - startMidnight) / (1000 * 60 * 60 * 24)) + 1
+        text = text.replace(/\[N\]|\{N\}|\[day\]|\{day\}/gi, String(diffDays))
+      }
+    }
+
+    return text
   }
 
   // ─── Channel Resolution ──────────────────────────────────────────────────────
 
   /**
-     * Resolve the Discord channel/DM to deliver to.
-     * @param {import('discord.js').Client} bot
-     * @param {object} task
-     * @param {string|null} overrideChannelId - Takes priority over task.channelId if present
-     */
+   * Resolve the Discord channel/DM to deliver to.
+   * @param {import('discord.js').Client} bot
+   * @param {object} task
+   * @param {string|null} overrideChannelId - Takes priority over task.channelId if present
+   */
   async resolveChannel (bot, task, overrideChannelId) {
     if (!bot) return null
     const channelId = overrideChannelId || task.channelId
@@ -334,11 +391,11 @@ Example output:
   // ─── Execution ───────────────────────────────────────────────────────────────
 
   /**
-     * Classify and execute a scheduled task using the appropriate action.
-     * @param {import('discord.js').Client} bot
-     * @param {object} task
-     * @returns {Promise<boolean>} Whether delivery succeeded
-     */
+   * Classify and execute a scheduled task using the appropriate action.
+   * @param {import('discord.js').Client} bot
+   * @param {object} task
+   * @returns {Promise<boolean>} Whether delivery succeeded
+   */
   async execute (bot, task) {
     // Hot-reload custom actions before every execution
     this._loadCustom()
@@ -355,7 +412,15 @@ Example output:
         logger.error('ActionExecutor: send_message fallback missing. Cannot deliver.')
         return false
       }
-      classified.params = { content: task.description }
+      classified.params = { content: ActionExecutor.interpolateTaskContent(task.description, task) }
+    }
+
+    if (classified.action === 'send_message') {
+      const raw = classified.params?.content || classified.params?.message || task.description
+      const interpolated = ActionExecutor.interpolateTaskContent(raw, task)
+      if (!classified.params) classified.params = {}
+      classified.params.content = interpolated
+      if (classified.params.message) classified.params.message = interpolated
     }
 
     const isIndividual = !task.guildId || task.channelId === 'dm' || task.channelId === 'terminal' || (task.channelId && (task.channelId.startsWith('cli_') || task.channelId.startsWith('web_')))
@@ -750,4 +815,6 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
 
 const actionExecutorInstance = new ActionExecutor()
 actionExecutorInstance.FORBIDDEN_PATTERNS = FORBIDDEN_PATTERNS
+actionExecutorInstance.ActionExecutor = ActionExecutor
+actionExecutorInstance.interpolateTaskContent = ActionExecutor.interpolateTaskContent
 module.exports = actionExecutorInstance

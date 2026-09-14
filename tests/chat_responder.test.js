@@ -128,4 +128,18 @@ describe('DiscordResponder', () => {
       content: 'Non-streamed fallback text'
     }))
   })
+
+  test('Preserves markdown blockquotes while scrubbing internal thinking', async () => {
+    const quoteText = 'Here is what it looks like:\n\n> Hey @LushyLee! Day 14 of your September mile.\n\nThat is all.'
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: quoteText,
+      sharedState
+    })
+
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('> Hey @LushyLee! Day 14 of your September mile.')
+    }))
+  })
 })
+

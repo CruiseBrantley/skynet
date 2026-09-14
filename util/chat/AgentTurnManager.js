@@ -654,7 +654,7 @@ class AgentTurnManager {
     const executedTools = []
     const executedSignatures = new Set()
     const highImpactExecuted = new Set()
-    const highImpactActions = new Set(['send_embed', 'send_poll', 'summarize_history'])
+    const highImpactActions = new Set(['send_embed', 'send_poll', 'summarize_history', 'send_message'])
 
     let lastToolSignature = ''
     let consecutiveSameToolCount = 0

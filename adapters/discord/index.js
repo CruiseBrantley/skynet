@@ -99,6 +99,9 @@ class DiscordAdapter {
     // 1. Proactive DM Channel Caching Fix for Discord.js v14 (CRITICAL GUARDRAIL)
     this.client.on('raw', async (packet) => {
       if (packet.t === 'MESSAGE_CREATE' && !packet.d.guild_id) {
+        // Skip messages from bots or ourselves to prevent DM-FIX loops
+        if (packet.d.author?.bot || packet.d.author?.id === this.client.user?.id) return
+
         const msgId = packet.d.id
         const channelId = packet.d.channel_id
         this.pendingDMs.add(msgId)
@@ -199,10 +202,11 @@ class DiscordAdapter {
     this.client.on('messageCreate', async (message) => {
       try {
         if (!message || !message.author) return
-        if (message.author.bot) return
 
         // 1. Cancel fallback DM emission if message arrived naturally
         this.pendingDMs.delete(message.id)
+
+        if (message.author.bot) return
 
         // 2. Strict deduplication (prevent double execution from fallback races)
         if (this.processedMessages.has(message.id)) {
