@@ -87,7 +87,7 @@ class AgentTurnManager {
       ]
 
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
-      const evalResp = await queryFn(evaluationPrompt, { ...ollamaContext, isCodeTask: false }, this.botName)
+      const evalResp = await queryFn(evaluationPrompt, { ...ollamaContext, isCodeTask: false, think: false }, this.botName)
       const evalContent = evalResp?.message?.content || ''
       const cleanedContent = (evalContent || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 
@@ -735,7 +735,7 @@ class AgentTurnManager {
           const synthStream = interaction.streamToken || interaction.onToken || null
           const synthResponse = await queryFn(
             [...channelHistory.messages],
-            { ...ollamaContext, tools: [] },
+            { ...ollamaContext, tools: [], think: false },
             this.botName,
             synthStream
           )

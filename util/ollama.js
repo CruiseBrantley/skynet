@@ -595,7 +595,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
   const isGemma4 = currentModel.toLowerCase().includes('gemma4')
 
   let numCtx = 8192
-  let think = false
+  let think = options.think !== undefined ? Boolean(options.think) : false
   let maxMemoryChars = 3500
 
   if (isBackup) {
@@ -605,14 +605,15 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
   } else if (isQwen3) {
     numCtx = 65536 // 64k context window on RTX 5090
     maxMemoryChars = 8000 // Full deep memory history for 5090
-    think = true
+    think = options.think !== undefined ? Boolean(options.think) : Boolean(options.isCodeTask)
   } else if (isQwen) {
     numCtx = 16384
     maxMemoryChars = 3500
+    think = options.think !== undefined ? Boolean(options.think) : false
   } else if (isGemma4) {
     numCtx = 16384 // Cap at 16k for fast local execution on Mac Mini
     maxMemoryChars = 3500
-    think = true
+    think = options.think !== undefined ? Boolean(options.think) : Boolean(options.isCodeTask)
   }
 
   const agentMemory = require('./AgentMemory')
