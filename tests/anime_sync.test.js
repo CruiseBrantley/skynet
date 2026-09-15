@@ -301,6 +301,83 @@ describe('anime_sync action', () => {
     expect(res.updated).toBe(false)
   })
 
+  test('detectAndApplyScheduleDrift returns updated: false when event is already truncated before next air date', async () => {
+    const mockEvent = {
+      id: 'event_bleach_old',
+      summary: 'BLEACH: Thousand-Year Blood War - The Calamity',
+      start: { date: '2026-07-25' },
+      recurrence: ['RRULE:FREQ=WEEKLY;UNTIL=20261018T140000Z;BYDAY=SA']
+    }
+    // Monday 2026-10-19 14:00:00 UTC = 1792418400
+    const mockMedia = {
+      idMal: 60636,
+      episodes: 10,
+      nextAiringEpisode: {
+        episode: 9,
+        airingAt: 1792418400 // Monday
+      }
+    }
+
+    const res = await animeSync.detectAndApplyScheduleDrift('cal_id', mockEvent, mockMedia, 'token', false)
+    expect(res.updated).toBe(false)
+  })
+
+  test('detectAndApplyScheduleDrift returns updated: false when shifted event already exists in existingEvents', async () => {
+    const mockEvent = {
+      id: 'event_bleach_old',
+      summary: 'BLEACH: Thousand-Year Blood War - The Calamity',
+      start: { date: '2026-07-25' },
+      recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=SA']
+    }
+    // Monday 2026-10-19 14:00:00 UTC = 1792418400
+    const mockMedia = {
+      idMal: 60636,
+      episodes: 10,
+      nextAiringEpisode: {
+        episode: 9,
+        airingAt: 1792418400 // Monday
+      }
+    }
+    const existingEvents = [
+      mockEvent,
+      {
+        id: 'event_bleach_shifted',
+        summary: 'BLEACH: Thousand-Year Blood War - The Calamity',
+        start: { date: '2026-10-19' },
+        recurrence: ['RRULE:FREQ=WEEKLY;COUNT=2;BYDAY=MO']
+      }
+    ]
+
+    const res = await animeSync.detectAndApplyScheduleDrift('cal_id', mockEvent, mockMedia, 'token', false, existingEvents)
+    expect(res.updated).toBe(false)
+  })
+
+  test('detectAndApplyScheduleDrift returns updated: false when event extendedProperties marks shiftedTo', async () => {
+    const mockEvent = {
+      id: 'event_bleach_old',
+      summary: 'BLEACH: Thousand-Year Blood War - The Calamity',
+      start: { date: '2026-07-25' },
+      recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=SA'],
+      extendedProperties: {
+        private: {
+          shiftedTo: 'MO'
+        }
+      }
+    }
+    // Monday 2026-10-19 14:00:00 UTC = 1792418400
+    const mockMedia = {
+      idMal: 60636,
+      episodes: 10,
+      nextAiringEpisode: {
+        episode: 9,
+        airingAt: 1792418400 // Monday
+      }
+    }
+
+    const res = await animeSync.detectAndApplyScheduleDrift('cal_id', mockEvent, mockMedia, 'token', false)
+    expect(res.updated).toBe(false)
+  })
+
   test('calculateSeriesEndDate calculates exact UTC finale dates', () => {
     // 1. Explicit endDate
     const d1 = animeSync.calculateSeriesEndDate({

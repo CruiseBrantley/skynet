@@ -759,9 +759,10 @@ async function truncateFutureOccurrences (calendarId, event, media, token) {
  * @param {object} media - AniList media object
  * @param {string} token - Google OAuth access token
  * @param {boolean} dryRun - If true, preview changes without modifying calendar
+ * @param {Array<object>|null} existingEvents - Existing calendar events to check for already shifted recurrences
  * @returns {Promise<{ updated: boolean, message?: string }>}
  */
-async function detectAndApplyScheduleDrift (calendarId, event, media, token, dryRun = false) {
+async function detectAndApplyScheduleDrift (calendarId, event, media, token, dryRun = false, existingEvents = null) {
   if (!media?.nextAiringEpisode?.airingAt) return { updated: false }
   const isRecurring = Boolean(event.recurrence && event.recurrence.length > 0)
   if (!isRecurring) return { updated: false }
@@ -789,8 +790,58 @@ async function detectAndApplyScheduleDrift (calendarId, event, media, token, dry
   // If broadcast day has not shifted, no schedule drift
   if (currentDay === targetDay) return { updated: false }
 
+  // Guard: If this event was already shifted to targetDay, do not re-apply
+  if (event.extendedProperties?.private?.shiftedTo === targetDay) {
+    return { updated: false }
+  }
+
+  // Guard: If this event's recurrence is already truncated to end on or before nextAirDate,
+  // it has already been truncated and does not schedule any episodes on or past nextAirDate.
+  const rrule = event.recurrence[0] || ''
+  if (rrule.includes('UNTIL=')) {
+    const match = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?/i)
+    if (match) {
+      const untilDate = new Date(Date.UTC(
+        parseInt(match[1], 10),
+        parseInt(match[2], 10) - 1,
+        parseInt(match[3], 10),
+        match[4] ? parseInt(match[4], 10) : 23,
+        match[5] ? parseInt(match[5], 10) : 59,
+        match[6] ? parseInt(match[6], 10) : 59
+      ))
+      if (untilDate <= nextAirDate) {
+        return { updated: false }
+      }
+    }
+  }
+
+  const countMatch = rrule.match(/COUNT=(\d+)/i)
+  if (countMatch) {
+    const count = parseInt(countMatch[1], 10)
+    const start = new Date(event.start?.dateTime || event.start?.date || 0)
+    const recurrenceEndDate = new Date(start.getTime() + count * 7 * 24 * 60 * 60 * 1000)
+    if (recurrenceEndDate <= nextAirDate) {
+      return { updated: false }
+    }
+  }
+
   const nextEpNum = media.nextAiringEpisode.episode
   const dateStr = nextAirDate.toISOString().split('T')[0]
+
+  // Guard: If a shifted recurrence already exists in existingEvents for this series on targetDay, skip
+  if (Array.isArray(existingEvents)) {
+    const alreadyShifted = existingEvents.some(other => {
+      if (other.id === event.id) return false
+      const matchTitle = isTitleOnCalendar(other.summary, [event.summary, media.title?.romaji, media.title?.english].filter(Boolean))
+      if (!matchTitle) return false
+      const sameStart = (other.start?.date === dateStr || other.start?.dateTime?.startsWith(dateStr))
+      const hasTargetDay = other.recurrence?.[0]?.includes(`BYDAY=${targetDay}`)
+      return sameStart || hasTargetDay
+    })
+    if (alreadyShifted) {
+      return { updated: false }
+    }
+  }
 
   if (dryRun) {
     return {
@@ -814,7 +865,16 @@ async function detectAndApplyScheduleDrift (calendarId, event, media, token, dry
 
   await axios.patch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(event.id)}`,
-    { recurrence: updatedRecurrence },
+    {
+      recurrence: updatedRecurrence,
+      extendedProperties: {
+        private: {
+          ...(event.extendedProperties?.private || {}),
+          shiftedTo: targetDay,
+          shiftCutoff: untilStr
+        }
+      }
+    },
     { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
   )
 
@@ -1072,7 +1132,7 @@ module.exports = {
               endedTruncated.push(event.summary)
             }
           } else if (media && media.nextAiringEpisode?.airingAt) {
-            const driftRes = await module.exports.detectAndApplyScheduleDrift(calendar.id, event, media, token, dryRun || !canModifyCalendar)
+            const driftRes = await module.exports.detectAndApplyScheduleDrift(calendar.id, event, media, token, dryRun || !canModifyCalendar, existingCalendarEvents)
             if (driftRes?.updated && driftRes.message) {
               scheduleShifted.push(driftRes.message)
             }
