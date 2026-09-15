@@ -313,10 +313,14 @@ Example output:
       const fullContext = `${task.description || ''} ${JSON.stringify(task.params || '')} ${content}`
       let startDate = null
 
-      if (task.params?.startDate) {
-        startDate = new Date(task.params.startDate)
-      } else if (task.startDate) {
-        startDate = new Date(task.startDate)
+      const rawStart = task.params?.startDate || task.startDate
+      if (rawStart) {
+        const iso = String(rawStart).match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+        if (iso) {
+          startDate = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10))
+        } else {
+          startDate = new Date(rawStart)
+        }
       } else {
         const isoMatch = fullContext.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
         if (isoMatch) {
