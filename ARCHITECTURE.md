@@ -130,7 +130,7 @@ Skynet routes inference and synthesis across three hardware tiers:
    - **Model**: `qwen3.8:27b-5090` / Vision / Code Synthesis
 2. **Level 2 (Cloud Fallback & Search Grounding)**:
    - **Endpoint**: Google Gemini API (`v1beta`)
-   - **Models**: `gemini-2.5-flash` → `gemini-3.7-flash` → `gemini-3.5-flash`
+   - **Models**: `gemini-3.8-flash` → `gemini-3.7-flash` → `gemini-3.6-flash`
    - **Capabilities**: Google Search Grounding (`tools: [{ googleSearch: {} }]`), Large Context, Multimodal
 3. **Level 1 (Local Failover — Mac Mini)**:
    - **Endpoint**: `http://127.0.0.1:11434` (Apple Silicon M-series)
