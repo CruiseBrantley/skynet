@@ -225,6 +225,16 @@ class ActionExecutor {
       }
     }
 
+    // Fast-path 2: Deterministic memory audit instruction
+    if (/\b(?:memory\s+audit|audit\s+memor(?:y|ies))\b/i.test(desc)) {
+      const channelMatch = desc.match(/<#(\d+)>/)
+      return {
+        action: 'audit_memories',
+        params: {},
+        override_channel_id: channelMatch?.[1] || null
+      }
+    }
+
     // Scheduled task execution must deliver content, never loop into scheduling tools
     const nonExecutableInTask = new Set(['schedule_task', 'cancel_task', 'list_tasks', 'update_task'])
     const actionList = this.listActions()

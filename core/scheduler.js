@@ -141,6 +141,8 @@ class AgentScheduler {
     }
     if (updates.repeat !== undefined) task.repeat = updates.repeat
     if (updates.guildId !== undefined) task.guildId = updates.guildId
+    if (updates.action !== undefined) task.action = updates.action
+    if (updates.params !== undefined) task.params = updates.params
 
     this._save()
     logger.info(`AgentScheduler: Updated task ${id}.`)

@@ -9,7 +9,9 @@ module.exports = {
     description: 'What the task should do (e.g. "Send a dnd attendance poll to <#channelId>")',
     when: 'Natural language time (e.g. "tomorrow at 10am", "every saturday at 1pm", "in 30 minutes")',
     repeat: 'Optional recurrence: "hourly", "daily", or "weekly"',
-    channelId: 'The Discord channel ID string (snowflake) where the task should execute'
+    channelId: 'The Discord channel ID string (snowflake) where the task should execute',
+    action: 'Optional: Executable action name (e.g. "manage_workflows", "send_message", "audit_memories", "send_poll", "anime_sync")',
+    params: 'Optional: Object containing parameters for the action'
   },
   execute: async (bot, channel, params, context) => {
     const { description, when, repeat, channelId } = params
@@ -26,7 +28,26 @@ module.exports = {
       throw new Error(`Could not resolve your time expression: "${when}". Try being more specific like "at 10am" or "tomorrow at 2pm".`)
     }
 
-    // 2. Add to the local scheduler
+    // 2. Resolve action and params at definition time if not explicitly provided
+    let taskAction = params.action || null
+    let taskParams = params.params || null
+
+    if (!taskAction) {
+      const desc = description.trim()
+      const wfMatch = desc.match(/\b(?:run|execute)\s+workflow\s+([a-zA-Z0-9_-]+)(?:\s*\((wf_[a-zA-Z0-9_-]+)\))?/i)
+      if (wfMatch) {
+        taskAction = 'manage_workflows'
+        taskParams = { action: 'run', name: wfMatch[2] || wfMatch[1] }
+      } else if (/\b(?:memory\s+audit|audit\s+memor(?:y|ies))\b/i.test(desc)) {
+        taskAction = 'audit_memories'
+        taskParams = {}
+      } else if (/\banime\s+sync\b/i.test(desc) || /\bsync\s+(?:watchlist|anime)\b/i.test(desc)) {
+        taskAction = 'anime_sync'
+        taskParams = { operation: 'sync_watchlist', silent_if_no_additions: true }
+      }
+    }
+
+    // 3. Add to the local scheduler
     let targetChannelId = channelId
     if (!targetChannelId || targetChannelId === 'current') {
       targetChannelId = channel?.id || context.channelId || 'dm'
@@ -49,6 +70,8 @@ module.exports = {
       guildId: targetGuildId,
       channelId: targetChannelId,
       repeat: ['hourly', 'daily', 'weekly'].includes(repeat) ? repeat : null,
+      action: taskAction,
+      params: taskParams,
       createdBy: context.user?.username || 'chat_agent'
     })
 

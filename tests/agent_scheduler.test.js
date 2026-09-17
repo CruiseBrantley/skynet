@@ -27,12 +27,28 @@ jest.mock('../util/AgentScheduler', () => {
         guildId: task.guildId || null,
         channelId: task.channelId || 'dm',
         repeat: task.repeat || null,
+        action: task.action || null,
+        params: task.params || null,
         createdAt: Date.now(),
         createdBy: task.createdBy || 'test'
       }
       this._tasks.push(entry)
       this._save()
       return entry
+    }
+
+    update (id, updates) {
+      const task = this._tasks.find(t => t.id === id)
+      if (!task) return null
+      if (updates.description !== undefined) task.description = updates.description
+      if (updates.scheduledAt !== undefined) task.scheduledAt = updates.scheduledAt
+      if (updates.channelId !== undefined) task.channelId = updates.channelId
+      if (updates.repeat !== undefined) task.repeat = updates.repeat
+      if (updates.guildId !== undefined) task.guildId = updates.guildId
+      if (updates.action !== undefined) task.action = updates.action
+      if (updates.params !== undefined) task.params = updates.params
+      this._save()
+      return task
     }
 
     getDue () { return this._tasks.filter(t => t.scheduledAt <= Date.now()) }
@@ -141,6 +157,30 @@ describe('AgentScheduler', () => {
     const AgentScheduler = scheduler.constructor
     const newSched = new AgentScheduler()
     expect(newSched.getAll().some(t => t.description === 'Persistent Task')).toBe(true)
+  })
+
+  test('add() preserves explicit action and params', () => {
+    const t = scheduler.add({
+      description: 'Audit memories',
+      scheduledAt: Date.now() + 1000,
+      action: 'audit_memories',
+      params: { pruneExpired: true }
+    })
+    expect(t.action).toBe('audit_memories')
+    expect(t.params).toEqual({ pruneExpired: true })
+  })
+
+  test('update() modifies action and params', () => {
+    const t = scheduler.add({
+      description: 'Initial',
+      scheduledAt: Date.now() + 1000
+    })
+    const updated = scheduler.update(t.id, {
+      action: 'manage_workflows',
+      params: { action: 'run', name: 'wf_test' }
+    })
+    expect(updated.action).toBe('manage_workflows')
+    expect(updated.params).toEqual({ action: 'run', name: 'wf_test' })
   })
 })
 

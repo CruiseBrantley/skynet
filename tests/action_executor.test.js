@@ -321,6 +321,26 @@ describe('ActionExecutor', () => {
       })
       expect(result.action).toBe('noop')
     })
+
+    test('bypasses LLM classification when task already has action and params defined', async () => {
+      const result = await executor.classify({
+        id: 'task_test_structured',
+        description: 'Run some arbitrary description',
+        action: 'manage_workflows',
+        params: { action: 'run', name: 'wf_my_wf' }
+      })
+      expect(result.action).toBe('manage_workflows')
+      expect(result.params).toEqual({ action: 'run', name: 'wf_my_wf' })
+      expect(mockOllama.queryOllama).not.toHaveBeenCalled()
+    })
+
+    test('deterministically classifies memory audit descriptions to audit_memories', async () => {
+      const result = await executor.classify({
+        description: 'Weekly memory audit: Review all stored memory entries and purge expired.'
+      })
+      expect(result.action).toBe('audit_memories')
+      expect(mockOllama.queryOllama).not.toHaveBeenCalled()
+    })
   })
 
   // ─── resolveChannel ───────────────────────────────────────────────────────

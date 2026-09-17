@@ -9,10 +9,12 @@ module.exports = {
     description: 'Optional: New description of what the task should do.',
     when: 'Optional: New natural language time (e.g. "tomorrow at 10am").',
     repeat: 'Optional: New recurrence ("hourly", "daily", "weekly", or "none").',
-    channelId: 'Optional: New Discord channel ID where the task should execute.'
+    channelId: 'Optional: New Discord channel ID where the task should execute.',
+    action: 'Optional: New executable action name.',
+    params: 'Optional: New action parameters object.'
   },
   execute: async (bot, channel, params, context) => {
-    const { id, description, when, repeat, channelId } = params
+    const { id, description, when, repeat, channelId, action, params: taskParams } = params
 
     if (!id) {
       throw new Error('Missing "id" parameter for updating a task.')
@@ -21,6 +23,8 @@ module.exports = {
     const updates = {}
     if (description) updates.description = description
     if (channelId) updates.channelId = channelId
+    if (action !== undefined) updates.action = action
+    if (taskParams !== undefined) updates.params = taskParams
 
     if (when) {
       const scheduledAt = await resolveTime(when)
