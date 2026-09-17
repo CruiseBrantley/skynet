@@ -304,6 +304,23 @@ describe('ActionExecutor', () => {
       expect(mockOllama.queryOllama.mock.calls[0][2]).toBe(0) // Level 0 first
       expect(mockOllama.queryOllama.mock.calls[1][2]).toBe(2) // Level 2 retry (Gemini)
     })
+
+    test('deterministically classifies "Run workflow <name> (<id>)" to manage_workflows without invoking LLM', async () => {
+      const result = await executor.classify({
+        description: 'Run workflow lol_patch_checker (wf_lol_patch_checker_mtfvr95d). No additional interpretation needed.'
+      })
+      expect(result.action).toBe('manage_workflows')
+      expect(result.params).toEqual({ action: 'run', name: 'wf_lol_patch_checker_mtfvr95d' })
+      expect(mockOllama.queryOllama).not.toHaveBeenCalled()
+    })
+
+    test('suppresses send_message and returns noop when classification fails for technical command instructions', async () => {
+      mockOllama.queryOllama.mockRejectedValue(new Error('All fallback tiers unreachable'))
+      const result = await executor.classify({
+        description: 'Execute action purge_temp_cache'
+      })
+      expect(result.action).toBe('noop')
+    })
   })
 
   // ─── resolveChannel ───────────────────────────────────────────────────────

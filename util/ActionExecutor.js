@@ -213,6 +213,18 @@ class ActionExecutor {
       }
     }
 
+    // Fast-path 1: Deterministic workflow execution instruction (e.g. "Run workflow lol_patch_checker (wf_...)")
+    const desc = task.description || ''
+    const wfMatch = desc.match(/\b(?:run|execute)\s+workflow\s+([a-zA-Z0-9_-]+)(?:\s*\((wf_[a-zA-Z0-9_-]+)\))?/i)
+    if (wfMatch) {
+      const channelMatch = desc.match(/<#(\d+)>/)
+      return {
+        action: 'manage_workflows',
+        params: { action: 'run', name: wfMatch[2] || wfMatch[1] },
+        override_channel_id: channelMatch?.[1] || null
+      }
+    }
+
     // Scheduled task execution must deliver content, never loop into scheduling tools
     const nonExecutableInTask = new Set(['schedule_task', 'cancel_task', 'list_tasks', 'update_task'])
     const actionList = this.listActions()
@@ -280,6 +292,11 @@ Example output:
       return parsed
     } catch (e) {
       logger.warn(`ActionExecutor: Classification failed (${e.message}). Falling back to send_message.`)
+      // If task description was an unexecutable technical command/instruction (not a message to user), don't spam raw prompt
+      if (/^\s*(?:run|execute)\s+(?:workflow|action|task)\b/i.test(task.description || '')) {
+        logger.error(`ActionExecutor: Task description appears to be an unexecutable command: "${task.description}". Suppressing send_message delivery on classification failure.`)
+        return { action: 'noop', params: {} }
+      }
       // Extract channel mentions even on fallback
       const channelMatch = task.description.match(/<#(\d+)>/)
       const rawContent = task.description.replace(/<#\d+>/g, '').trim()
@@ -683,7 +700,23 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
      * @returns {Promise<{ success: boolean, error?: string }>}
      */
   async executeAction (name, params, context = {}) {
-    logger.info(`ActionExecutor: Triggering action "${name}" with params: ${JSON.stringify(params).substring(0, 500)}`)
+    // Support alternate/workflow signature: executeAction(name, bot, channel, params, context)
+    if (arguments.length >= 4) {
+      const botArg = arguments[1]
+      const channelArg = arguments[2]
+      const paramsArg = arguments[3]
+      const contextArg = arguments[4]
+      context = { ...(contextArg || {}), bot: botArg, channel: channelArg }
+      params = paramsArg || {}
+    }
+
+    let paramsStr = ''
+    try {
+      paramsStr = JSON.stringify(params, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500)
+    } catch (_) {
+      paramsStr = '[Unserializable params]'
+    }
+    logger.info(`ActionExecutor: Triggering action "${name}" with params: ${paramsStr}`)
     const action = this._actions[name]
     if (!action) return { success: false, error: `unknown action: ${name}` }
 

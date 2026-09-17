@@ -266,7 +266,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
     }
 
     const primaryModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
-    const candidateModels = [primaryModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].filter((v, i, a) => a.indexOf(v) === i)
+    const candidateModels = [primaryModel, 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite'].filter((v, i, a) => a.indexOf(v) === i)
 
     let geminiContents = []
     if (payload.messages) {
@@ -366,6 +366,9 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
         if (statusCode && statusCode !== 503 && statusCode !== 429 && statusCode !== 404 && statusCode !== 500) {
           // Non-transient errors (e.g. 400 Bad Request, 403 Forbidden) shouldn't be blindly retried across all models
           break
+        }
+        if (statusCode === 503 || statusCode === 429) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
         }
       }
     }
