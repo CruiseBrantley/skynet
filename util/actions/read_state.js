@@ -23,12 +23,22 @@ module.exports = {
 
     if (params.compare_with !== undefined) {
       const diffResult = stateStore.diff(key, params.compare_with)
+      if (context?.isWorkflow || context?.workflowId) {
+        return diffResult
+      }
       return `[SYSTEM: State Diff for "${key}":\n\`\`\`json\n${JSON.stringify(diffResult, null, 2)}\n\`\`\`]`
     }
 
     const entry = stateStore.getEntry(key)
     if (!entry) {
+      if (context?.isWorkflow || context?.workflowId) {
+        return { exists: false, value: null, message: `State key "${key}" is not set or has expired.` }
+      }
       return `[SYSTEM: State key "${key}" is not set or has expired.]`
+    }
+
+    if (context?.isWorkflow || context?.workflowId) {
+      return { exists: true, value: entry.value, updatedAt: entry.updatedAtIso }
     }
 
     return `[SYSTEM: State Value for "${key}" (Updated: ${entry.updatedAtIso}):\n\`\`\`json\n${JSON.stringify(entry.value, null, 2)}\n\`\`\`]`

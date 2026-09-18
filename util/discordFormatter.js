@@ -110,13 +110,25 @@ function smartTruncate (text, maxChars = 4000, suffix = '\n\n*(Truncated for Dis
 }
 
 /**
+ * Clean internal AI system prompt directives, search citations headers, or instructions.
+ */
+function stripSystemDirectives (text) {
+  if (!text || typeof text !== 'string') return ''
+  return text
+    .replace(/^\[SYSTEM:[^\]]*\]\s*/gi, '')
+    .replace(/\s*\[INSTRUCTIONS\]:[^\n]*\s*$/gi, '')
+    .trim()
+}
+
+/**
  * Sanitize and format text specifically for Discord Embed descriptions.
  * @param {string} text
  * @param {number} maxChars (default: 4000)
  */
 function formatForEmbed (text, maxChars = 4000) {
   if (!text || typeof text !== 'string') return ''
-  let formatted = convertMarkdownTables(text)
+  let formatted = stripSystemDirectives(text)
+  formatted = convertMarkdownTables(formatted)
   formatted = demoteLargeHeaders(formatted)
   return smartTruncate(formatted, maxChars)
 }
@@ -128,7 +140,8 @@ function formatForEmbed (text, maxChars = 4000) {
  */
 function formatForMessage (text, maxChars = 2000) {
   if (!text || typeof text !== 'string') return ''
-  const formatted = convertMarkdownTables(text)
+  let formatted = stripSystemDirectives(text)
+  formatted = convertMarkdownTables(formatted)
   return smartTruncate(formatted, maxChars)
 }
 
@@ -186,6 +199,7 @@ module.exports = {
   convertMarkdownTables,
   demoteLargeHeaders,
   balanceMarkdownTags,
+  stripSystemDirectives,
   smartTruncate,
   formatForEmbed,
   formatForMessage,

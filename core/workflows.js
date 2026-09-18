@@ -166,16 +166,61 @@ class WorkflowEngine {
   _resolveValue (val, stepResults, previousResult, context) {
     if (typeof val === 'string') {
       if (val === '$results' || val === '$prev') return previousResult
-      if (val.startsWith('$step')) {
+
+      // Support $steps.<step_name> or $steps.<step_name>.<path> (exact single token, no operators)
+      if (val.startsWith('$steps.') && !/\s|[!=<>]/.test(val)) {
+        const parts = val.substring(7).split('.')
+        const stepName = parts[0]
+        const subPath = parts.slice(1).join('.')
+        const stepIdx = context?.stepNameToIndex?.[stepName]
+        if (stepIdx !== undefined) {
+          const stepObj = stepResults[stepIdx]
+          if (subPath && stepObj && typeof stepObj === 'object') {
+            let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            // If subPath begins with "output." or "result." but stepObj has properties directly, check fallback
+            if (resolved === undefined && (subPath.startsWith('output.') || subPath.startsWith('result.'))) {
+              const altPath = subPath.replace(/^(output|result)\./, '')
+              resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            }
+            if (resolved !== undefined) return resolved
+          }
+          if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
+            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
+            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
+            if (patchMatch) return patchMatch[1]
+          }
+          if (subPath === 'output' || subPath === 'result') {
+            return stepObj
+          }
+          if (!subPath && stepObj !== undefined) return stepObj
+          return null
+        }
+      }
+
+      if (val.startsWith('$step') && !/\s|[!=<>]/.test(val)) {
         const match = val.match(/^\$step(\d+)(\..+)?$/)
         if (match) {
           const stepIndex = parseInt(match[1], 10) - 1
           const subPath = match[2] ? match[2].substring(1) : null
           const stepObj = stepResults[stepIndex]
           if (subPath && stepObj && typeof stepObj === 'object') {
-            return stepObj[subPath] !== undefined ? stepObj[subPath] : val
+            let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            if (resolved === undefined && (subPath.startsWith('output.') || subPath.startsWith('result.'))) {
+              const altPath = subPath.replace(/^(output|result)\./, '')
+              resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            }
+            if (resolved !== undefined) return resolved
           }
-          return stepObj !== undefined ? stepObj : val
+          if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
+            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
+            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
+            if (patchMatch) return patchMatch[1]
+          }
+          if (subPath === 'output' || subPath === 'result') {
+            return stepObj
+          }
+          if (!subPath && stepObj !== undefined) return stepObj
+          return null
         }
       }
       if (val.startsWith('$state.')) {
@@ -185,7 +230,7 @@ class WorkflowEngine {
       if (val === '$channelId') return context.channelId || null
       if (val === '$guildId') return context.guildId || null
 
-      // Inline string replacements (e.g. "Latest: $results")
+      // Inline string replacements (e.g. "Latest: $results", "$steps.search_latest_patch.output")
       let out = val
       if (out.includes('$results')) {
         out = out.replace(/\$results/g, typeof previousResult === 'object' ? JSON.stringify(previousResult) : String(previousResult || ''))
@@ -193,6 +238,32 @@ class WorkflowEngine {
       if (out.includes('$channelId')) {
         out = out.replace(/\$channelId/g, String(context.channelId || ''))
       }
+      // Replace embedded $steps.<step_name> references
+      out = out.replace(/\$steps\.([a-zA-Z0-9_-]+)(?:\.([a-zA-Z0-9_.-]+))?/g, (fullMatch, sName, sPath) => {
+        const stepIdx = context?.stepNameToIndex?.[sName]
+        if (stepIdx !== undefined) {
+          const stepObj = stepResults[stepIdx]
+          if (sPath && stepObj && typeof stepObj === 'object') {
+            let resolved = sPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            if (resolved === undefined && (sPath.startsWith('output.') || sPath.startsWith('result.'))) {
+              const altPath = sPath.replace(/^(output|result)\./, '')
+              resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+            }
+            if (resolved !== undefined) return typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved)
+          }
+          if (sPath && (sPath === 'patch' || sPath.endsWith('.patch') || sPath === 'version' || sPath.endsWith('.version'))) {
+            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
+            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
+            if (patchMatch) return patchMatch[1]
+          }
+          if (sPath === 'output' || sPath === 'result') {
+            return typeof stepObj === 'object' ? JSON.stringify(stepObj) : String(stepObj)
+          }
+          if (!sPath && stepObj !== undefined) return typeof stepObj === 'object' ? JSON.stringify(stepObj) : String(stepObj)
+          return ''
+        }
+        return fullMatch
+      })
       return out
     }
 
@@ -211,24 +282,69 @@ class WorkflowEngine {
     return val
   }
 
-  _evaluateCondition (condition, previousResult, stepResults, params) {
+  _evaluateCondition (condition, previousResult, stepResults, params, context = {}) {
     if (!condition || condition === 'always') return true
+    if (condition === 'never') return false
 
     if (condition === 'changed') {
-      // If diff_key is specified in params or compare_baseline
-      if (params && params.diff_key) {
-        const diffRes = stateStore.diff(params.diff_key, previousResult)
+      if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
+        return previousResult.hasChanged
+      }
+      if (params && (params.diff_key || params.key)) {
+        const diffRes = stateStore.diff(params.diff_key || params.key, previousResult)
         return diffRes.hasChanged
       }
       return previousResult !== null && previousResult !== undefined && previousResult !== ''
     }
 
     if (condition === 'truthy') {
+      if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
+        return previousResult.hasChanged
+      }
       return Boolean(previousResult)
     }
 
     if (condition === 'falsy') {
+      if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
+        return !previousResult.hasChanged
+      }
       return !previousResult
+    }
+
+    // Support expression evaluation like "$steps.compare_patch_baseline.output.hasChanged == true"
+    if (typeof condition === 'string') {
+      const compMatch = condition.match(/^\s*(.+?)\s*(==|!=)\s*(.+?)\s*$/)
+      if (compMatch) {
+        const leftRaw = compMatch[1].trim()
+        const op = compMatch[2]
+        const rightRaw = compMatch[3].trim()
+
+        const leftResolved = this._resolveValue(leftRaw, stepResults, previousResult, context)
+        const rightResolved = this._resolveValue(rightRaw, stepResults, previousResult, context)
+
+        const normalize = (v) => {
+          if (typeof v === 'boolean') return v
+          if (v === 'true') return true
+          if (v === 'false') return false
+          if (v === 'null') return null
+          if (v === 'undefined') return undefined
+          if (!isNaN(v) && v !== '' && typeof v === 'string') return Number(v)
+          return v
+        }
+
+        const leftVal = normalize(leftResolved)
+        const rightVal = normalize(rightResolved)
+
+        if (op === '==') return leftVal === rightVal
+        if (op === '!=') return leftVal !== rightVal
+      }
+
+      const resolved = this._resolveValue(condition, stepResults, previousResult, context)
+      if (typeof resolved === 'boolean') return resolved
+      if (typeof resolved === 'object' && resolved !== null && typeof resolved.hasChanged === 'boolean') {
+        return resolved.hasChanged
+      }
+      return Boolean(resolved)
     }
 
     return true
@@ -245,11 +361,19 @@ class WorkflowEngine {
     let previousResult = null
     const executionLogs = []
 
+    const stepNameToIndex = {}
+    for (let i = 0; i < wf.steps.length; i++) {
+      if (wf.steps[i]?.name) {
+        stepNameToIndex[wf.steps[i].name] = i
+      }
+    }
+
     const context = {
       workflowId: wf.id,
       workflowName: wf.name,
       channelId: channel?.id || wf.channelId,
       guildId: channel?.guild?.id || wf.guildId,
+      stepNameToIndex,
       ...extraContext
     }
 
@@ -271,7 +395,7 @@ class WorkflowEngine {
       }
 
       // Check condition
-      const shouldRun = this._evaluateCondition(step.condition, previousResult, stepResults, step.params)
+      const shouldRun = this._evaluateCondition(step.condition, previousResult, stepResults, step.params, context)
       if (!shouldRun) {
         executionLogs.push(`⏭️ Step ${i + 1} (${stepName}): Condition "${step.condition}" evaluated to false, skipped.`)
         stepResults.push(null)

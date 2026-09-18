@@ -3,11 +3,20 @@ const {
   demoteLargeHeaders,
   balanceMarkdownTags,
   smartTruncate,
+  stripSystemDirectives,
   formatForEmbed,
   formatForMessage
 } = require('../util/discordFormatter')
 
 describe('discordFormatter', () => {
+  describe('stripSystemDirectives', () => {
+    test('strips system headers and instruction trailers from tool outputs', () => {
+      const raw = '[SYSTEM: WEB SEARCH RESULTS (Distilled Knowledge)]\n- Patch 14.19 is live.\n- Buffs to champions.\n\n[INSTRUCTIONS]: Use this real-time information to formulate your answer.'
+      const cleaned = stripSystemDirectives(raw)
+      expect(cleaned).toBe('- Patch 14.19 is live.\n- Buffs to champions.')
+      expect(formatForEmbed(raw)).toBe('- Patch 14.19 is live.\n- Buffs to champions.')
+    })
+  })
   describe('convertMarkdownTables', () => {
     test('converts simple markdown table into bullet list', () => {
       const table = '| Game | Status |\n|---|---|\n| Valheim | Active |\n| Core Keeper | Inactive |'
