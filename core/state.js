@@ -45,7 +45,8 @@ class StateStore {
               }
             }
             this._saveLocalOnly()
-            logger.info(`StateStore: Hydrated ${remoteState.length} state keys from Firebase.`)
+            this._syncRemote()
+            logger.info(`StateStore: Hydrated ${remoteState.length} state keys from Firebase and synced baseline.`)
           } else if (remoteState && typeof remoteState === 'object') {
             for (const [k, v] of Object.entries(remoteState)) {
               if (!this._state.has(k)) {
@@ -53,7 +54,8 @@ class StateStore {
               }
             }
             this._saveLocalOnly()
-            logger.info(`StateStore: Hydrated ${Object.keys(remoteState).length} state keys from Firebase.`)
+            this._syncRemote()
+            logger.info(`StateStore: Hydrated ${Object.keys(remoteState).length} state keys from Firebase and synced baseline.`)
           }
         } else if (this._state.size > 0) {
           this._syncRemote()
@@ -122,6 +124,7 @@ class StateStore {
   }
 
   _saveLocalOnly () {
+    if (process.env.NODE_ENV === 'test') return
     try {
       this._ensureDataDir()
       this._pruneExpired()

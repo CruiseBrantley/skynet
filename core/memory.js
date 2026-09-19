@@ -106,7 +106,6 @@ class AgentMemory {
   _ensureDataDir () {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true })
-      logger.info('AgentMemory: Created data/ directory for persistent storage.')
     }
   }
 
@@ -122,6 +121,7 @@ class AgentMemory {
   }
 
   _saveLocalOnly () {
+    if (process.env.NODE_ENV === 'test') return
     try {
       fs.writeFileSync(MEMORY_FILE, JSON.stringify(this._data, null, 2))
     } catch (e) {

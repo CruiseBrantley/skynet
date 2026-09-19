@@ -36,6 +36,7 @@ class AgentScheduler {
   }
 
   _save () {
+    if (process.env.NODE_ENV === 'test') return
     try {
       fs.writeFileSync(TASKS_FILE, JSON.stringify(this._tasks, null, 2))
     } catch (e) {

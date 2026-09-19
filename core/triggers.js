@@ -99,6 +99,7 @@ class TriggerEngine {
   }
 
   _saveLocalOnly () {
+    if (process.env.NODE_ENV === 'test') return
     try {
       this._ensureDataDir()
       if (typeof fs.writeFileSync === 'function') {

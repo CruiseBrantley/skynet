@@ -38,14 +38,15 @@ class WorkflowEngine {
         if (snapshot && typeof snapshot.exists === 'function' && snapshot.exists()) {
           const remoteWfs = snapshot.val()
           if (Array.isArray(remoteWfs)) {
-            const existingIds = new Set(this._workflows.map(w => w.id))
+            const localMap = new Map(this._workflows.map(w => [w.id, w]))
             for (const rw of remoteWfs) {
-              if (!existingIds.has(rw.id)) {
+              if (!localMap.has(rw.id)) {
                 this._workflows.push(rw)
               }
             }
             this._saveLocalOnly()
-            logger.info(`WorkflowEngine: Hydrated ${remoteWfs.length} workflows from Firebase.`)
+            this._syncRemote()
+            logger.info(`WorkflowEngine: Hydrated ${remoteWfs.length} workflows from Firebase and synced baseline.`)
           }
         } else if (this._workflows.length > 0) {
           this._syncRemote()
@@ -94,13 +95,14 @@ class WorkflowEngine {
   }
 
   _saveLocalOnly () {
+    if (process.env.NODE_ENV === 'test') return
     try {
       this._ensureDataDir()
       if (typeof fs.writeFileSync === 'function') {
         fs.writeFileSync(WORKFLOWS_FILE, JSON.stringify(this._workflows, null, 2), 'utf8')
       }
     } catch (err) {
-      logger.error(`WorkflowEngine: Failed to save workflows: ${err.message}`)
+      logger.error(`WorkflowEngine: Failed to save workflows to disk: ${err.message}`)
     }
   }
 
@@ -150,6 +152,20 @@ class WorkflowEngine {
     this._save()
     logger.info(`WorkflowEngine: Registered workflow "${workflow.name}" (${workflow.id}) with ${steps.length} steps.`)
     return workflow
+  }
+
+  updateWorkflow (idOrName, updates = {}) {
+    const wf = this.getWorkflow(idOrName)
+    if (!wf) return null
+    if (updates.name) wf.name = String(updates.name).trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+    if (updates.description !== undefined) wf.description = updates.description
+    if (updates.channelId !== undefined) wf.channelId = updates.channelId
+    if (updates.guildId !== undefined) wf.guildId = updates.guildId
+    if (Array.isArray(updates.steps)) wf.steps = updates.steps
+    if (updates.enabled !== undefined) wf.enabled = Boolean(updates.enabled)
+    this._save()
+    logger.info(`WorkflowEngine: Updated workflow "${wf.name}" (${wf.id})`)
+    return wf
   }
 
   deleteWorkflow (idOrName) {
