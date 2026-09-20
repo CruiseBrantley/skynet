@@ -141,5 +141,41 @@ describe('DiscordResponder', () => {
       content: expect.stringContaining('> Hey @LushyLee! Day 14 of your September mile.')
     }))
   })
+
+  test('splitMessage safely splits oversized single-line responses into <= 1900-char chunks', () => {
+    const { splitMessage } = require('../util/chat/splitMessage')
+    // Continuous 5000-char line without newlines
+    const continuousLine = 'word '.repeat(1000) // 5000 chars
+    const chunks = splitMessage(continuousLine)
+
+    expect(chunks.length).toBeGreaterThanOrEqual(3)
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(1900)
+      expect(chunk.trim().length).toBeGreaterThan(0)
+    }
+
+    // 17,000 char line (similar to thermodynamics incident)
+    const longString = '2 a e o a a i e a e i a i o a e e '.repeat(500)
+    const longChunks = splitMessage(longString)
+    expect(longChunks.length).toBeGreaterThanOrEqual(9)
+    for (const chunk of longChunks) {
+      expect(chunk.length).toBeLessThanOrEqual(1900)
+      expect(chunk.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  test('DiscordResponder scrubs thinking and status messages from final response', async () => {
+    const thinkingText = '*Skynet is thinking...*\nHere is the real answer.'
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: thinkingText,
+      sharedState
+    })
+
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Here is the real answer.'
+    }))
+  })
 })
+
 

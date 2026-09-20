@@ -47,11 +47,16 @@ async function execute (interaction, database) {
   await interaction.deferReply()
 
   // Get the current queue promise or start a new one
+  const hadPreviousTurn = channelQueues.has(channelId)
   const previousTurn = channelQueues.get(channelId) || Promise.resolve()
 
   // Chain the new request
   const currentTurn = (async () => {
-    await previousTurn.catch(() => {}) // Wait for previous turn, ignore its errors
+    let waitedForQueue = false
+    if (hadPreviousTurn) {
+      waitedForQueue = true
+      await previousTurn.catch(() => {}) // Wait for previous turn, ignore its errors
+    }
     markChannelInFlight(channelId)
 
     const msgIdToMark = interaction.triggeringMessageId || interaction.id
@@ -115,7 +120,7 @@ async function execute (interaction, database) {
         logger.info(`Populated ${formatted.length} historical messages from conversationStore for profile "${profileId}".`)
       } else {
         // Server / Guild Channel Mode: Live Discord channel snapshot
-        if (!channelHistories[channelId] || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
+        if (!channelHistories[channelId] || waitedForQueue || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
           channelHistories[channelId] = {
             time: Date.now(),
             messages: [{ role: 'system', content: getBasePrompt(promptOptions) }]
@@ -123,7 +128,9 @@ async function execute (interaction, database) {
 
           // Populate initial context with last 20 messages for better situational awareness
           try {
-            const history = interaction.recentMessages || await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
+            const history = (!waitedForQueue && interaction.recentMessages)
+              ? interaction.recentMessages
+              : await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
             channelHistories[channelId].messages.push(...history)
             logger.info(`Populated ${history.length} historical messages for channel context.`)
           } catch (err) {
@@ -483,6 +490,9 @@ async function execute (interaction, database) {
         interaction.cleanup()
       }
       clearChannelInFlight(channelId)
+      if (channelQueues.get(channelId) === currentTurn) {
+        channelQueues.delete(channelId)
+      }
     }
   })()
 

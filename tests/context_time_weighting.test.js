@@ -52,4 +52,25 @@ describe('Time Weighting in Context Helper', () => {
     expect(formatted[0].role).toBe('assistant')
     expect(formatted[0].content).toContain('[ID: 1 | 10m ago]')
   })
+
+  it('filters out bot status and thinking placeholders from context', async () => {
+    const now = Date.now()
+    const messages = new Map([
+      ['1', { id: '1', author: { id: 'bot123', username: 'Skynet' }, content: '*Skynet is thinking...*', createdAt: new Date(now - 1000 * 30) }],
+      ['2', { id: '2', author: { id: 'bot123', username: 'Skynet' }, content: '*Skynet is thinking...* (12s)', createdAt: new Date(now - 1000 * 25) }],
+      ['3', { id: '3', author: { id: 'bot123', username: 'Skynet' }, content: '*Skynet is autonomously executing...*', createdAt: new Date(now - 1000 * 20) }],
+      ['4', { id: '4', author: { id: 'user1', username: 'alice' }, content: 'hello', createdAt: new Date(now - 1000 * 15) }],
+      ['5', { id: '5', author: { id: 'bot123', username: 'Skynet' }, content: '*Skynet is thinking...*\nActual answer here', createdAt: new Date(now - 1000 * 10) }]
+    ])
+
+    const formatted = await formatMessagesForContext(messages, 'bot123')
+    // Messages 1, 2, 3 should be dropped completely.
+    // Message 4 (user) and Message 5 (bot with actual answer scrubbed of thinking) should remain.
+    expect(formatted).toHaveLength(2)
+    expect(formatted[0].role).toBe('user')
+    expect(formatted[0].content).toContain('hello')
+    expect(formatted[1].role).toBe('assistant')
+    expect(formatted[1].content).toContain('Actual answer here')
+    expect(formatted[1].content).not.toContain('thinking')
+  })
 })

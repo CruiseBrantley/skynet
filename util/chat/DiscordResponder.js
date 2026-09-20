@@ -54,6 +54,8 @@ class DiscordResponder {
           .replace(BOILERPLATE_SCRUB_REGEX, '')
           .replace(ID_SCRUB_REGEX, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
+          .replace(/\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?/gi, '')
+          .replace(/^[•✓]\s+.*$/gm, '')
           .trim()
 
         if (!cleanChunk && i === 0 && !sharedState.primaryResponseUsed) continue
@@ -75,7 +77,8 @@ class DiscordResponder {
 
           // Clean status messages from the original text
           const cleanOriginal = originalText
-            .replace(/\*.*is autonomously executing.*\*/g, '')
+            .replace(/\*.*(?:is autonomously executing|is thinking\.\.\.).*\*(\s*\(\d+s\))?/gi, '')
+            .replace(/^[•✓]\s+.*$/gm, '')
             .replace(THOUGHT_SCRUB_REGEX, '')
             .trim()
 
@@ -143,6 +146,8 @@ class DiscordResponder {
           .replace(BOILERPLATE_SCRUB_REGEX, '')
           .replace(/^\[ID: \d+\]\s*@[\w\d._-]+(?:\s*\([^)]+\))?:\s*/, '')
           .replace(THOUGHT_SCRUB_REGEX, '')
+          .replace(/\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?/gi, '')
+          .replace(/^[•✓]\s+.*$/gm, '')
           .trim()
 
         if (fallbackClean) {
@@ -160,7 +165,18 @@ class DiscordResponder {
             // User already has the text from streaming. Do not spawn a duplicate channel.send.
             continue
           }
-          await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] })
+          try {
+            if (fallbackClean.length > 2000) {
+              const subChunks = splitMessage(fallbackClean)
+              for (const sc of subChunks) {
+                await interaction.channel.send({ content: sc, flags: [MessageFlags.SuppressEmbeds] }).catch(() => {})
+              }
+            } else {
+              await interaction.channel.send({ content: fallbackClean, flags: [MessageFlags.SuppressEmbeds] })
+            }
+          } catch (sendErr) {
+            logger.error(`DiscordResponder: channel.send fallback failed: ${sendErr.message}`)
+          }
         }
       }
     }

@@ -54,6 +54,17 @@ class AgentTurnManager {
       }
     }
 
+    // Deterministic check: Status placeholders or bullet progress lines are NEVER a sufficient final response
+    if (/^\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?$/i.test(trimmed) || /^[•✓]\s+/.test(trimmed)) {
+      logger.info('AgentTurnManager: Deterministic pending check: Assistant echoed a status placeholder.')
+      return {
+        isPending: true,
+        isSufficient: false,
+        reason: 'Assistant echoed a status message or placeholder instead of generating a real response',
+        suggestedAction: 'Provide a complete, grounded response answering the user\'s question'
+      }
+    }
+
     // If assistant is explicitly asking the user a clarifying question or confirmation, it is waiting for user input
     if (trimmed.endsWith('?') || /\b(do you want me to|would you like me to|should i|which option|please confirm)\b/i.test(trimmed)) {
       return { isPending: false, isSufficient: true, reason: 'Waiting for user input' }
@@ -782,9 +793,16 @@ class AgentTurnManager {
         }
 
         if (finalReplyContent) {
+          finalReplyContent = finalReplyContent
+            .replace(/\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?/gi, '')
+            .replace(/^[•✓]\s+.*$/gm, '')
+            .trim()
+        }
+
+        if (finalReplyContent) {
           channelHistory.messages.push({ role: 'assistant', content: finalReplyContent })
         }
-        logger.info(`AgentTurnManager: Natural completion reached at step ${step + 1}. Final reply length: ${finalReplyContent.length}`)
+        logger.info(`AgentTurnManager: Natural completion reached at step ${step + 1}. Final reply length: ${(finalReplyContent || '').length}`)
         break
       }
 

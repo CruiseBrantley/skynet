@@ -25,6 +25,18 @@ async function formatMessagesForContext (messages, botId) {
     const handle = `@${m.author.username}`
     let content = (m.content || '').replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
 
+    if (role === 'assistant') {
+      content = content
+        .replace(/\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?/gi, '')
+        .replace(/^[•✓]\s+.*$/gm, '')
+        .trim()
+
+      // If assistant message was purely a thinking or status placeholder, skip it
+      if (!content && (!m.attachments || m.attachments.size === 0)) {
+        continue
+      }
+    }
+
     if (m.attachments && m.attachments.size > 0) {
       const attachmentList = [...m.attachments.values()].map(a => {
         if (a.contentType?.startsWith('image/')) return '[Attached Image]'
@@ -33,6 +45,10 @@ async function formatMessagesForContext (messages, botId) {
         return `[Attached File: ${a.name}]`
       }).join(' ')
       content = `${attachmentList} ${content}`.trim()
+    }
+
+    if (!content) {
+      continue
     }
 
     let reactionsLabel = ''
