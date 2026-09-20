@@ -266,7 +266,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
     }
 
     const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-    const candidateModels = [primaryModel, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash'].filter((v, i, a) => a.indexOf(v) === i)
+    const candidateModels = [primaryModel, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash'].filter((v, i, a) => a.indexOf(v) === i)
+    const geminiTimeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS) || 25000
 
     let geminiContents = []
     if (payload.messages) {
@@ -321,7 +322,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
           `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
           requestBody,
           {
-            timeout: timeoutMs
+            timeout: geminiTimeoutMs
           }
         )
 
