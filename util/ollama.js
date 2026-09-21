@@ -41,7 +41,51 @@ async function checkOllamaOnline (url, endpoint) {
   }
 }
 
-async function consumeOllamaStream (responseStream, onToken = null) {
+function createStreamWatchdog ({ ttftMs = 10000, inactivityMs = 10000, onTimeout }) {
+  let timer = null
+  let receivedFirstChunk = false
+  let isDone = false
+
+  const clear = () => {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
+  const arm = (ms, reason) => {
+    clear()
+    if (isDone) return
+    timer = setTimeout(() => {
+      if (isDone) return
+      isDone = true
+      clear()
+      if (typeof onTimeout === 'function') {
+        onTimeout(new Error(reason))
+      }
+    }, ms)
+    if (typeof timer.unref === 'function') timer.unref()
+  }
+
+  arm(ttftMs, `Stream TTFT timeout (${ttftMs}ms exceeded without first token)`)
+
+  return {
+    onChunk: () => {
+      if (isDone) return
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true
+      }
+      arm(inactivityMs, `Stream inactivity timeout (${inactivityMs}ms exceeded between tokens)`)
+    },
+    done: () => {
+      isDone = true
+      clear()
+    },
+    isDone: () => isDone
+  }
+}
+
+async function consumeOllamaStream (responseStream, onToken = null, watchdogOptions = {}) {
   let fullContent = ''
   let fullThinking = ''
   const fullToolCalls = []
@@ -86,25 +130,55 @@ async function consumeOllamaStream (responseStream, onToken = null) {
     }
   }
 
-  for await (const chunk of responseStream) {
-    buffer += chunk.toString('utf8')
-    const lines = buffer.split('\n')
-    buffer = lines.pop()
+  let watchdogError = null
+  let watchdog = null
+  if (watchdogOptions && watchdogOptions.enabled !== false && (watchdogOptions.ttftMs || watchdogOptions.inactivityMs)) {
+    watchdog = createStreamWatchdog({
+      ttftMs: watchdogOptions.ttftMs || 15000,
+      inactivityMs: watchdogOptions.inactivityMs || 10000,
+      onTimeout: (err) => {
+        watchdogError = err
+        if (typeof watchdogOptions.abortController?.abort === 'function') {
+          watchdogOptions.abortController.abort(err)
+        }
+        if (typeof responseStream.destroy === 'function') {
+          responseStream.destroy(err)
+        }
+      }
+    })
+  }
 
-    for (const line of lines) {
-      if (!line.trim()) continue
+  if (typeof responseStream.on === 'function') {
+    responseStream.on('error', () => {})
+  }
+
+  try {
+    for await (const chunk of responseStream) {
+      if (watchdog) watchdog.onChunk()
+      buffer += chunk.toString('utf8')
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const parsed = JSON.parse(line)
+          processChunk(parsed)
+        } catch (e) {}
+      }
+    }
+
+    if (buffer && buffer.trim()) {
       try {
-        const parsed = JSON.parse(line)
+        const parsed = JSON.parse(buffer)
         processChunk(parsed)
       } catch (e) {}
     }
-  }
-
-  if (buffer && buffer.trim()) {
-    try {
-      const parsed = JSON.parse(buffer)
-      processChunk(parsed)
-    } catch (e) {}
+  } catch (streamErr) {
+    if (watchdogError) throw watchdogError
+    throw streamErr
+  } finally {
+    if (watchdog) watchdog.done()
   }
 
   const indexedCalls = Object.values(toolCallsByIndex)
@@ -117,6 +191,100 @@ async function consumeOllamaStream (responseStream, onToken = null) {
       ...(allToolCalls.length > 0 ? { tool_calls: allToolCalls } : {}),
       ...(fullThinking ? { thinking: fullThinking } : {})
     }
+  }
+}
+
+async function consumeGeminiStream (responseStream, onToken = null, watchdogOptions = {}) {
+  let fullContent = ''
+  const toolCalls = []
+  let buffer = ''
+
+  const processLine = (line) => {
+    const trimmed = line.trim()
+    if (!trimmed || !trimmed.startsWith('data:')) return
+    const jsonStr = trimmed.substring(5).trim()
+    if (!jsonStr || jsonStr === '[DONE]') return
+
+    let parsed
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch (_) {
+      return
+    }
+
+    if (parsed.error) {
+      throw new Error(parsed.error.message || `Gemini stream error: ${JSON.stringify(parsed.error)}`)
+    }
+
+    const candidate = parsed.candidates?.[0]
+    if (candidate?.content?.parts && Array.isArray(candidate.content.parts)) {
+      for (const part of candidate.content.parts) {
+        if (part.text) {
+          fullContent += part.text
+          if (typeof onToken === 'function') {
+            onToken(part.text)
+          }
+        }
+        if (part.functionCall) {
+          toolCalls.push({
+            type: 'function',
+            function: {
+              name: part.functionCall.name,
+              arguments: part.functionCall.args || {}
+            }
+          })
+        }
+      }
+    }
+  }
+
+  let watchdogError = null
+  let watchdog = null
+  if (watchdogOptions && watchdogOptions.enabled !== false && (watchdogOptions.ttftMs || watchdogOptions.inactivityMs)) {
+    watchdog = createStreamWatchdog({
+      ttftMs: watchdogOptions.ttftMs || 10000,
+      inactivityMs: watchdogOptions.inactivityMs || 10000,
+      onTimeout: (err) => {
+        watchdogError = err
+        if (typeof watchdogOptions.abortController?.abort === 'function') {
+          watchdogOptions.abortController.abort(err)
+        }
+        if (typeof responseStream.destroy === 'function') {
+          responseStream.destroy(err)
+        }
+      }
+    })
+  }
+
+  if (typeof responseStream.on === 'function') {
+    responseStream.on('error', () => {})
+  }
+
+  try {
+    for await (const chunk of responseStream) {
+      if (watchdog) watchdog.onChunk()
+      buffer += chunk.toString('utf8')
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        processLine(line)
+      }
+    }
+
+    if (buffer && buffer.trim()) {
+      processLine(buffer)
+    }
+  } catch (streamErr) {
+    if (watchdogError) throw watchdogError
+    throw streamErr
+  } finally {
+    if (watchdog) watchdog.done()
+  }
+
+  return {
+    content: fullContent,
+    toolCalls
   }
 }
 
@@ -192,6 +360,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
   if (fallbackLevel === false) fallbackLevel = 0
 
   const timeoutMs = 180000 // 180s base timeout for more reliable failover/thinking models
+  const ollamaTtftMs = parseInt(process.env.OLLAMA_TTFT_MS, 10) || 15000
+  const ollamaInactivityMs = parseInt(process.env.OLLAMA_INACTIVITY_MS, 10) || 10000
 
   // Level 1: Local Mac Fallback (Reserved for background tasks or explicit opt-in)
   if (fallbackLevel === 1) {
@@ -220,14 +390,22 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
         logger.debug(`Local Model Payload (${localModel}): ${JSON.stringify(payload.messages, null, 2)}`)
       }
       const isStream = typeof onToken === 'function'
+      const localAbort = new AbortController()
       const response = await axios.post(
         localUrl,
         { ...payload, model: localModel, stream: isStream },
-        { timeout: 180000, ...(isStream ? { responseType: 'stream' } : {}) }
+        {
+          timeout: isStream ? ollamaTtftMs : 180000,
+          ...(isStream ? { responseType: 'stream', signal: localAbort.signal } : {})
+        }
       )
 
-      if (isStream) {
-        const data = await consumeOllamaStream(response.data, onToken)
+      if (isStream && (response.data?.[Symbol.asyncIterator] || typeof response.data?.on === 'function')) {
+        const data = await consumeOllamaStream(response.data, onToken, {
+          ttftMs: ollamaTtftMs,
+          inactivityMs: ollamaInactivityMs,
+          abortController: localAbort
+        })
         if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
           return data
         }
@@ -267,7 +445,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
     const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
     const candidateModels = [primaryModel, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash'].filter((v, i, a) => a.indexOf(v) === i)
-    const geminiTimeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS) || 25000
+    const geminiTtftMs = parseInt(process.env.GEMINI_TTFT_MS, 10) || 10000
+    const geminiInactivityMs = parseInt(process.env.GEMINI_INACTIVITY_MS, 10) || 10000
 
     let geminiContents = []
     if (payload.messages) {
@@ -311,6 +490,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
     let lastError = null
     for (const modelName of candidateModels) {
+      const abortController = new AbortController()
       try {
         logger.info(`Triggering Level 2 fallback: ${modelName} for ${endpoint}`)
         const requestBody = {
@@ -318,48 +498,75 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
           ...(geminiTools ? { tools: geminiTools } : {})
         }
 
+        const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`
+
         const response = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          streamUrl,
           requestBody,
           {
-            timeout: geminiTimeoutMs
+            timeout: geminiTtftMs,
+            responseType: 'stream',
+            signal: abortController.signal
           }
         )
 
-        const candidate = response.data?.candidates?.[0]
-        if (candidate && Array.isArray(candidate.content?.parts)) {
-          let textContent = ''
-          const toolCalls = []
+        // Handle case where mock or interceptor returned plain object instead of stream
+        if (response.data && !response.data[Symbol.asyncIterator] && typeof response.data.on !== 'function') {
+          const candidate = response.data?.candidates?.[0]
+          if (candidate && Array.isArray(candidate.content?.parts)) {
+            let textContent = ''
+            const toolCalls = []
 
-          for (const part of candidate.content.parts) {
-            if (part.text) {
-              textContent += (textContent ? '\n' : '') + part.text
+            for (const part of candidate.content.parts) {
+              if (part.text) {
+                textContent += (textContent ? '\n' : '') + part.text
+                if (typeof onToken === 'function') onToken(part.text)
+              }
+              if (part.functionCall) {
+                toolCalls.push({
+                  type: 'function',
+                  function: {
+                    name: part.functionCall.name,
+                    arguments: part.functionCall.args || {}
+                  }
+                })
+              }
             }
-            if (part.functionCall) {
-              toolCalls.push({
-                type: 'function',
-                function: {
-                  name: part.functionCall.name,
-                  arguments: part.functionCall.args || {}
-                }
-              })
+
+            if (endpoint === '/api/generate') {
+              return { response: textContent }
+            }
+
+            return {
+              message: {
+                role: 'assistant',
+                content: textContent,
+                ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+              }
             }
           }
+          throw new Error(`Invalid response structure from Gemini API (${modelName})`)
+        }
 
-          if (endpoint === '/api/generate') {
-            return { response: textContent }
-          }
+        const streamResult = await consumeGeminiStream(response.data, onToken, {
+          ttftMs: geminiTtftMs,
+          inactivityMs: geminiInactivityMs,
+          abortController
+        })
 
-          return {
-            message: {
-              role: 'assistant',
-              content: textContent,
-              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-            }
+        if (endpoint === '/api/generate') {
+          return { response: streamResult.content }
+        }
+
+        return {
+          message: {
+            role: 'assistant',
+            content: streamResult.content,
+            ...(streamResult.toolCalls.length > 0 ? { tool_calls: streamResult.toolCalls } : {})
           }
         }
-        throw new Error(`Invalid response structure from Gemini API (${modelName})`)
       } catch (err) {
+        abortController.abort()
         lastError = err
         const errMsg = err.response?.data?.error?.message || err.message
         const statusCode = err.response?.status
@@ -399,22 +606,31 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
   }
   try {
     const isStream = typeof onToken === 'function'
+    const remoteAbort = new AbortController()
     let response
     try {
       response = await axios.post(
         remoteUrl,
         { ...payload, model: remoteModel, stream: isStream },
-        { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
+        {
+          timeout: isStream ? ollamaTtftMs : timeoutMs,
+          ...(isStream ? { responseType: 'stream', signal: remoteAbort.signal } : {})
+        }
       )
     } catch (postErr) {
+      remoteAbort.abort()
       // If Ollama returned 500 while loading model into VRAM, retry once after 1.5s
       if (postErr.response?.status === 500) {
         logger.warn(`Remote Model [${remoteModel}] returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...`)
         await new Promise(resolve => setTimeout(resolve, 1500))
+        const retryAbort = new AbortController()
         response = await axios.post(
           remoteUrl,
           { ...payload, model: remoteModel, stream: isStream },
-          { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
+          {
+            timeout: isStream ? ollamaTtftMs : timeoutMs,
+            ...(isStream ? { responseType: 'stream', signal: retryAbort.signal } : {})
+          }
         )
       } else {
         throw postErr
@@ -422,7 +638,11 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
     }
 
     if (isStream) {
-      const data = await consumeOllamaStream(response.data, onToken)
+      const data = await consumeOllamaStream(response.data, onToken, {
+        ttftMs: ollamaTtftMs,
+        inactivityMs: ollamaInactivityMs,
+        abortController: remoteAbort
+      })
       if (data && data.message && (
         (typeof data.message.content === 'string' && data.message.content.trim().length > 0) ||
         (Array.isArray(data.message.tool_calls) && data.message.tool_calls.length > 0)
@@ -840,5 +1060,8 @@ module.exports = {
   checkOllamaOnline,
   queryLocalOrRemote,
   queryCodeCapableModel,
-  getActiveModelCapabilities
+  getActiveModelCapabilities,
+  consumeOllamaStream,
+  consumeGeminiStream,
+  createStreamWatchdog
 }

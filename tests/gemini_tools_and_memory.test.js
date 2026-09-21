@@ -61,7 +61,7 @@ describe('Gemini Tools & Missing Primitives Suite', () => {
 
       // Verify request to Gemini had functionDeclarations
       expect(axios.post).toHaveBeenCalledWith(
-        expect.stringContaining('generateContent'),
+        expect.stringMatching(/generateContent/i),
         expect.objectContaining({
           tools: [
             expect.objectContaining({
