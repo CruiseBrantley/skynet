@@ -22,6 +22,11 @@ module.exports = {
     if (!key) return '[SYSTEM: Error: "key" is required for write_state.]'
     if (params.value === undefined) return '[SYSTEM: Error: "value" is required for write_state.]'
 
+    const lowerKey = key.toLowerCase()
+    if ((lowerKey.includes('patch') || lowerKey.includes('version')) && (params.value === null || params.value === undefined || params.value === '')) {
+      return `[SYSTEM: Skipped saving state for "${key}": Cannot write null or empty value to a patch/version baseline.]`
+    }
+
     const ttlDays = params.ttl_days !== undefined ? parseInt(params.ttl_days) : 30
     try {
       const entry = stateStore.set(key, params.value, { ttlDays })

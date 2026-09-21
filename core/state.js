@@ -169,6 +169,14 @@ class StateStore {
   set (key, value, { ttlDays = 30, metadata = {} } = {}) {
     if (!key) throw new Error('Key is required for StateStore.set')
     const cleanKey = String(key).trim()
+
+    // Guard: Do not save null, undefined, or empty string for patch/version state keys
+    const lowerKey = cleanKey.toLowerCase()
+    if ((lowerKey.includes('patch') || lowerKey.includes('version')) && (value === null || value === undefined || value === '')) {
+      logger.warn(`StateStore: Refused to write invalid/empty value for patch state key "${cleanKey}".`)
+      return this.getEntry(cleanKey)
+    }
+
     const now = Date.now()
     const expiresAt = (ttlDays && ttlDays > 0) ? (now + (ttlDays * 24 * 60 * 60 * 1000)) : null
 
@@ -195,6 +203,41 @@ class StateStore {
 
   diff (key, newValue) {
     const existing = this.get(key, null)
+
+    // Guard: null, undefined, or empty string cannot represent a valid updated state
+    if (newValue === null || newValue === undefined || newValue === '') {
+      return {
+        hasChanged: false,
+        previousValue: existing,
+        newValue
+      }
+    }
+
+    const cleanKey = String(key || '').toLowerCase()
+    const isVersionKey = cleanKey.includes('patch') || cleanKey.includes('version')
+    const isVersionPattern = (val) => typeof val === 'string' && /^\s*v?\d+(\.\d+)+\s*$/i.test(val)
+
+    if (isVersionKey && existing !== null && isVersionPattern(existing) && isVersionPattern(newValue)) {
+      const p1 = String(newValue).replace(/^[^\d]*/, '').split('.').map(n => parseInt(n, 10) || 0)
+      const p2 = String(existing).replace(/^[^\d]*/, '').split('.').map(n => parseInt(n, 10) || 0)
+      const len = Math.max(p1.length, p2.length)
+      let cmp = 0
+      for (let i = 0; i < len; i++) {
+        const num1 = p1[i] || 0
+        const num2 = p2[i] || 0
+        if (num1 > num2) { cmp = 1; break }
+        if (num1 < num2) { cmp = -1; break }
+      }
+
+      // Only considered changed if the new version is strictly greater than the existing version
+      const hasChanged = cmp > 0
+      return {
+        hasChanged,
+        previousValue: existing,
+        newValue
+      }
+    }
+
     const existingStr = JSON.stringify(existing)
     const newStr = JSON.stringify(newValue)
     const hasChanged = existingStr !== newStr

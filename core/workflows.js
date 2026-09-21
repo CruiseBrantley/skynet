@@ -179,6 +179,48 @@ class WorkflowEngine {
 
   // ─── Variable Resolution & Interpolation ───────────────────────────────────
 
+  static extractVersionOrPatch (rawText) {
+    if (!rawText) return null
+    const text = typeof rawText === 'object'
+      ? (rawText.summary || rawText.output || JSON.stringify(rawText))
+      : String(rawText)
+
+    // Clean out markdown asterisks/formatting for uniform matching
+    const cleanText = text.replace(/[*_#`]/g, '')
+
+    // 1. Check for explicit "Current Patch: X.Y", "Patch X.Y is live", "Patch X.Y Live"
+    const explicitCurrentMatch = cleanText.match(/\b(?:current|live)\s+patch[:\s]+(?:patch\s*)?(?:v\s*)?(\d{1,2}\.\d{1,2})\b/i) ||
+                                cleanText.match(/\bpatch\s*[:#-]?\s*(\d{1,2}\.\d{1,2})\s+(?:is\s+)?(?:now\s+)?live\b/i)
+    if (explicitCurrentMatch) return explicitCurrentMatch[1]
+
+    // 2. Extract all version candidates, but exclude any explicitly described as next/upcoming/scheduled
+    const matches = Array.from(cleanText.matchAll(/\b(?:patch\s*[:#-]?\s*|v\s*)(\d{1,2}\.\d{1,2})\b/gi))
+    if (matches.length === 0) return null
+
+    const validVersions = []
+    for (const m of matches) {
+      const idx = m.index
+      const prefix = cleanText.substring(Math.max(0, idx - 40), idx).toLowerCase()
+      // Skip if marked as next, upcoming, pbe, or scheduled
+      if (prefix.includes('next') || prefix.includes('upcoming') || prefix.includes('scheduled') || prefix.includes('pbe')) {
+        continue
+      }
+      validVersions.push(m[1])
+    }
+
+    if (validVersions.length === 0) return null
+
+    // Pick highest valid released version
+    validVersions.sort((a, b) => {
+      const [aMaj, aMin] = a.split('.').map(Number)
+      const [bMaj, bMin] = b.split('.').map(Number)
+      if (aMaj !== bMaj) return bMaj - aMaj
+      return bMin - aMin
+    })
+
+    return validVersions[0]
+  }
+
   _resolveValue (val, stepResults, previousResult, context) {
     if (typeof val === 'string') {
       if (val === '$results' || val === '$prev') return previousResult
@@ -201,9 +243,7 @@ class WorkflowEngine {
             if (resolved !== undefined) return resolved
           }
           if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
-            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
-            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
-            if (patchMatch) return patchMatch[1]
+            return WorkflowEngine.extractVersionOrPatch(stepObj)
           }
           if (subPath === 'output' || subPath === 'result') {
             return stepObj
@@ -228,9 +268,7 @@ class WorkflowEngine {
             if (resolved !== undefined) return resolved
           }
           if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
-            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
-            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
-            if (patchMatch) return patchMatch[1]
+            return WorkflowEngine.extractVersionOrPatch(stepObj)
           }
           if (subPath === 'output' || subPath === 'result') {
             return stepObj
@@ -268,9 +306,8 @@ class WorkflowEngine {
             if (resolved !== undefined) return typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved)
           }
           if (sPath && (sPath === 'patch' || sPath.endsWith('.patch') || sPath === 'version' || sPath.endsWith('.version'))) {
-            const rawText = (typeof stepObj === 'object' && stepObj !== null) ? (stepObj.summary || stepObj.output || JSON.stringify(stepObj)) : String(stepObj || '')
-            const patchMatch = rawText.match(/\b(?:patch\s*|v)(\d{1,2}\.\d{1,2})\b/i)
-            if (patchMatch) return patchMatch[1]
+            const patch = WorkflowEngine.extractVersionOrPatch(stepObj)
+            return patch !== null ? patch : ''
           }
           if (sPath === 'output' || sPath === 'result') {
             return typeof stepObj === 'object' ? JSON.stringify(stepObj) : String(stepObj)

@@ -42,4 +42,38 @@ describe('StateStore & State Actions', () => {
     const diffRes = await readStateAction.execute({}, {}, { key: 'd4_season', compare_with: 9 })
     expect(diffRes).toContain('"hasChanged": true')
   })
+
+  test('diff ignores null, undefined, and empty string as invalid new values', () => {
+    stateStore.set('lol_patch_baseline', '26.18')
+
+    expect(stateStore.diff('lol_patch_baseline', null).hasChanged).toBe(false)
+    expect(stateStore.diff('lol_patch_baseline', undefined).hasChanged).toBe(false)
+    expect(stateStore.diff('lol_patch_baseline', '').hasChanged).toBe(false)
+  })
+
+  test('diff enforces version monotonicity for patch/version keys', () => {
+    stateStore.set('lol_patch_baseline', '26.18')
+
+    // Same version -> false
+    expect(stateStore.diff('lol_patch_baseline', '26.18').hasChanged).toBe(false)
+    // Older / downgraded version (e.g. 26.16 from stale search results) -> false
+    expect(stateStore.diff('lol_patch_baseline', '26.16').hasChanged).toBe(false)
+    expect(stateStore.diff('lol_patch_baseline', '14.19').hasChanged).toBe(false)
+    // Newer version -> true
+    expect(stateStore.diff('lol_patch_baseline', '26.19').hasChanged).toBe(true)
+    expect(stateStore.diff('lol_patch_baseline', '27.1').hasChanged).toBe(true)
+  })
+
+  test('write_state action rejects empty or null values for patch/version keys', async () => {
+    stateStore.set('lol_patch_baseline', '26.18')
+
+    const nullRes = await writeStateAction.execute({}, {}, { key: 'lol_patch_baseline', value: null })
+    expect(nullRes).toContain('Skipped saving state')
+    expect(stateStore.get('lol_patch_baseline')).toBe('26.18')
+
+    const emptyRes = await writeStateAction.execute({}, {}, { key: 'lol_patch_baseline', value: '' })
+    expect(emptyRes).toContain('Skipped saving state')
+    expect(stateStore.get('lol_patch_baseline')).toBe('26.18')
+  })
 })
+
