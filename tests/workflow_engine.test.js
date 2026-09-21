@@ -261,5 +261,29 @@ describe('WorkflowEngine & Multi-Step Pipelines', () => {
 
     actionExecutor.executeAction.mockRestore()
   })
+
+  test('condition evaluation treats hasChanged as false by default unless explicitly true', () => {
+    // 1. condition: 'changed' with non-diff results
+    expect(workflowEngine._evaluateCondition('changed', 'regular string output', [], {})).toBe(false)
+    expect(workflowEngine._evaluateCondition('changed', { status: 'success' }, [], {})).toBe(false)
+    expect(workflowEngine._evaluateCondition('changed', { hasChanged: false }, [], {})).toBe(false)
+    expect(workflowEngine._evaluateCondition('changed', { hasChanged: true }, [], {})).toBe(true)
+
+    // 2. Expression with missing or non-boolean hasChanged
+    const context = { stepNameToIndex: { step1: 0, step2: 1 } }
+    const stepResults = [
+      'simple string',
+      { exists: true, value: 'current_val' } // no hasChanged property
+    ]
+
+    // $steps.step1.output.hasChanged == true should be false
+    expect(workflowEngine._evaluateCondition('$steps.step1.output.hasChanged == true', null, stepResults, {}, context)).toBe(false)
+    // $steps.step2.output.hasChanged == true should be false
+    expect(workflowEngine._evaluateCondition('$steps.step2.output.hasChanged == true', null, stepResults, {}, context)).toBe(false)
+    // $steps.step2.output.hasChanged should be false
+    expect(workflowEngine._evaluateCondition('$steps.step2.output.hasChanged', null, stepResults, {}, context)).toBe(false)
+    // $steps.step2.output.hasChanged == false should be true
+    expect(workflowEngine._evaluateCondition('$steps.step2.output.hasChanged == false', null, stepResults, {}, context)).toBe(true)
+  })
 })
 

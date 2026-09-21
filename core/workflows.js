@@ -233,6 +233,17 @@ class WorkflowEngine {
         const stepIdx = context?.stepNameToIndex?.[stepName]
         if (stepIdx !== undefined) {
           const stepObj = stepResults[stepIdx]
+          if (subPath && (subPath === 'hasChanged' || subPath.endsWith('.hasChanged'))) {
+            if (stepObj && typeof stepObj === 'object') {
+              let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              if (resolved === undefined && (subPath.startsWith('output.') || subPath.startsWith('result.'))) {
+                const altPath = subPath.replace(/^(output|result)\./, '')
+                resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              }
+              return resolved === true
+            }
+            return false
+          }
           if (subPath && stepObj && typeof stepObj === 'object') {
             let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
             // If subPath begins with "output." or "result." but stepObj has properties directly, check fallback
@@ -259,6 +270,17 @@ class WorkflowEngine {
           const stepIndex = parseInt(match[1], 10) - 1
           const subPath = match[2] ? match[2].substring(1) : null
           const stepObj = stepResults[stepIndex]
+          if (subPath && (subPath === 'hasChanged' || subPath.endsWith('.hasChanged'))) {
+            if (stepObj && typeof stepObj === 'object') {
+              let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              if (resolved === undefined && (subPath.startsWith('output.') || subPath.startsWith('result.'))) {
+                const altPath = subPath.replace(/^(output|result)\./, '')
+                resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              }
+              return resolved === true
+            }
+            return false
+          }
           if (subPath && stepObj && typeof stepObj === 'object') {
             let resolved = subPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
             if (resolved === undefined && (subPath.startsWith('output.') || subPath.startsWith('result.'))) {
@@ -297,6 +319,17 @@ class WorkflowEngine {
         const stepIdx = context?.stepNameToIndex?.[sName]
         if (stepIdx !== undefined) {
           const stepObj = stepResults[stepIdx]
+          if (sPath && (sPath === 'hasChanged' || sPath.endsWith('.hasChanged'))) {
+            if (stepObj && typeof stepObj === 'object') {
+              let resolved = sPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              if (resolved === undefined && (sPath.startsWith('output.') || sPath.startsWith('result.'))) {
+                const altPath = sPath.replace(/^(output|result)\./, '')
+                resolved = altPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
+              }
+              return String(resolved === true)
+            }
+            return 'false'
+          }
           if (sPath && stepObj && typeof stepObj === 'object') {
             let resolved = sPath.split('.').reduce((acc, part) => (acc && acc[part] !== undefined) ? acc[part] : undefined, stepObj)
             if (resolved === undefined && (sPath.startsWith('output.') || sPath.startsWith('result.'))) {
@@ -341,25 +374,25 @@ class WorkflowEngine {
 
     if (condition === 'changed') {
       if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
-        return previousResult.hasChanged
+        return previousResult.hasChanged === true
       }
       if (params && (params.diff_key || params.key)) {
         const diffRes = stateStore.diff(params.diff_key || params.key, previousResult)
-        return diffRes.hasChanged
+        return diffRes.hasChanged === true
       }
-      return previousResult !== null && previousResult !== undefined && previousResult !== ''
+      return false
     }
 
     if (condition === 'truthy') {
       if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
-        return previousResult.hasChanged
+        return previousResult.hasChanged === true
       }
       return Boolean(previousResult)
     }
 
     if (condition === 'falsy') {
       if (previousResult && typeof previousResult === 'object' && typeof previousResult.hasChanged === 'boolean') {
-        return !previousResult.hasChanged
+        return previousResult.hasChanged === false
       }
       return !previousResult
     }
@@ -385,8 +418,15 @@ class WorkflowEngine {
           return v
         }
 
-        const leftVal = normalize(leftResolved)
-        const rightVal = normalize(rightResolved)
+        let leftVal = normalize(leftResolved)
+        let rightVal = normalize(rightResolved)
+
+        if ((leftRaw === 'hasChanged' || leftRaw.endsWith('.hasChanged')) && typeof leftVal !== 'boolean') {
+          leftVal = false
+        }
+        if ((rightRaw === 'hasChanged' || rightRaw.endsWith('.hasChanged')) && typeof rightVal !== 'boolean') {
+          rightVal = false
+        }
 
         if (op === '==') return leftVal === rightVal
         if (op === '!=') return leftVal !== rightVal
@@ -395,7 +435,10 @@ class WorkflowEngine {
       const resolved = this._resolveValue(condition, stepResults, previousResult, context)
       if (typeof resolved === 'boolean') return resolved
       if (typeof resolved === 'object' && resolved !== null && typeof resolved.hasChanged === 'boolean') {
-        return resolved.hasChanged
+        return resolved.hasChanged === true
+      }
+      if (condition === 'hasChanged' || condition.endsWith('.hasChanged')) {
+        return resolved === true
       }
       return Boolean(resolved)
     }

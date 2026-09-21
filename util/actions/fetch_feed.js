@@ -96,10 +96,16 @@ module.exports = {
       let diffNotice = ''
       if (params.diff_key) {
         const latestId = items[0].id || items[0].link || items[0].title
-        const diffRes = stateStore.diff(params.diff_key, latestId)
-        diffNotice = `\n• **Baseline Diff (${params.diff_key})**: ${diffRes.hasChanged ? '🆕 NEW CONTENT DETECTED' : 'Unchanged (matches stored baseline)'}`
-        if (diffRes.hasChanged) {
+        const existing = stateStore.get(params.diff_key, null)
+        if (existing === null) {
           stateStore.set(params.diff_key, latestId)
+          diffNotice = `\n• **Baseline Initialized (${params.diff_key})**: Set to latest article`
+        } else {
+          const diffRes = stateStore.diff(params.diff_key, latestId)
+          diffNotice = `\n• **Baseline Diff (${params.diff_key})**: ${diffRes.hasChanged ? '🆕 NEW CONTENT DETECTED' : 'Unchanged (matches stored baseline)'}`
+          if (diffRes.hasChanged) {
+            stateStore.set(params.diff_key, latestId)
+          }
         }
       }
 

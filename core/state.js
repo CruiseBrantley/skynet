@@ -202,6 +202,7 @@ class StateStore {
   }
 
   diff (key, newValue) {
+    let hasChanged = false
     const existing = this.get(key, null)
 
     // Guard: null, undefined, or empty string cannot represent a valid updated state
@@ -213,11 +214,20 @@ class StateStore {
       }
     }
 
+    // Default to false if there is no valid existing state baseline to have changed from
+    if (existing === null || existing === undefined) {
+      return {
+        hasChanged: false,
+        previousValue: null,
+        newValue
+      }
+    }
+
     const cleanKey = String(key || '').toLowerCase()
     const isVersionKey = cleanKey.includes('patch') || cleanKey.includes('version')
     const isVersionPattern = (val) => typeof val === 'string' && /^\s*v?\d+(\.\d+)+\s*$/i.test(val)
 
-    if (isVersionKey && existing !== null && isVersionPattern(existing) && isVersionPattern(newValue)) {
+    if (isVersionKey && isVersionPattern(existing) && isVersionPattern(newValue)) {
       const p1 = String(newValue).replace(/^[^\d]*/, '').split('.').map(n => parseInt(n, 10) || 0)
       const p2 = String(existing).replace(/^[^\d]*/, '').split('.').map(n => parseInt(n, 10) || 0)
       const len = Math.max(p1.length, p2.length)
@@ -230,7 +240,9 @@ class StateStore {
       }
 
       // Only considered changed if the new version is strictly greater than the existing version
-      const hasChanged = cmp > 0
+      if (cmp > 0) {
+        hasChanged = true
+      }
       return {
         hasChanged,
         previousValue: existing,
@@ -240,7 +252,9 @@ class StateStore {
 
     const existingStr = JSON.stringify(existing)
     const newStr = JSON.stringify(newValue)
-    const hasChanged = existingStr !== newStr
+    if (existingStr !== newStr) {
+      hasChanged = true
+    }
 
     return {
       hasChanged,

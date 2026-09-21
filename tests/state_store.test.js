@@ -75,5 +75,32 @@ describe('StateStore & State Actions', () => {
     expect(emptyRes).toContain('Skipped saving state')
     expect(stateStore.get('lol_patch_baseline')).toBe('26.18')
   })
+
+  test('hasChanged is false by default unless explicitly changed true', async () => {
+    // 1. Non-existent baseline -> false by default
+    expect(stateStore.diff('uninitialized_key', 'some_val').hasChanged).toBe(false)
+    expect(stateStore.diff('uninitialized_patch', '26.19').hasChanged).toBe(false)
+
+    // 2. Existing baseline with identical value -> false
+    stateStore.set('game_status', 'active')
+    expect(stateStore.diff('game_status', 'active').hasChanged).toBe(false)
+
+    // 3. Existing baseline with invalid / empty values -> false
+    expect(stateStore.diff('game_status', '').hasChanged).toBe(false)
+    expect(stateStore.diff('game_status', null).hasChanged).toBe(false)
+    expect(stateStore.diff('game_status', undefined).hasChanged).toBe(false)
+
+    // 4. Existing baseline with explicitly changed new value -> true
+    expect(stateStore.diff('game_status', 'inactive').hasChanged).toBe(true)
+
+    // 5. read_state in workflow context returns hasChanged: false by default
+    const wfReadNoDiff = await readStateAction.execute({}, {}, { key: 'game_status' }, { isWorkflow: true })
+    expect(wfReadNoDiff.hasChanged).toBe(false)
+    expect(wfReadNoDiff.value).toBe('active')
+
+    const wfReadMissingKey = await readStateAction.execute({}, {}, { key: 'missing_key' }, { isWorkflow: true })
+    expect(wfReadMissingKey.hasChanged).toBe(false)
+    expect(wfReadMissingKey.exists).toBe(false)
+  })
 })
 

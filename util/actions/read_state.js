@@ -32,13 +32,13 @@ module.exports = {
     const entry = stateStore.getEntry(key)
     if (!entry) {
       if (context?.isWorkflow || context?.workflowId) {
-        return { exists: false, value: null, message: `State key "${key}" is not set or has expired.` }
+        return { hasChanged: false, exists: false, value: null, message: `State key "${key}" is not set or has expired.` }
       }
       return `[SYSTEM: State key "${key}" is not set or has expired.]`
     }
 
     if (context?.isWorkflow || context?.workflowId) {
-      return { exists: true, value: entry.value, updatedAt: entry.updatedAtIso }
+      return { hasChanged: false, exists: true, value: entry.value, updatedAt: entry.updatedAtIso }
     }
 
     return `[SYSTEM: State Value for "${key}" (Updated: ${entry.updatedAtIso}):\n\`\`\`json\n${JSON.stringify(entry.value, null, 2)}\n\`\`\`]`
