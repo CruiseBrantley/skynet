@@ -1,98 +1,100 @@
 {
-	"name": "skynet",
-	"version": "1.0.0",
-	"description": "Skynet, various functions",
-	"main": "bot.js",
-	"author": "Cruise Brantley",
-	"dependencies": {
-		"@discordjs/opus": "^0.10.0",
-		"@discordjs/voice": "^0.19.2",
-		"@distube/ytdl-core": "^4.15.1",
-		"@ngrok/ngrok": "^1.7.0",
-		"axios": "^1.7.0",
-		"chrono-node": "^2.9.0",
-		"discord.js": "^14.26.3",
-		"dotenv": "^16.4.5",
-		"duck-duck-scrape": "^2.2.7",
-		"express": "^4.19.2",
-		"ffmpeg": "0.0.4",
-		"ffmpeg-static": "^4.4.0",
-		"firebase-admin": "^13.7.0",
-		"google-it": "^1.6.4",
-		"google-tts-api": "^2.0.2",
-		"jsonrepair": "^3.13.3",
-		"m3u8stream": "^0.6.5",
-		"moment": "^2.24.0",
-		"node-schedule": "^1.3.2",
-		"nodemon": "^3.1.0",
-		"parse-time": "^0.1.4",
-		"play-dl": "^1.9.7",
-		"public-ip": "^3.2.0",
-		"puppeteer": "^24.41.0",
-		"sodium-native": "^5.1.0",
-		"unescape": "^1.0.1",
-		"wikipedia": "^2.4.2",
-		"winston": "^3.13.0",
-		"yarn": "^1.22.22",
-		"youtube-captions-scraper": "^2.0.3",
-		"youtube-search": "^1.1.6",
-		"youtube-transcript": "^1.3.0",
-		"ytpl": "^2.0.4"
-	},
-	"overrides": {
-		"xml2js": "^0.6.2",
-		"qs": "^6.11.0",
-		"tough-cookie": "^4.1.3",
-		"protobufjs": "^7.2.4",
-		"axios": "^1.7.0",
-		"got": "^11.8.5",
-		"form-data": "^4.0.0",
-		"@tootallnate/once": "^2.0.0"
-	},
-	"devDependencies": {
-		"cross-env": "^7.0.2",
-		"husky": "^9.1.7",
-		"jest": "^30.3.0",
-		"standard": "^17.1.2"
-	},
-	"scripts": {
-		"test": "node --no-experimental-webstorage node_modules/.bin/jest",
-		"lint": "standard",
-		"build:web": "npm --prefix frontend run build",
-		"dev:web": "npm --prefix frontend run dev",
-		"cli": "node cli.js",
-		"start": "npm run bot:prod",
-		"bot:run": "node bot.js",
-		"bot:dev": "cross-env NODE_ENV=dev node bot.js",
-		"bot:prod": "cross-env NODE_ENV=prod node bot.js",
-		"service:restart": "launchctl kickstart -k gui/$(id -u)/com.user.skynet",
-		"service:status": "launchctl print gui/$(id -u)/com.user.skynet",
-		"service:start": "launchctl bootstrap gui/$(id -u)/com.user.skynet ~/Library/LaunchAgents/com.user.skynet.plist",
-		"service:stop": "launchctl bootout gui/$(id -u)/com.user.skynet",
-		"service:logs": "tail -f logs/launchd_out.log",
-		"prepare": "husky"
-	},
-	"jest": {
-		"testEnvironment": "node",
-		"testMatch": [
-			"<rootDir>/tests/**/*.test.js"
-		],
-		"testEnvironmentOptions": {
-			"url": "http://localhost"
-		},
-		"setupFilesAfterEnv": [
-			"./tests/setup.js"
-		]
-	},
-	"standard": {
-		"env": [
-			"jest"
-		],
-		"ignore": [
-			"tests/**",
-			"scripts/**",
-			"public/**",
-			"frontend/**"
-		]
-	}
+  "name": "skynet",
+  "version": "1.0.0",
+  "description": "Skynet, various functions",
+  "main": "bot.js",
+  "author": "Cruise Brantley",
+  "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.19.2",
+    "@distube/ytdl-core": "^4.15.1",
+    "@ngrok/ngrok": "^1.7.0",
+    "axios": "^1.7.0",
+    "chrono-node": "^2.9.0",
+    "discord.js": "^14.26.3",
+    "dotenv": "^16.4.5",
+    "duck-duck-scrape": "^2.2.7",
+    "express": "^4.19.2",
+    "ffmpeg": "0.0.4",
+    "ffmpeg-static": "^4.4.0",
+    "firebase-admin": "^13.7.0",
+    "google-it": "^1.6.4",
+    "google-tts-api": "^2.0.2",
+    "jsonrepair": "^3.13.3",
+    "m3u8stream": "^0.6.5",
+    "moment": "^2.24.0",
+    "node-schedule": "^1.3.2",
+    "nodemon": "^3.1.0",
+    "parse-time": "^0.1.4",
+    "play-dl": "^1.9.7",
+    "public-ip": "^3.2.0",
+    "puppeteer": "^24.41.0",
+    "sodium-native": "^5.1.0",
+    "unescape": "^1.0.1",
+    "von-sdk": "^1.1.1",
+    "wikipedia": "^2.4.2",
+    "winston": "^3.13.0",
+    "yarn": "^1.22.22",
+    "youtube-captions-scraper": "^2.0.3",
+    "youtube-search": "^1.1.6",
+    "youtube-transcript": "^1.3.0",
+    "ytpl": "^2.0.4"
+  },
+  "overrides": {
+    "xml2js": "^0.6.2",
+    "qs": "^6.11.0",
+    "tough-cookie": "^4.1.3",
+    "protobufjs": "^7.2.4",
+    "axios": "^1.7.0",
+    "got": "^11.8.5",
+    "form-data": "^4.0.0",
+    "@tootallnate/once": "^2.0.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.2",
+    "husky": "^9.1.7",
+    "jest": "^30.3.0",
+    "standard": "^17.1.2"
+  },
+  "scripts": {
+    "test": "node --no-experimental-webstorage node_modules/.bin/jest",
+    "lint": "standard",
+    "build:web": "npm --prefix frontend run build",
+    "dev:web": "npm --prefix frontend run dev",
+    "cli": "node cli.js",
+    "start": "npm run bot:prod",
+    "bot:run": "node bot.js",
+    "bot:dev": "cross-env NODE_ENV=dev node bot.js",
+    "bot:prod": "cross-env NODE_ENV=prod node bot.js",
+    "service:restart": "launchctl kickstart -k gui/$(id -u)/com.user.skynet",
+    "service:status": "launchctl print gui/$(id -u)/com.user.skynet",
+    "service:start": "launchctl bootstrap gui/$(id -u)/com.user.skynet ~/Library/LaunchAgents/com.user.skynet.plist",
+    "service:stop": "launchctl bootout gui/$(id -u)/com.user.skynet",
+    "service:logs": "tail -f logs/launchd_out.log",
+    "prepare": "husky"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "testEnvironmentOptions": {
+      "url": "http://localhost"
+    },
+    "setupFilesAfterEnv": [
+      "./tests/setup.js"
+    ]
+  },
+  "standard": {
+    "env": [
+      "jest"
+    ],
+    "ignore": [
+      "tests/**",
+      "scripts/**",
+      "public/**",
+      "frontend/**",
+      "services/**"
+    ]
+  }
 }

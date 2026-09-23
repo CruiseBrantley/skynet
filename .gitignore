@@ -95,3 +95,7 @@ data/agent_actions/*.js
 
 # Steam Apps Config
 config/steam_apps.json
+
+# Von services venv
+services/**/venv/
+services/von/venv/

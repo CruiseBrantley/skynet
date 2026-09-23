@@ -440,6 +440,12 @@ class DiscordAdapter {
               cleanup()
             }
           }
+        } else {
+          // Unmentioned guild message: evaluate proactively via System 1 Gatekeeper
+          const gatekeeper = require('../../util/System1Gatekeeper')
+          gatekeeper.evaluateMessage(message, this.client, this.core?.database).catch(err => {
+            logger.warn(`DiscordAdapter: System 1 Gatekeeper evaluation failed: ${err.message}`)
+          })
         }
       } catch (err) {
         logger.error(`DiscordAdapter messageCreate fatal error: ${err.stack || err.message}`)

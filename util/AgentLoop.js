@@ -91,8 +91,10 @@ class AgentLoop {
         }
       }
 
-      // 3. Proactive "Interjection" check for whitelisted guilds
-      await this._checkProactiveGuilds()
+      // 3. Proactive "Interjection" check for whitelisted guilds (deprecated in favor of real-time System 1 Gatekeeper)
+      if (process.env.LEGACY_PROACTIVE_POLLING === 'true') {
+        await this._checkProactiveGuilds()
+      }
     } catch (err) {
       logger.error(`AgentLoop: Uncaught exception in tick: ${err.stack || err.message}`)
     } finally {

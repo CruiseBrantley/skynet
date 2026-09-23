@@ -7235,6 +7235,11 @@ version-guard@^1.1.1:
   resolved "https://registry.npmjs.org/version-guard/-/version-guard-1.1.3.tgz"
   integrity sha512-JwPr6erhX53EWH/HCSzfy1tTFrtPXUe927wdM1jqBBeYp1OM+qPHjWbsvv6pIBduqdgxxS+ScfG7S28pzyr2DQ==
 
+von-sdk@^1.1.1:
+  version "1.1.1"
+  resolved "https://registry.npmjs.org/von-sdk/-/von-sdk-1.1.1.tgz"
+  integrity sha512-9fHFSrPhM31ZSxCF3LeR7f507yW69MuSeHdIGBUHgngrW6ACrolq0SbjvmrbUr8jLEC7DqjS0YE8Vk+WR+gtUQ==
+
 walker@^1.0.8:
   version "1.0.8"
   resolved "https://registry.npmjs.org/walker/-/walker-1.0.8.tgz"
