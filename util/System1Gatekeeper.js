@@ -164,7 +164,7 @@ class System1Gatekeeper {
         state: message.content,
         questions: {
           reaction: noul('Is this message funny, shocking, hype, or notable enough to react to?'),
-          interject: noul('Does this message address or invoke Skynet, ask a question, or invite a response?')
+          interject: noul('Does this message explicitly address Skynet, ask Skynet a question, or clearly call on the bot to speak?')
         }
       })
 
@@ -178,8 +178,15 @@ class System1Gatekeeper {
         `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}]`
       )
 
+      // Spoken interjections interrupt human conversation and must NEVER trigger on arbitrary banter
+      // unless it contains an explicit question mark or mentions the bot/AI.
+      const rawText = message.content || ''
+      const hasQuestion = rawText.includes('?')
+      const mentionsBot = /\b(skynet|bot|ai)\b/i.test(rawText)
+      const canInterject = hasQuestion || mentionsBot
+
       // Priority 1: High-confidence Interjection
-      if (interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
+      if (canInterject && interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +

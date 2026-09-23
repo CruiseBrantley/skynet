@@ -684,12 +684,13 @@ class AgentTurnManager {
       (interaction.channel?.id && String(interaction.channel.id).includes('sirian'))
     )
     const isPrivate = !interaction.guildId || interaction.isDM || interaction.clientId === 'web' || interaction.clientId === 'cli'
-    const availableToolsSchema = typeof ActionExecutor.getOllamaToolsSchema === 'function'
+    const isProactive = Boolean(interaction.isProactive || ollamaContext?.isProactive)
+    const availableToolsSchema = (!isProactive && typeof ActionExecutor.getOllamaToolsSchema === 'function')
       ? ActionExecutor.getOllamaToolsSchema({ isOwner, isPrivate })
       : []
 
     const tracker = new ActionProgressTracker({ botName: this.botName })
-    if (!sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
+    if (!isProactive && !sharedState.primaryResponseUsed && typeof interaction.showStatus === 'function') {
       await interaction.showStatus(`${this.botName} is thinking...`).catch(() => {})
     }
 
@@ -706,7 +707,8 @@ class AgentTurnManager {
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
       const turnContext = {
         ...ollamaContext,
-        tools: availableToolsSchema
+        tools: availableToolsSchema,
+        ...(isProactive ? { num_predict: 80, think: false, isCodeTask: false } : {})
       }
 
       const responseData = await queryFn(
@@ -755,12 +757,15 @@ class AgentTurnManager {
 
         finalReplyContent = candidateReply
 
-        const pendingEval = await this.evaluatePendingWork({
-          ollamaContext,
-          executedTools,
-          assistantText: finalReplyContent || rawContent,
-          channelHistory
-        })
+        let pendingEval = { isPending: false }
+        if (!isProactive) {
+          pendingEval = await this.evaluatePendingWork({
+            ollamaContext,
+            executedTools,
+            assistantText: finalReplyContent || rawContent,
+            channelHistory
+          })
+        }
 
         if (pendingEval.isPending && pendingPromptCount < 2 && step < maxSteps - 1) {
           pendingPromptCount++
@@ -897,6 +902,9 @@ class AgentTurnManager {
 
     // Resolve @mentions back to <@ID> using persistent mention resolver
     if (finalReplyContent) {
+      if (isProactive && finalReplyContent.length > 300) {
+        finalReplyContent = finalReplyContent.slice(0, 300).trim()
+      }
       const mentionResolver = require('../MentionResolver')
       finalReplyContent = mentionResolver.resolve(finalReplyContent, interaction.guildId)
     }

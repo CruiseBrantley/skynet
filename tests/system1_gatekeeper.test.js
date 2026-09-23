@@ -164,6 +164,27 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
     })
 
+    test('blocks interjection when message lacks explicit question or bot keyword even with high score', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'i was waiting forever and nothing happened'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.10 },
+          interject: { noul: 0.95 }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'ignore' })
+      expect(proactivePersonality.executeProactiveInterjection).not.toHaveBeenCalled()
+    })
+
     test('handles Von connection refusal gracefully without throwing', async () => {
       const msg = {
         author: { bot: false, id: 'user1' },

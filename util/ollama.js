@@ -888,7 +888,7 @@ async function queryOllamaWithContext (messages, options, botName = 'Skynet', on
       ...(options.tools && Array.isArray(options.tools) && options.tools.length > 0 ? { tools: options.tools } : {}),
       options: {
         num_ctx: numCtx,
-        num_predict: -1, // -1 in Ollama = unlimited generation (runs until natural EOS)
+        num_predict: options.num_predict !== undefined ? options.num_predict : -1, // -1 in Ollama = unlimited generation (runs until natural EOS)
         temperature: 0.3,
         top_k: 40,
         top_p: 0.9

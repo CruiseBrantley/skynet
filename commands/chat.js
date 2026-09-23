@@ -195,8 +195,10 @@ async function execute (interaction, database) {
       }
 
       // Inject dynamic system context
-      let commandsContext = 'Available Commands & Actions:\n'
-      if (interaction.client.commands) {
+      let commandsContext = interaction.isProactive
+        ? 'No tools or actions available in proactive chat mode.'
+        : 'Available Commands & Actions:\n'
+      if (!interaction.isProactive && interaction.client.commands) {
         const cmdValues = typeof interaction.client.commands.map === 'function'
           ? interaction.client.commands.map(c => c)
           : Array.from(interaction.client.commands.values ? interaction.client.commands.values() : [])
@@ -215,10 +217,10 @@ async function execute (interaction, database) {
           }
           return `- ${c.data?.name || c.name}: ${c.data?.description || c.description}${paramStr}`
         }).join('\n')
-      } else {
-        commandsContext += 'Unknown'
       }
-      commandsContext += '\n' + ActionExecutor.listActions(promptOptions).map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+      if (!interaction.isProactive) {
+        commandsContext += '\n' + ActionExecutor.listActions(promptOptions).map(a => `- ${a.name}: ${a.description} (JSON Params: ${JSON.stringify(a.schema)})`).join('\n')
+      }
       let logsContext = 'No recent logs available.'
       try {
         const logPath = path.join(__dirname, '../logs/combined.log')
@@ -326,7 +328,9 @@ async function execute (interaction, database) {
       const isCodeTask = isExplicitCode || isErrorReport
 
       let effectiveSystemPrompt = enhancedSystemPrompt
-      if (isCodeTask) {
+      if (interaction.isProactive) {
+        effectiveSystemPrompt += '\n\n[PROACTIVE CASUAL CHAT MODE: You are chiming in casually in #' + (interaction.channel?.name || 'chat') + '. Keep your reply to 1-2 SHORT sentences max (under 180 characters). Speak casually and directly like a Discord server member. DO NOT monologue, DO NOT list tools or commands, DO NOT ask how you can assist as a bot. Output only your conversational remark.]'
+      } else if (isCodeTask) {
         effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE & ERROR REMEDIATION SYNTHESIS]\nIf creating, fixing, or patching a Discord slash command or internal action, you MUST invoke create_slash_command or create_action via tool calls in your response.\nNEVER output conversational promises like "Fixing it now" or "Let me check" without executing the tool in the same turn.'
 
         // Auto-inject existing source code of any command or action mentioned in conversation or recent error
@@ -445,7 +449,7 @@ async function execute (interaction, database) {
         }
       }
 
-      if (typeof interaction.showStatus === 'function') {
+      if (!interaction.isProactive && typeof interaction.showStatus === 'function') {
         await interaction.showStatus(`${botName} is thinking...`).catch(() => {})
       }
 
@@ -455,8 +459,12 @@ async function execute (interaction, database) {
         interaction,
         database,
         channelHistory: channelHistories[channelId],
-        ollamaContext,
-        maxSteps: 25
+        ollamaContext: {
+          ...ollamaContext,
+          isProactive: Boolean(interaction.isProactive),
+          ...(interaction.isProactive ? { tools: [], num_predict: 80, think: false } : {})
+        },
+        maxSteps: interaction.isProactive ? 1 : 25
       })
 
       // Persist turn into conversationStore for 1-on-1 direct chat profiles

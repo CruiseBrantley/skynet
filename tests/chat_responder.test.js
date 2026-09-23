@@ -176,6 +176,38 @@ describe('DiscordResponder', () => {
       content: 'Here is the real answer.'
     }))
   })
+
+  test('Proactive interjection: truncates to 400 chars, sends single editReply, never calls followUp', async () => {
+    mockInteraction.isProactive = true
+    const massiveText = 'This is a casual comment. ' + 'Very long text '.repeat(50)
+
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: massiveText,
+      sharedState
+    })
+
+    expect(mockInteraction.editReply).toHaveBeenCalledTimes(1)
+    const callArg = mockInteraction.editReply.mock.calls[0][0]
+    expect(callArg.content.length).toBeLessThanOrEqual(400)
+    expect(callArg.content.startsWith('This is a casual comment.')).toBe(true)
+    expect(mockInteraction.followUp).not.toHaveBeenCalled()
+  })
+
+  test('Proactive interjection: deletes reply when AI output is empty or whitespace', async () => {
+    mockInteraction.isProactive = true
+
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: '   <think>internal thought only</think>   ',
+      sharedState
+    })
+
+    expect(mockInteraction.deleteReply).toHaveBeenCalledTimes(1)
+    expect(mockInteraction.editReply).not.toHaveBeenCalled()
+    expect(mockInteraction.followUp).not.toHaveBeenCalled()
+  })
 })
+
 
 

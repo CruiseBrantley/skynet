@@ -250,22 +250,8 @@ async function executeProactiveInterjection (message, client, database) {
     streamToken.reset = resetStream
     streamToken.hasEdited = () => hasEdited
 
-    const showStatusFunc = async (text) => {
-      clearStatusInterval()
+    const showStatusFunc = async () => {
       startTyping()
-
-      const { createStatusHeartbeat } = require('./statusHeartbeat')
-      const updateStatus = async (payload) => {
-        if (responseMessage) {
-          return await responseMessage.edit(payload)
-        } else {
-          responseMessage = await message.channel.send(payload)
-          return responseMessage
-        }
-      }
-
-      heartbeat = createStatusHeartbeat(updateStatus, text)
-      await heartbeat.start()
       return responseMessage
     }
 
@@ -282,6 +268,7 @@ async function executeProactiveInterjection (message, client, database) {
       client,
       isDM: false,
       isOwner: isMessageOwner,
+      isProactive: true,
       profileId: isMessageOwner ? 'sirian' : `user_${message.author.id}`,
       options: {
         getString: (opt) => opt === 'message' ? message.content : null,
@@ -313,8 +300,8 @@ async function executeProactiveInterjection (message, client, database) {
       cleanup
     }
 
-    // Immediately show thinking status
-    await showStatusFunc(`${client.user?.username || 'Skynet'} is thinking...`).catch(() => {})
+    // Proactively show typing indicator without sending thinking message
+    startTyping()
 
     try {
       await chatCommand.execute(normalizedInteraction, database)
