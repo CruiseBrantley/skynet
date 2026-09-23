@@ -755,21 +755,16 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 }
 
 /**
- * Queries Ollama using ONLY local Mac or remote PC — never Gemini.
- * Safe for background agent tasks (schedulers, loops) where API costs must be avoided.
- * Priority: Remote PC → Local Mac. Gemini API is strictly disallowed.
+ * Executes an LLM query using the standard cascade:
+ * Remote PC (Level 0) -> Gemini API (Level 2) -> Local Mac Mini (Level 3).
+ * Applies lightweight options by default (capped context, no thinking) suitable for background checks.
  * @param {string} endpoint
  * @param {object} payload
  * @param {Function|null} onToken
+ * @param {object} options
  */
-async function queryLocalOrRemote (endpoint, payload, onToken = null) {
-  const remoteHost = process.env.OLLAMA_REMOTE_HOST
-  const remotePort = parseInt(process.env.OLLAMA_REMOTE_PORT) || 11434
+async function queryLocalOrRemote (endpoint, payload, onToken = null, options = {}) {
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
-  const timeoutMs = 120_000 // 2 min — background tasks get less priority
-
-  // Background agent tasks are lightweight evaluations (maintenance / NOOP checks).
-  // Disable heavy chain-of-thought thinking and cap token prediction to avoid pegging GPU.
   const isQwen3 = (remoteModel || '').toLowerCase().includes('qwen3')
   const defaultCtx = isQwen3 ? 65536 : 8192
 
@@ -778,29 +773,8 @@ async function queryLocalOrRemote (endpoint, payload, onToken = null) {
   if (payload.options.num_predict === undefined) payload.options.num_predict = 256
   if (payload.think === undefined) payload.think = false
 
-  if (remoteHost && remoteModel) {
-    const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
-    if (isOnline) {
-      try {
-        const isStream = typeof onToken === 'function'
-        const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
-        const response = await axios.post(
-          remoteUrl,
-          { ...payload, model: remoteModel, stream: isStream },
-          { timeout: timeoutMs, ...(isStream ? { responseType: 'stream' } : {}) }
-        )
-        if (isStream) {
-          return await consumeOllamaStream(response.data, onToken)
-        }
-        return response.data
-      } catch (err) {
-        logger.info(`queryLocalOrRemote: Remote PC failed, falling to local: ${err.message}`)
-      }
-    }
-  }
-
-  // Fall through to local — strictly disable Gemini fallback to protect quota
-  return queryOllama(endpoint, payload, 3, onToken, { allowCloudFallback: false })
+  // Standard cascade: Remote PC (Level 0) -> Gemini API (Level 2) -> Local Mac Mini (Level 3)
+  return queryOllama(endpoint, payload, 0, onToken, options)
 }
 
 /**

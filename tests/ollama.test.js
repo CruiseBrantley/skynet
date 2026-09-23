@@ -153,7 +153,7 @@ describe('Ollama Fallback Hierarchy', () => {
   })
 })
 
-describe('queryLocalOrRemote — Gemini-free routing', () => {
+describe('queryLocalOrRemote — Standard cascade delegation', () => {
   const { queryLocalOrRemote } = require('../util/ollama')
   let mockSocket
 
@@ -164,6 +164,7 @@ describe('queryLocalOrRemote — Gemini-free routing', () => {
     process.env.OLLAMA_REMOTE_MODEL = 'remote-model'
     process.env.OLLAMA_LOCAL_MODEL = 'local-model'
     process.env.GEMINI_API_KEY = 'gemini-key'
+    process.env.GEMINI_MODEL = 'gemini-model'
 
     mockSocket = {
       setTimeout: jest.fn(),
@@ -177,79 +178,108 @@ describe('queryLocalOrRemote — Gemini-free routing', () => {
     net.Socket.mockImplementation(() => mockSocket)
   })
 
-  test('calls remote PC when online — never Gemini', async () => {
+  test('calls remote PC when online', async () => {
     axios.post.mockResolvedValueOnce({ data: { message: { content: 'from-remote' } } })
 
     const result = await queryLocalOrRemote('/api/chat', { messages: [] })
 
     expect(result.message.content).toBe('from-remote')
-    // Exactly one axios POST — to the remote PC, not Gemini
     expect(axios.post).toHaveBeenCalledTimes(1)
     expect(axios.post.mock.calls[0][0]).toContain('remote-host')
     expect(axios.post.mock.calls[0][0]).not.toContain('googleapis')
   })
 
-  test('falls back to local (level 2) when remote is offline — never Gemini', async () => {
+  test('falls back to Gemini (Level 2) when remote is offline — zero Mac Mini load', async () => {
     // Remote port check fails
     mockSocket.connect.mockImplementation((p, h, cb) => {
       if (p === 11434 && h === 'remote-host') {
-        // no callback = timeout
+        // timeout
       }
     })
     mockSocket.once.mockImplementation((event, cb) => {
       if (event === 'error' || event === 'timeout') setImmediate(cb)
     })
 
-    // Local model responds
-    axios.post.mockResolvedValueOnce({ data: { message: { content: 'from-local' } } })
+    // Gemini responds
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-gemini' }] } }] } })
 
     const result = await queryLocalOrRemote('/api/chat', { messages: [] })
 
-    // The local call should go to 127.0.0.1 with keep_alive 2m, not googleapis
-    expect(axios.post.mock.calls[0][0]).not.toContain('googleapis')
-    expect(axios.post.mock.calls[0][0]).toContain('127.0.0.1')
-    expect(axios.post.mock.calls[0][1]).toMatchObject({
+    expect(result.message.content).toBe('from-gemini')
+    expect(axios.post.mock.calls[0][0]).toContain('googleapis')
+    expect(axios.post.mock.calls.some(c => c[0].includes('127.0.0.1'))).toBe(false)
+  })
+
+  test('falls back to Gemini when remote throws', async () => {
+    axios.post
+      .mockRejectedValueOnce(new Error('remote timeout'))
+      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini-fallback' }] } }] } })
+
+    const result = await queryLocalOrRemote('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('gemini-fallback')
+    expect(axios.post.mock.calls[1][0]).toContain('googleapis')
+  })
+
+  test('skips remote and goes straight to Gemini when OLLAMA_REMOTE_HOST is missing', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+    axios.post.mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'gemini-only' }] } }] } })
+
+    const result = await queryLocalOrRemote('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('gemini-only')
+    const connectCalls = mockSocket.connect.mock.calls
+    const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
+    expect(remoteConnects.length).toBe(0)
+    expect(axios.post.mock.calls[0][0]).toContain('googleapis')
+  })
+
+  test('falls back to Level 3 (Local Mac Mini with keep_alive 2m) when remote and Gemini both fail', async () => {
+    // Remote port check fails
+    mockSocket.connect.mockImplementation((p, h, cb) => {
+      if (p === 11434 && h === 'remote-host') {
+        // timeout
+      }
+    })
+    mockSocket.once.mockImplementation((event, cb) => {
+      if (event === 'error' || event === 'timeout') setImmediate(cb)
+    })
+
+    const err500 = new Error('Gemini down')
+    err500.response = { status: 500, data: { error: { message: 'Gemini 500' } } }
+
+    axios.post.mockImplementation((url) => {
+      if (url.includes('127.0.0.1')) {
+        return Promise.resolve({ data: { message: { content: 'from-local-emergency' } } })
+      }
+      return Promise.reject(err500)
+    })
+
+    const result = await queryLocalOrRemote('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('from-local-emergency')
+    const localCall = axios.post.mock.calls.find(c => c[0].includes('127.0.0.1'))
+    expect(localCall).toBeDefined()
+    expect(localCall[1]).toMatchObject({
+      model: 'local-model',
       keep_alive: '2m'
     })
   })
 
-  test('falls back to local when remote throws — never Gemini', async () => {
-    // Port check succeeds but POST fails
-    axios.post
-      .mockRejectedValueOnce(new Error('remote timeout'))
-      .mockResolvedValueOnce({ data: { message: { content: 'local-fallback' } } })
+  test('throws when remote, Gemini, and local Mac Mini all fail', async () => {
+    // Remote port check fails
+    mockSocket.connect.mockImplementation((p, h, cb) => {
+      if (p === 11434 && h === 'remote-host') {
+        // timeout
+      }
+    })
+    mockSocket.once.mockImplementation((event, cb) => {
+      if (event === 'error' || event === 'timeout') setImmediate(cb)
+    })
 
-    const result = await queryLocalOrRemote('/api/chat', { messages: [] })
+    const err = new Error('All tiers dead')
+    axios.post.mockRejectedValue(err)
 
-    expect(result.message.content).toBe('local-fallback')
-    // Gemini URL was never called
-    const urls = axios.post.mock.calls.map(c => c[0])
-    expect(urls.some(u => u.includes('googleapis'))).toBe(false)
-  })
-
-  test('skips remote and goes straight to local when OLLAMA_REMOTE_HOST is missing', async () => {
-    delete process.env.OLLAMA_REMOTE_HOST
-    axios.post.mockResolvedValueOnce({ data: { message: { content: 'local-only' } } })
-
-    const result = await queryLocalOrRemote('/api/chat', { messages: [] })
-
-    expect(result.message.content).toBe('local-only')
-    // Any socket checks should be against localhost, never the remote host
-    const connectCalls = mockSocket.connect.mock.calls
-    const remoteConnects = connectCalls.filter(([, host]) => host === 'remote-host')
-    expect(remoteConnects.length).toBe(0)
-  })
-
-  test('strictly never calls Gemini even if both remote and local fail', async () => {
-    // Remote port check succeeds but remote post fails
-    axios.post.mockRejectedValueOnce(new Error('remote dead'))
-    // Local post also fails
-    axios.post.mockRejectedValueOnce(new Error('local dead'))
-
-    await expect(queryLocalOrRemote('/api/chat', { messages: [] })).rejects.toThrow('local dead')
-
-    // Verify googleapis was never called
-    const urls = axios.post.mock.calls.map(c => c[0])
-    expect(urls.some(u => u.includes('googleapis'))).toBe(false)
+    await expect(queryLocalOrRemote('/api/chat', { messages: [] })).rejects.toThrow('All tiers dead')
   })
 })

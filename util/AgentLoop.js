@@ -16,7 +16,7 @@ const MAX_RECENT_ACTIONS = 20
  * and executes lightweight tool calls (memory, scheduling) as needed.
  *
  * Design constraints:
- * - NEVER calls Gemini — all inference via queryLocalOrRemote()
+ * - Uses standard cascade (Remote 5090 -> Gemini -> Mac Mini) via queryLocalOrRemote()
  * - Backs off if a tick is already running (no concurrent evaluations)
  * - Depth counter prevents runaway recursive tool chains
  * - Unknown or unsupported commands are silently ignored, never re-tried
