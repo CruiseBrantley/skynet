@@ -2,6 +2,7 @@ const logger = require('../logger')
 const { isProactiveChannelAllowed } = require('./config_manager')
 const { isChannelInFlight } = require('./inFlightChannels')
 const { selectProactiveEmoji, executeProactiveInterjection } = require('./chat/proactivePersonality')
+const { executeProactiveInsight } = require('./chat/proactiveInsight')
 
 function noul (instructions, criteria = null) {
   return {
@@ -59,14 +60,17 @@ class System1Gatekeeper {
     // Cooldown configurations (in ms)
     this.reactionCooldownMs = parseInt(process.env.GATEKEEPER_REACTION_COOLDOWN_MS, 10) || 10 * 60 * 1000 // 10 minutes
     this.interjectCooldownMs = parseInt(process.env.GATEKEEPER_INTERJECT_COOLDOWN_MS, 10) || 60 * 60 * 1000 // 60 minutes
+    this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 30 * 60 * 1000 // 30 minutes
 
     // Probability thresholds (0.0 - 1.0)
     this.reactionThreshold = parseFloat(process.env.VON_REACTION_THRESHOLD) || 0.80
     this.interjectThreshold = parseFloat(process.env.VON_INTERJECT_THRESHOLD) || 0.80
+    this.insightThreshold = parseFloat(process.env.VON_INSIGHT_THRESHOLD) || 0.80
 
     // In-memory cooldown tracking per channel ID
     this.lastReactionTimeByChannel = new Map()
     this.lastInterjectTimeByChannel = new Map()
+    this.lastInsightTimeByChannel = new Map()
 
     this._hasLoggedOffline = false
   }
@@ -77,6 +81,7 @@ class System1Gatekeeper {
   resetCooldowns () {
     this.lastReactionTimeByChannel.clear()
     this.lastInterjectTimeByChannel.clear()
+    this.lastInsightTimeByChannel.clear()
   }
 
   /**
@@ -97,6 +102,16 @@ class System1Gatekeeper {
   isInterjectOnCooldown (channelId) {
     const last = this.lastInterjectTimeByChannel.get(channelId) || 0
     return Date.now() - last < this.interjectCooldownMs
+  }
+
+  /**
+   * Check if a channel is on insight cooldown.
+   * @param {string} channelId
+   * @returns {boolean}
+   */
+  isInsightOnCooldown (channelId) {
+    const last = this.lastInsightTimeByChannel.get(channelId) || 0
+    return Date.now() - last < this.insightCooldownMs
   }
 
   /**
@@ -136,10 +151,11 @@ class System1Gatekeeper {
     const text = (message.content || '').trim()
     if (text.length < 4) return false
 
-    // If both cooldowns are active, no need to query System 1
+    // If all cooldowns are active, no need to query System 1
     const reactionBlocked = this.isReactionOnCooldown(message.channel.id)
     const interjectBlocked = this.isInterjectOnCooldown(message.channel.id)
-    if (reactionBlocked && interjectBlocked) return false
+    const insightBlocked = this.isInsightOnCooldown(message.channel.id)
+    if (reactionBlocked && interjectBlocked && insightBlocked) return false
 
     return true
   }
@@ -164,7 +180,8 @@ class System1Gatekeeper {
         state: message.content,
         questions: {
           reaction: noul('Is this message funny, shocking, hype, or notable enough to react to?'),
-          interject: noul('Does this message explicitly address Skynet, ask Skynet a question, or clearly call on the bot to speak?')
+          interject: noul('Does this message explicitly address Skynet, ask Skynet a question, or clearly call on the bot to speak?'),
+          insight: noul('Does this message ask a technical question, describe a bug or problem, or discuss a topic where factual context or troubleshooting would be helpful?')
         }
       })
 
@@ -172,10 +189,11 @@ class System1Gatekeeper {
       const latencyMs = Date.now() - start
       const reactionProb = res?.answers?.reaction?.noul ?? 0
       const interjectProb = res?.answers?.interject?.noul ?? 0
+      const insightProb = res?.answers?.insight?.noul ?? 0
 
       logger.info(
         `System1Gatekeeper: #${channelName} evaluated in ${latencyMs}ms ` +
-        `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}]`
+        `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}, insight: ${insightProb.toFixed(2)}]`
       )
 
       // Spoken interjections interrupt human conversation and must NEVER trigger on arbitrary banter
@@ -185,7 +203,7 @@ class System1Gatekeeper {
       const mentionsBot = /\b(skynet|bot|ai)\b/i.test(rawText)
       const canInterject = hasQuestion || mentionsBot
 
-      // Priority 1: High-confidence Interjection
+      // Priority 1: High-confidence Interjection (Conversational 1-line flavor)
       if (canInterject && interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
@@ -201,7 +219,22 @@ class System1Gatekeeper {
         return { action: 'interject', score: interjectProb, latencyMs }
       }
 
-      // Priority 2: High-confidence Reaction
+      // Priority 2: High-confidence Topic Insight (Helpful context with Ephemeral Button)
+      if (insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
+        this.lastInsightTimeByChannel.set(channelId, Date.now())
+        logger.info(
+          `System1Gatekeeper: Insight triggered in #${channelName} ` +
+          `(score: ${insightProb.toFixed(2)} >= ${this.insightThreshold}) for "${message.content.slice(0, 50)}"`
+        )
+        setImmediate(() => {
+          Promise.resolve(executeProactiveInsight(message, discordClient)).catch(err => {
+            logger.error(`System1Gatekeeper: Proactive insight error: ${err.message}`)
+          })
+        })
+        return { action: 'insight', score: insightProb, latencyMs }
+      }
+
+      // Priority 3: High-confidence Reaction
       if (reactionProb >= this.reactionThreshold && !this.isReactionOnCooldown(channelId)) {
         this.lastReactionTimeByChannel.set(channelId, Date.now())
         logger.info(
@@ -217,7 +250,7 @@ class System1Gatekeeper {
         return { action: 'react', score: reactionProb, latencyMs }
       }
 
-      return { action: 'ignore', reactionProb, interjectProb, latencyMs }
+      return { action: 'ignore', reactionProb, interjectProb, insightProb, latencyMs }
     } catch (err) {
       if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
         if (!this._hasLoggedOffline) {

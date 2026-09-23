@@ -2,10 +2,12 @@ const gatekeeper = require('../util/System1Gatekeeper')
 const configManager = require('../util/config_manager')
 const inFlightChannels = require('../util/inFlightChannels')
 const proactivePersonality = require('../util/chat/proactivePersonality')
+const proactiveInsight = require('../util/chat/proactiveInsight')
 
 jest.mock('../util/config_manager')
 jest.mock('../util/inFlightChannels')
 jest.mock('../util/chat/proactivePersonality')
+jest.mock('../util/chat/proactiveInsight')
 
 describe('System1Gatekeeper (Real-time Von Sentry)', () => {
   const botId = '558428214805135370'
@@ -81,14 +83,18 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
     })
 
-    test('rejects when both reaction and interjection cooldowns are active', () => {
+    test('rejects when reaction, interjection, and insight cooldowns are all active', () => {
       gatekeeper.lastReactionTimeByChannel.set('c1', Date.now())
       gatekeeper.lastInterjectTimeByChannel.set('c1', Date.now())
+      gatekeeper.lastInsightTimeByChannel.set('c1', Date.now())
       const msg = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: 'this is a full message' }
       expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
     })
 
     test('allows valid unmentioned message when at least one cooldown is available', () => {
+      gatekeeper.lastReactionTimeByChannel.set('c1', Date.now())
+      gatekeeper.lastInterjectTimeByChannel.set('c1', Date.now())
+      // insight is NOT on cooldown
       const msg = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: 'this is a valid message' }
       expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(true)
     })
@@ -183,6 +189,30 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(res).toMatchObject({ action: 'ignore' })
       expect(proactivePersonality.executeProactiveInterjection).not.toHaveBeenCalled()
+    })
+
+    test('triggers topic insight when insight probability exceeds threshold', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'tech-chat' },
+        content: 'Anyone know why my node server crashes with ERR_HTTP_HEADERS_SENT?'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.10 },
+          interject: { noul: 0.20 },
+          insight: { noul: 0.91 }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'insight', score: 0.91 })
+      expect(gatekeeper.isInsightOnCooldown('c1')).toBe(true)
+      await new Promise(resolve => setImmediate(resolve))
+      expect(proactiveInsight.executeProactiveInsight).toHaveBeenCalledWith(msg, mockClient)
     })
 
     test('handles Von connection refusal gracefully without throwing', async () => {

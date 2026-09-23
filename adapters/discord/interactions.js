@@ -57,7 +57,14 @@ async function handleInteractionComponent (interaction, core) {
       return await discordSelfHealing.handleButton(interaction)
     }
 
-    // D. Dynamic Command Component Dispatch (Buttons, e.g. soundboard_*)
+    // D. Proactive Topic Insight Buttons
+    if (interaction.customId.startsWith('insight:')) {
+      const { handleInsightButton } = require('../../util/chat/proactiveInsight')
+      await handleInsightButton(interaction)
+      return true
+    }
+
+    // E. Dynamic Command Component Dispatch (Buttons, e.g. soundboard_*)
     const [cmdPrefix] = (interaction.customId || '').split(/[_:]/)
     const dynamicCommand = interaction.client?.commands?.get ? interaction.client.commands.get(cmdPrefix) : null
     const handler = dynamicCommand && (
