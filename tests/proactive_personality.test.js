@@ -129,4 +129,41 @@ describe('proactivePersonality (System 2 Soul & Emoji Selection)', () => {
       expect(mockReact).not.toHaveBeenCalled()
     })
   })
+
+  describe('executeProactiveInterjection', () => {
+    test('starts typing and executes chatCommand with normalized interaction', async () => {
+      const { executeProactiveInterjection } = require('../util/chat/proactivePersonality')
+      const chatCommand = require('../commands/chat')
+      const origExecute = chatCommand.execute
+      chatCommand.execute = jest.fn().mockImplementation(async (interaction) => {
+        if (typeof interaction.reply === 'function') {
+          await interaction.reply('Hello from proactive interjection!')
+        }
+      })
+
+      const mockSendTyping = jest.fn().mockResolvedValue({})
+      const mockSend = jest.fn().mockResolvedValue({ id: 'reply1', edit: jest.fn() })
+      const mockMessage = {
+        id: 'msg123',
+        content: 'Skynet respond here if you are listening',
+        author: { id: 'user1', username: 'Sirian' },
+        guild: mockGuild,
+        guildId: 'guild123',
+        channel: {
+          name: 'bot-test',
+          id: 'chan1',
+          sendTyping: mockSendTyping,
+          send: mockSend
+        }
+      }
+
+      await executeProactiveInterjection(mockMessage, { user: { id: 'bot123' } }, {})
+
+      expect(mockSendTyping).toHaveBeenCalled()
+      expect(chatCommand.execute).toHaveBeenCalled()
+      expect(mockSend).toHaveBeenCalledWith({ content: 'Hello from proactive interjection!' })
+
+      chatCommand.execute = origExecute
+    })
+  })
 })

@@ -142,8 +142,40 @@ async function executeProactiveInterjection (message, client, database) {
     const chatCommand = require('../../commands/chat')
     if (!chatCommand || typeof chatCommand.execute !== 'function') return
 
+    let typingInterval = null
+    const stopTyping = () => {
+      if (typingInterval) {
+        clearInterval(typingInterval)
+        typingInterval = null
+      }
+    }
+
+    const startTyping = () => {
+      stopTyping()
+      message.channel.sendTyping().catch(() => {})
+      typingInterval = setInterval(() => {
+        message.channel.sendTyping().catch(() => {})
+      }, 4000)
+      if (typingInterval.unref) typingInterval.unref()
+    }
+
+    startTyping()
     let responseMessage = null
+    let heartbeat = null
+    const clearStatusInterval = () => {
+      if (heartbeat) {
+        heartbeat.stop()
+        heartbeat = null
+      }
+    }
+
+    const cleanup = () => {
+      stopTyping()
+      clearStatusInterval()
+    }
+
     const replyFunc = async (content) => {
+      cleanup()
       const payload = typeof content === 'string' ? { content } : content
       responseMessage = await message.channel.send(payload)
       return responseMessage
@@ -159,6 +191,85 @@ async function executeProactiveInterjection (message, client, database) {
       }
     }
 
+    let buffer = ''
+    let lastEdit = 0
+    let isEditing = false
+    let hasEdited = false
+    let gen = 0
+    const BATCH_MS = 800
+    const MAX_LEN = 1900
+
+    const resetStream = () => {
+      buffer = ''
+      isEditing = false
+      hasEdited = false
+      lastEdit = 0
+      gen++
+    }
+
+    const streamToken = async (token) => {
+      const myGen = gen
+      if (myGen !== gen) return
+      buffer += token
+      const now = Date.now()
+      if (now - lastEdit < BATCH_MS || isEditing) return
+
+      lastEdit = now
+      isEditing = true
+
+      try {
+        if (myGen !== gen) return
+        const visibleText = buffer
+          .replace(/<think[\s\S]*?(?:<\/think>|$)/gi, '')
+          .replace(/<thought[\s\S]*?(?:<\/thought>|$)/gi, '')
+          .replace(/<action[\s\S]*?(?:<\/action>|$)/gi, '')
+          .replace(/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd][\s\S]*?(?:>>>|$)/gi, '')
+          .replace(/<<<[\s\S]*?(?:>>>|$)/gi, '')
+          .replace(/<[a-zA-Z0-9_]*$/g, '')
+          .replace(/<<*$/g, '')
+          .trim()
+
+        if (!visibleText) return
+
+        clearStatusInterval()
+        const toPost = visibleText.length > MAX_LEN
+          ? visibleText.substring(0, MAX_LEN)
+          : visibleText
+
+        const res = await editFunc({ content: toPost, flags: [4096] }).catch((err) => {
+          if (err.code === 10008 || err.status === 404) {
+            responseMessage = null
+          }
+          return null
+        })
+        if (res) hasEdited = true
+      } finally {
+        isEditing = false
+      }
+    }
+    streamToken.reset = resetStream
+    streamToken.hasEdited = () => hasEdited
+
+    const showStatusFunc = async (text) => {
+      clearStatusInterval()
+      startTyping()
+
+      const { createStatusHeartbeat } = require('./statusHeartbeat')
+      const updateStatus = async (payload) => {
+        if (responseMessage) {
+          return await responseMessage.edit(payload)
+        } else {
+          responseMessage = await message.channel.send(payload)
+          return responseMessage
+        }
+      }
+
+      heartbeat = createStatusHeartbeat(updateStatus, text)
+      await heartbeat.start()
+      return responseMessage
+    }
+
+    const isMessageOwner = Boolean(message.author?.id === process.env.OWNER_ID)
     const normalizedInteraction = {
       id: message.id,
       triggeringMessageId: message.id,
@@ -170,8 +281,8 @@ async function executeProactiveInterjection (message, client, database) {
       member: message.member,
       client,
       isDM: false,
-      isOwner: Boolean(message.author?.id === process.env.OWNER_ID),
-      profileId: `user_${message.author.id}`,
+      isOwner: isMessageOwner,
+      profileId: isMessageOwner ? 'sirian' : `user_${message.author.id}`,
       options: {
         getString: (opt) => opt === 'message' ? message.content : null,
         getAttachment: () => message.attachments?.first?.() || null,
@@ -181,6 +292,8 @@ async function executeProactiveInterjection (message, client, database) {
       replied: false,
       deferReply: async () => {},
       deleteReply: async () => {
+        cleanup()
+        resetStream()
         if (responseMessage) {
           await responseMessage.delete().catch(() => {})
           responseMessage = null
@@ -189,14 +302,25 @@ async function executeProactiveInterjection (message, client, database) {
       fetchReply: async () => responseMessage,
       reply: replyFunc,
       editReply: editFunc,
-      showStatus: async () => {},
+      showStatus: showStatusFunc,
       followUp: async (content) => {
+        cleanup()
         const payload = typeof content === 'string' ? { content } : content
         return await message.channel.send(payload)
-      }
+      },
+      streamToken,
+      resetStream,
+      cleanup
     }
 
-    await chatCommand.execute(normalizedInteraction, database)
+    // Immediately show thinking status
+    await showStatusFunc(`${client.user?.username || 'Skynet'} is thinking...`).catch(() => {})
+
+    try {
+      await chatCommand.execute(normalizedInteraction, database)
+    } finally {
+      cleanup()
+    }
   } catch (err) {
     logger.error(`proactivePersonality: Interjection error: ${err.stack || err.message}`)
   }

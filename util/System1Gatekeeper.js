@@ -163,8 +163,8 @@ class System1Gatekeeper {
       const res = await this.client.systemOne({
         state: message.content,
         questions: {
-          reaction: noul('Is this message hilarious, an absurd failure, hype, or notable enough to react to?'),
-          interject: noul('Does this message directly ask a question or invite the bot to speak?')
+          reaction: noul('Is this message funny, shocking, hype, or notable enough to react to?'),
+          interject: noul('Does this message address or invoke Skynet, ask a question, or invite a response?')
         }
       })
 
@@ -173,7 +173,7 @@ class System1Gatekeeper {
       const reactionProb = res?.answers?.reaction?.noul ?? 0
       const interjectProb = res?.answers?.interject?.noul ?? 0
 
-      logger.debug(
+      logger.info(
         `System1Gatekeeper: #${channelName} evaluated in ${latencyMs}ms ` +
         `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}]`
       )
