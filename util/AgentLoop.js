@@ -496,6 +496,14 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
       }
     } catch (_) {}
 
+    const hasErrors = telemetrySummary !== 'No recent command errors.'
+    const hasTriggers = triggersSummary !== 'No active watchdog triggers.'
+    const hasRepairs = pendingRepairsSummary !== 'No pending code repairs.'
+    if (!hasErrors && !hasTriggers && !hasRepairs) {
+      logger.info('AgentLoop: System healthy, no active triggers, errors, or pending repairs. Skipping autonomous LLM query.')
+      return
+    }
+
     const actionExecutor = require('./ActionExecutor')
     const actionList = actionExecutor.listActions()
       .map(a => `  - ${a.name}: ${a.description}`)

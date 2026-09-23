@@ -103,6 +103,54 @@ describe('Ollama Fallback Hierarchy', () => {
     expect(axios.post.mock.calls[0][0]).toContain('gemini-3.8-flash')
     expect(axios.post.mock.calls[1][0]).toContain('gemini-3.7-flash')
   })
+
+  test('should failover to Level 3 (Local Mac Mini) with keep_alive 2m when Gemini fails across all candidate models', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+
+    const err500 = new Error('Gemini API 500 error')
+    err500.response = { status: 500, data: { error: { message: 'Internal error' } } }
+
+    axios.post.mockImplementation((url) => {
+      if (url.includes('127.0.0.1')) {
+        return Promise.resolve({ data: { message: { content: 'from-local-level-3' } } })
+      }
+      return Promise.reject(err500)
+    })
+
+    const result = await queryOllama('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('from-local-level-3')
+    const localCall = axios.post.mock.calls.find(call => call[0].includes('127.0.0.1'))
+    expect(localCall).toBeDefined()
+    expect(localCall[1]).toMatchObject({
+      model: 'local-model',
+      keep_alive: '2m'
+    })
+  })
+
+  test('should failover to Level 3 (Local Mac Mini) when GEMINI_API_KEY is missing', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+    delete process.env.GEMINI_API_KEY
+
+    axios.post.mockResolvedValueOnce({ data: { message: { content: 'from-local-no-key' } } })
+
+    const result = await queryOllama('/api/chat', { messages: [] })
+
+    expect(result.message.content).toBe('from-local-no-key')
+    expect(axios.post.mock.calls[0][0]).toContain('127.0.0.1')
+    expect(axios.post.mock.calls[0][1]).toMatchObject({
+      model: 'local-model',
+      keep_alive: '2m'
+    })
+  })
+
+  test('should throw if Level 0, Level 2, and Level 3 all fail', async () => {
+    delete process.env.OLLAMA_REMOTE_HOST
+    const err = new Error('All models dead')
+    axios.post.mockRejectedValue(err)
+
+    await expect(queryOllama('/api/chat', { messages: [] })).rejects.toThrow('All models dead')
+  })
 })
 
 describe('queryLocalOrRemote — Gemini-free routing', () => {
@@ -157,9 +205,12 @@ describe('queryLocalOrRemote — Gemini-free routing', () => {
 
     const result = await queryLocalOrRemote('/api/chat', { messages: [] })
 
-    expect(result.message.content).toBe('from-local')
-    // The local call should go to 127.0.0.1, not googleapis
+    // The local call should go to 127.0.0.1 with keep_alive 2m, not googleapis
     expect(axios.post.mock.calls[0][0]).not.toContain('googleapis')
+    expect(axios.post.mock.calls[0][0]).toContain('127.0.0.1')
+    expect(axios.post.mock.calls[0][1]).toMatchObject({
+      keep_alive: '2m'
+    })
   })
 
   test('falls back to local when remote throws — never Gemini', async () => {

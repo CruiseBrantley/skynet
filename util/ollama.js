@@ -289,13 +289,14 @@ async function consumeGeminiStream (responseStream, onToken = null, watchdogOpti
 }
 
 /**
- * Queries Ollama with automatic failover from remote PC directly to Gemini.
- * Local Ollama is reserved exclusively for background proactive tasks (or explicit opt-in).
+ * Queries Ollama with automatic failover: Remote PC (Level 0) -> Gemini API (Level 2) -> Local Mac Mini (Level 3).
+ * Local Ollama is reserved exclusively for background proactive tasks, explicit opt-in (Level 1),
+ * or emergency tertiary fallback when Remote PC and Gemini both fail (Level 3).
  * @param {string} endpoint - The API endpoint e.g., '/api/chat' or '/api/generate'
  * @param {object} payload - The request body (e.g. messages: [], prompt: "")
- * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: local Ollama (opt-in), 2: Gemini
+ * @param {number|boolean} fallbackLevel - 0: remote Ollama, 1: local Ollama (opt-in), 2: Gemini API, 3: local Mac Mini Ollama
  * @param {Function|null} onToken - Optional callback for streaming tokens
- * @param {object} options - Optional flags (e.g. { allowCloudFallback: false })
+ * @param {object} options - Optional flags (e.g. { allowCloudFallback: false, allowLocalFallback: false })
  * @returns {Promise<object>} The normalized response data
  */
 function convertToolsToGemini (tools) {
@@ -363,12 +364,12 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
   const ollamaTtftMs = parseInt(process.env.OLLAMA_TTFT_MS, 10) || 30000
   const ollamaInactivityMs = parseInt(process.env.OLLAMA_INACTIVITY_MS, 10) || 15000
 
-  // Level 1: Local Mac Fallback (Reserved for background tasks or explicit opt-in)
-  if (fallbackLevel === 1) {
+  // Level 1: Explicit Local Opt-in; Level 3: Emergency Tertiary Fallback (Local Mac Mini)
+  if (fallbackLevel === 1 || fallbackLevel === 3) {
     const localUrl = `http://127.0.0.1:11434${endpoint}`
     const localModel = process.env.OLLAMA_LOCAL_MODEL || 'gemma4:e4b'
 
-    logger.info(`Triggering Level 1 fallback: Local Ollama (${localModel}) for ${endpoint}`)
+    logger.info(`Triggering Level ${fallbackLevel} fallback: Local Ollama (${localModel}) for ${endpoint}`)
 
     // Try to start local Ollama if offline
     let isOnline = await checkPortOpen('127.0.0.1', 11434, 1000)
@@ -393,7 +394,7 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       const localAbort = new AbortController()
       const response = await axios.post(
         localUrl,
-        { ...payload, model: localModel, stream: isStream },
+        { ...payload, model: localModel, stream: isStream, keep_alive: payload.keep_alive || '2m' },
         {
           timeout: isStream ? ollamaTtftMs : 180000,
           ...(isStream ? { responseType: 'stream', signal: localAbort.signal } : {})
@@ -426,21 +427,25 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       }
       throw new Error(`Local Model ${localModel} returned malformed response.`)
     } catch (err) {
-      if (options.allowCloudFallback === false) {
-        logger.error(`Local Ollama fallback failed: ${err.message}. Cloud fallback disallowed.`)
+      if (fallbackLevel === 3 || options.allowCloudFallback === false) {
+        logger.error(`Local Ollama fallback (Level ${fallbackLevel}) failed: ${err.message}.`)
         throw err
       }
       logger.error(`Local Ollama fallback failed: ${err.message}. Dropping to Level 2 (Gemini).`)
-      return queryOllama(endpoint, payload, 2, onToken, options)
+      return queryOllama(endpoint, payload, 2, onToken, { ...options, allowLocalFallback: false })
     }
   }
 
-  // Level 2: Gemini API Tier (Final Cloud API Fallback — preserves quota)
-  if (fallbackLevel >= 2) {
+  // Level 2: Gemini API Tier (Secondary Cloud Fallback)
+  if (fallbackLevel === 2) {
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
       logger.error('GEMINI_API_KEY is not configured in .env and fallback reached Level 2.')
-      throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
+      if (options.allowLocalFallback !== false) {
+        logger.warn('Dropping to Level 3: Local Mac Mini Ollama.')
+        return queryOllama(endpoint, payload, 3, onToken, options)
+      }
+      throw new Error('All fallback tiers (Remote PC, Gemini API) are unreachable.')
     }
 
     const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
@@ -582,8 +587,12 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
     }
 
     const finalErrMsg = lastError?.response?.data?.error?.message || lastError?.message || 'Unknown error'
-    logger.error(`Final Gemini fallback failed across all candidate models: ${finalErrMsg}`)
-    throw new Error('All fallback tiers (Remote PC, Local Mac, Gemini API) are unreachable.')
+    logger.error(`Gemini fallback failed across all candidate models: ${finalErrMsg}`)
+    if (options.allowLocalFallback !== false) {
+      logger.warn('Dropping to Level 3: Local Mac Mini Ollama.')
+      return queryOllama(endpoint, payload, 3, onToken, options)
+    }
+    throw new Error(`All fallback tiers are unreachable: Gemini failed (${finalErrMsg})`)
   }
 
   // Level 0: Primary Remote Workstation
@@ -791,7 +800,7 @@ async function queryLocalOrRemote (endpoint, payload, onToken = null) {
   }
 
   // Fall through to local — strictly disable Gemini fallback to protect quota
-  return queryOllama(endpoint, payload, 1, onToken, { allowCloudFallback: false })
+  return queryOllama(endpoint, payload, 3, onToken, { allowCloudFallback: false })
 }
 
 /**
