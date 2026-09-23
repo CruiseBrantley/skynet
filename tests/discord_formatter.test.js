@@ -16,6 +16,12 @@ describe('discordFormatter', () => {
       expect(cleaned).toBe('- Patch 14.19 is live.\n- Buffs to champions.')
       expect(formatForEmbed(raw)).toBe('- Patch 14.19 is live.\n- Buffs to champions.')
     })
+
+    test('strips SOURCE markers and multiline instruction trailers cleanly', () => {
+      const raw = '[SOURCE: Web Result: EarlyGame (https://example.com)]\n### Patch 26.19 (Latest\n\n[INSTRUCTIONS]:\nUse this real-time distilled information to formulate your answer.\nDo not fabricate.'
+      const cleaned = stripSystemDirectives(raw)
+      expect(cleaned).toBe('### Patch 26.19 (Latest')
+    })
   })
   describe('convertMarkdownTables', () => {
     test('converts simple markdown table into bullet list', () => {

@@ -115,8 +115,9 @@ function smartTruncate (text, maxChars = 4000, suffix = '\n\n*(Truncated for Dis
 function stripSystemDirectives (text) {
   if (!text || typeof text !== 'string') return ''
   return text
-    .replace(/^\[SYSTEM:[^\]]*\]\s*/gi, '')
-    .replace(/\s*\[INSTRUCTIONS\]:[^\n]*\s*$/gi, '')
+    .replace(/\[SYSTEM:[\s\S]*?\]\s*/gi, '')
+    .replace(/\[SOURCE:[\s\S]*?\]\s*/gi, '')
+    .replace(/\s*\[INSTRUCTIONS\]:[\s\S]*$/gi, '')
     .trim()
 }
 

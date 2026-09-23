@@ -182,7 +182,7 @@ class WorkflowEngine {
   static extractVersionOrPatch (rawText) {
     if (!rawText) return null
     const text = typeof rawText === 'object'
-      ? (rawText.summary || rawText.output || JSON.stringify(rawText))
+      ? (rawText.summary || rawText.output || rawText.content || JSON.stringify(rawText))
       : String(rawText)
 
     // Clean out markdown asterisks/formatting for uniform matching
@@ -197,14 +197,40 @@ class WorkflowEngine {
     const matches = Array.from(cleanText.matchAll(/\b(?:patch\s*[:#-]?\s*|v\s*)(\d{1,2}\.\d{1,2})\b/gi))
     if (matches.length === 0) return null
 
+    const clauseDelims = /[·|;\n]/
+    const futurePatterns = [
+      /\b(?:next|upcoming|scheduled|pbe|preview|tentative|expected|planned|arriving|coming|future)\b/i,
+      /\b(?:will\s+release|releases\s+on|release\s+date|drops\s+on|slated\s+for|target\s+date)\b/i,
+      /\bon\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\b/i,
+      /\bin\s+\d+\s+(?:days?|weeks?|months?)\b/i,
+      /\b(?:tomorrow|next\s+week|next\s+month)\b/i
+    ]
+
     const validVersions = []
     for (const m of matches) {
       const idx = m.index
-      const prefix = cleanText.substring(Math.max(0, idx - 40), idx).toLowerCase()
-      // Skip if marked as next, upcoming, pbe, or scheduled
-      if (prefix.includes('next') || prefix.includes('upcoming') || prefix.includes('scheduled') || prefix.includes('pbe')) {
+      const rawPrefix = cleanText.substring(Math.max(0, idx - 45), idx)
+      const rawSuffix = cleanText.substring(idx + m[0].length, Math.min(cleanText.length, idx + m[0].length + 55))
+
+      // Limit prefix to after last clause delimiter
+      const pParts = rawPrefix.split(clauseDelims)
+      const prefix = pParts[pParts.length - 1].toLowerCase()
+
+      // Limit suffix to before next clause delimiter
+      const sParts = rawSuffix.split(clauseDelims)
+      const suffix = sParts[0].toLowerCase()
+
+      // If explicitly marked live in its immediate clause, accept it
+      if (prefix.includes('live') || suffix.includes('live') || prefix.includes('current') || suffix.includes('current')) {
+        validVersions.push(m[1])
         continue
       }
+
+      const windowText = `${prefix} ${suffix}`
+      if (futurePatterns.some(p => p.test(windowText))) {
+        continue
+      }
+
       validVersions.push(m[1])
     }
 
@@ -219,6 +245,62 @@ class WorkflowEngine {
     })
 
     return validVersions[0]
+  }
+
+  static hasMeaningfulPatchNotes (rawText) {
+    if (!rawText) return false
+    let text = typeof rawText === 'object'
+      ? (rawText.summary || rawText.output || rawText.content || JSON.stringify(rawText))
+      : String(rawText)
+
+    // Strip system directives, citations, and instructions
+    text = text
+      .replace(/\[SYSTEM:[\s\S]*?\]\s*/gi, '')
+      .replace(/\[SOURCE:[\s\S]*?\]\s*/gi, '')
+      .replace(/\s*\[INSTRUCTIONS\]:[\s\S]*$/gi, '')
+      .trim()
+
+    // Strip markdown formatting symbols
+    const plainText = text.replace(/[*_#`~>]/g, '').trim()
+
+    // Reject anything shorter than 120 characters
+    if (plainText.length < 120) return false
+
+    const lower = plainText.toLowerCase()
+
+    // Reject placeholder / error / unreleased phrases
+    const rejectionPhrases = [
+      'no direct external web pages',
+      'no patch notes',
+      'notes are not yet available',
+      'haven\'t been released',
+      'have not been released',
+      'yet to be released',
+      'will be released',
+      'expected to release',
+      'scheduled to release',
+      'coming soon',
+      'maintenance schedule',
+      'action executed successfully but returned no text'
+    ]
+    if (rejectionPhrases.some(phrase => lower.includes(phrase))) {
+      return false
+    }
+
+    // Must contain game balance / change indicators
+    const changeIndicators = [
+      /\b(?:buffs?|nerfs?|reworks?|adjustments?|adjusted|changes?|tuning|balance)\b/i,
+      /\b(?:damage|cooldown|passive|mana|health|armor|stats?|ratio|scaling)\b/i,
+      /\b(?:champions?|items?|runes?|bug\s*fixes?|bugfixes?|arena|aram|summoner's rift)\b/i,
+      /\b[qwer]\s*[-–—:]\s*\w+/i
+    ]
+
+    let matches = 0
+    for (const re of changeIndicators) {
+      if (re.test(lower)) matches++
+    }
+
+    return matches >= 2
   }
 
   _resolveValue (val, stepResults, previousResult, context) {
@@ -256,6 +338,9 @@ class WorkflowEngine {
           if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
             return WorkflowEngine.extractVersionOrPatch(stepObj)
           }
+          if (subPath && (subPath === 'hasMeaningfulPatchNotes' || subPath.endsWith('.hasMeaningfulPatchNotes'))) {
+            return WorkflowEngine.hasMeaningfulPatchNotes(stepObj)
+          }
           if (subPath === 'output' || subPath === 'result') {
             return stepObj
           }
@@ -291,6 +376,9 @@ class WorkflowEngine {
           }
           if (subPath && (subPath === 'patch' || subPath.endsWith('.patch') || subPath === 'version' || subPath.endsWith('.version'))) {
             return WorkflowEngine.extractVersionOrPatch(stepObj)
+          }
+          if (subPath && (subPath === 'hasMeaningfulPatchNotes' || subPath.endsWith('.hasMeaningfulPatchNotes'))) {
+            return WorkflowEngine.hasMeaningfulPatchNotes(stepObj)
           }
           if (subPath === 'output' || subPath === 'result') {
             return stepObj
@@ -341,6 +429,9 @@ class WorkflowEngine {
           if (sPath && (sPath === 'patch' || sPath.endsWith('.patch') || sPath === 'version' || sPath.endsWith('.version'))) {
             const patch = WorkflowEngine.extractVersionOrPatch(stepObj)
             return patch !== null ? patch : ''
+          }
+          if (sPath && (sPath === 'hasMeaningfulPatchNotes' || sPath.endsWith('.hasMeaningfulPatchNotes'))) {
+            return String(WorkflowEngine.hasMeaningfulPatchNotes(stepObj))
           }
           if (sPath === 'output' || sPath === 'result') {
             return typeof stepObj === 'object' ? JSON.stringify(stepObj) : String(stepObj)
@@ -399,6 +490,15 @@ class WorkflowEngine {
 
     // Support expression evaluation like "$steps.compare_patch_baseline.output.hasChanged == true"
     if (typeof condition === 'string') {
+      if (condition.includes('&&')) {
+        const parts = condition.split('&&')
+        return parts.every(part => this._evaluateCondition(part.trim(), previousResult, stepResults, params, context))
+      }
+      if (condition.includes('||')) {
+        const parts = condition.split('||')
+        return parts.some(part => this._evaluateCondition(part.trim(), previousResult, stepResults, params, context))
+      }
+
       const compMatch = condition.match(/^\s*(.+?)\s*(==|!=)\s*(.+?)\s*$/)
       if (compMatch) {
         const leftRaw = compMatch[1].trim()

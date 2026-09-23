@@ -285,5 +285,186 @@ describe('WorkflowEngine & Multi-Step Pipelines', () => {
     // $steps.step2.output.hasChanged == false should be true
     expect(workflowEngine._evaluateCondition('$steps.step2.output.hasChanged == false', null, stepResults, {}, context)).toBe(true)
   })
+
+  test('extractVersionOrPatch strictly excludes future, scheduled, and pbe patch candidates in prefix and suffix', () => {
+    const { extractVersionOrPatch } = workflowEngine.constructor
+
+    // Suffix date and scheduling patterns
+    expect(extractVersionOrPatch('LoL Patch Notes ⇒ Patch 26.18 Live · 26.19 on Sep 23')).toBe('26.18')
+    expect(extractVersionOrPatch('Patch 26.19 is scheduled for September 23, 2026')).toBeNull()
+    expect(extractVersionOrPatch('Upcoming Patch 26.19 preview and tentative changes')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 PBE notes and datamines')).toBeNull()
+    expect(extractVersionOrPatch('League of Legends Patch 26.19 will release on Wednesday')).toBeNull()
+    expect(extractVersionOrPatch('Expected release for Patch 26.19 is tomorrow')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 (Upcoming)')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 (PBE)')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 (Tentative)')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 in 3 days')).toBeNull()
+    expect(extractVersionOrPatch('Patch 26.19 target date is next week')).toBeNull()
+
+    // Valid live patches
+    expect(extractVersionOrPatch('League of Legends Patch 26.18 Notes: Champion updates and balance changes')).toBe('26.18')
+    expect(extractVersionOrPatch('Patch 26.18 is live on all servers!')).toBe('26.18')
+    expect(extractVersionOrPatch('Patch 26.18 Live')).toBe('26.18')
+  })
+
+  test('hasMeaningfulPatchNotes validates substantial patch content and rejects stubs/schedules/placeholders', () => {
+    const { hasMeaningfulPatchNotes } = workflowEngine.constructor
+
+    // Rejection: Null or empty
+    expect(hasMeaningfulPatchNotes(null)).toBe(false)
+    expect(hasMeaningfulPatchNotes('')).toBe(false)
+
+    // Rejection: Incomplete prompt stub from local model
+    expect(hasMeaningfulPatchNotes('### Patch 26.19 (Latest\n\n[INSTRUCTIONS]: Use this real-time distilled information to formulate your answer.')).toBe(false)
+
+    // Rejection: Schedule snippet without actual notes
+    expect(hasMeaningfulPatchNotes('LoL Patch Notes ⇒ Patch 26.18 Live · 26.19 on Sep 23. Check out the release schedule and maintenance times.')).toBe(false)
+
+    // Rejection: Future unreleased notice
+    expect(hasMeaningfulPatchNotes('Patch 26.19 is scheduled to release on September 23, 2026. Patch notes have not been released yet by Riot Games. Stay tuned.')).toBe(false)
+
+    // Rejection: Search placeholder / error
+    expect(hasMeaningfulPatchNotes('[SYSTEM: WEB RESEARCH FINDINGS FOR query]\nNo direct external web pages or articles were retrieved. Rely on deep internal model reasoning to answer the query thoroughly.')).toBe(false)
+
+    // Rejection: Action executed with no text
+    expect(hasMeaningfulPatchNotes('Action executed successfully but returned no text.')).toBe(false)
+
+    // Acceptance: Genuine patch notes summary with champion changes and balance details
+    const realSummary = `## League of Legends Patch 26.19 Notes
+- Champion Buffs: Ahri Q damage increased to 50, Azir W soldier damage scaling improved.
+- Champion Nerfs: Smolder passive stacks reduced, Corki base attack damage decreased.
+- Item Changes: Bloodthirster cost increased to 3400 gold with adjusted life steal.`
+    expect(hasMeaningfulPatchNotes(realSummary)).toBe(true)
+
+    // Acceptance: Official Riot highlights with balance changes
+    const riotHighlights = 'Patch 26.19 Highlights: Worlds 2026 balance adjustments are live! Key champion changes include buffs for K\'Sante and nerfs for Zeri. Several mage items adjusted for mid lane.'
+    expect(hasMeaningfulPatchNotes(riotHighlights)).toBe(true)
+  })
+
+  test('condition evaluation supports compound expressions with && and ||', () => {
+    const context = { stepNameToIndex: { step1: 0, step2: 1 } }
+    const stepResults = [
+      { hasChanged: true },
+      '## Patch 26.19 Notes\nChampion Buffs: Ahri Q damage increased.\nChampion Nerfs: Corki base stats reduced.\nItem updates for mage items.'
+    ]
+
+    // Both true with &&
+    expect(workflowEngine._evaluateCondition(
+      '$steps.step1.hasChanged == true && $steps.step2.hasMeaningfulPatchNotes == true',
+      null,
+      stepResults,
+      {},
+      context
+    )).toBe(true)
+
+    // First true, second false with &&
+    const stepResultsWithStub = [
+      { hasChanged: true },
+      '### Patch 26.19 (Latest'
+    ]
+    expect(workflowEngine._evaluateCondition(
+      '$steps.step1.hasChanged == true && $steps.step2.hasMeaningfulPatchNotes == true',
+      null,
+      stepResultsWithStub,
+      {},
+      context
+    )).toBe(false)
+
+    // With ||
+    expect(workflowEngine._evaluateCondition(
+      '$steps.step1.hasChanged == false || $steps.step2.hasMeaningfulPatchNotes == true',
+      null,
+      stepResults,
+      {},
+      context
+    )).toBe(true)
+  })
+
+  test('lol_patch_checker pipeline strictly blocks embed and state update if notes are not meaningful', async () => {
+    stateStore.set('lol_patch_baseline', '26.18')
+
+    const mockSearch = jest.fn()
+    const mockSendEmbed = jest.fn()
+    const mockWriteState = jest.fn()
+
+    jest.spyOn(actionExecutor, 'executeAction').mockImplementation(async (actionName, bot, channel, params, context) => {
+      if (actionName === 'web_search') return mockSearch(params)
+      if (actionName === 'read_state') {
+        const readState = require('../util/actions/read_state')
+        return readState.execute(bot, channel, params, context)
+      }
+      if (actionName === 'send_embed') return mockSendEmbed(params)
+      if (actionName === 'write_state') return mockWriteState(params)
+      return 'ok'
+    })
+
+    const patchWf = workflowEngine.createWorkflow({
+      name: 'lol_patch_checker_strict_test',
+      description: 'Strict patch checker test',
+      steps: [
+        {
+          name: 'search_latest_patch',
+          action: 'web_search',
+          params: { query: 'latest League of Legends patch notes summary' }
+        },
+        {
+          name: 'compare_patch_baseline',
+          action: 'read_state',
+          params: { key: 'lol_patch_baseline', compare_with: '$steps.search_latest_patch.patch' }
+        },
+        {
+          name: 'post_patch_tldr',
+          action: 'send_embed',
+          condition: '$steps.compare_patch_baseline.output.hasChanged == true && $steps.search_latest_patch.hasMeaningfulPatchNotes == true',
+          params: { title: 'New Patch $steps.search_latest_patch.patch', description: '$steps.search_latest_patch.output' }
+        },
+        {
+          name: 'update_patch_baseline',
+          action: 'write_state',
+          condition: '$steps.compare_patch_baseline.output.hasChanged == true && $steps.search_latest_patch.hasMeaningfulPatchNotes == true',
+          params: { key: 'lol_patch_baseline', value: '$steps.search_latest_patch.patch' }
+        }
+      ]
+    })
+
+    // Scenario A: Higher patch (26.19) detected from a stub, but NO meaningful patch notes -> NO post, NO baseline change
+    mockSearch.mockResolvedValueOnce('### Patch 26.19 (Latest\n\n[INSTRUCTIONS]: Use this real-time distilled information to formulate your answer.')
+    let res = await workflowEngine.executeWorkflow(patchWf.id, { bot: {}, channel: { id: 'c123' } })
+    expect(res.success).toBe(true)
+    expect(mockSendEmbed).not.toHaveBeenCalled()
+    expect(mockWriteState).not.toHaveBeenCalled()
+
+    // Scenario B: DuckDuckGo search snippet with scheduled future date -> 26.19 rejected as future, 26.18 extracted -> NO post
+    mockSearch.mockResolvedValueOnce('LoL Patch Notes ⇒ Patch 26.18 Live · 26.19 on Sep 23')
+    res = await workflowEngine.executeWorkflow(patchWf.id, { bot: {}, channel: { id: 'c123' } })
+    expect(res.success).toBe(true)
+    expect(mockSendEmbed).not.toHaveBeenCalled()
+    expect(mockWriteState).not.toHaveBeenCalled()
+
+    // Scenario C: Genuine new patch (26.19) WITH meaningful patch notes -> POST and UPDATE baseline!
+    const realPatchContent = `[SYSTEM: WEB SEARCH RESULTS (Distilled Knowledge)]
+## League of Legends Patch 26.19 Notes
+- Champion Buffs: Ahri Q damage increased from 40 to 50, Azir W soldier damage scaling improved.
+- Champion Nerfs: Smolder passive stacks reduced, Corki base attack damage decreased.
+- Item Changes: Bloodthirster cost increased to 3400 gold with adjusted balance.
+
+[INSTRUCTIONS]: Use this real-time distilled information to formulate your answer.`
+
+    mockSearch.mockResolvedValueOnce(realPatchContent)
+    res = await workflowEngine.executeWorkflow(patchWf.id, { bot: {}, channel: { id: 'c123' } })
+    expect(res.success).toBe(true)
+    expect(mockSendEmbed).toHaveBeenCalledTimes(1)
+    expect(mockSendEmbed).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'New Patch 26.19'
+    }))
+    expect(mockWriteState).toHaveBeenCalledTimes(1)
+    expect(mockWriteState).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'lol_patch_baseline',
+      value: '26.19'
+    }))
+
+    actionExecutor.executeAction.mockRestore()
+  })
 })
 
