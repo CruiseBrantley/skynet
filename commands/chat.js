@@ -291,7 +291,7 @@ async function execute (interaction, database) {
             }
           }
 
-          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle}${replyTag} | Text: "${enrichedContent.substring(0, 300)}${enrichedContent.length > 300 ? '...' : ''}"${attachmentLabel} ${reactions ? `| Reactions: [${reactions}]` : ''}`
+          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle}${replyTag} | Text: "${enrichedContent}"${attachmentLabel} ${reactions ? `| Reactions: [${reactions}]` : ''}`
         }).reverse().join('\n')
         logger.info(`Context Enrichment: Fetched ${recentMessages.size} messages for context.`)
       } catch (e) {
