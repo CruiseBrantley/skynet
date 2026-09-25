@@ -291,6 +291,30 @@ class DiscordAdapter {
               }
             }
 
+            // If the user is replying to a specific message, fetch and resolve it into context
+            let referencedMessage = null
+            let replyPrefix = ''
+            if (message.reference && message.reference.messageId) {
+              try {
+                referencedMessage = await message.channel.messages.fetch(message.reference.messageId).catch(() => null)
+                if (referencedMessage) {
+                  const refAuthor = `@${referencedMessage.author?.username || 'User'}${referencedMessage.member?.nickname ? ` (${referencedMessage.member.nickname})` : ''}`
+                  let refText = (referencedMessage.content || '').trim()
+                  if (referencedMessage.attachments && referencedMessage.attachments.size > 0) {
+                    const attachInfo = [...referencedMessage.attachments.values()].map(a => `[Attachment: ${a.name || a.contentType}]`).join(' ')
+                    refText = `${attachInfo} ${refText}`.trim()
+                  }
+                  if (referencedMessage.embeds && referencedMessage.embeds.length > 0) {
+                    const embedInfo = referencedMessage.embeds.map(e => e.title || e.description || '').filter(Boolean).join(' | ')
+                    if (embedInfo) refText = `${refText} [Embed: ${embedInfo}]`.trim()
+                  }
+                  replyPrefix = `[Replying to ${refAuthor}: "${refText}"]\n\n`
+                }
+              } catch (refErr) {
+                logger.warn(`DiscordAdapter: Failed to fetch referenced message: ${refErr.message}`)
+              }
+            }
+
             let cleanContent = (message.content || '').replace(new RegExp(`<@!?${botId}>`, 'g'), '')
             if (isRoleMention && message.mentions?.roles) {
               for (const [roleId, role] of message.mentions.roles) {
@@ -301,7 +325,10 @@ class DiscordAdapter {
             }
             cleanContent = cleanContent.trim()
             if (!cleanContent) {
-              cleanContent = message.attachments?.size ? 'What do you think of this?' : 'Hello!'
+              cleanContent = (message.attachments?.size || referencedMessage?.attachments?.size) ? 'What do you think of this?' : 'Hello!'
+            }
+            if (replyPrefix) {
+              cleanContent = `${replyPrefix}${cleanContent}`
             }
             const preFetchedHistory = await fetchAndFormatContext(message.channel, this.client.user.id, 20, message.id)
 
@@ -399,9 +426,10 @@ class DiscordAdapter {
               profileId: isMessageOwner ? 'sirian' : `user_${message.author.id}`,
               options: {
                 getString: (opt) => opt === 'message' ? cleanContent : null,
-                getAttachment: () => message.attachments?.first?.() || null,
-                attachments: message.attachments
+                getAttachment: () => message.attachments?.first?.() || referencedMessage?.attachments?.first?.() || null,
+                attachments: message.attachments?.size ? message.attachments : (referencedMessage?.attachments || message.attachments)
               },
+              referencedMessage,
               deferred: true,
               replied: false,
               deferReply: async () => {},

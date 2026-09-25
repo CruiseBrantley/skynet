@@ -120,28 +120,26 @@ async function execute (interaction, database) {
         logger.info(`Populated ${formatted.length} historical messages from conversationStore for profile "${profileId}".`)
       } else {
         // Server / Guild Channel Mode: Live Discord channel snapshot
-        if (!channelHistories[channelId] || waitedForQueue || (Date.now() - channelHistories[channelId].time > (60000 * 10))) {
-          channelHistories[channelId] = {
-            time: Date.now(),
-            messages: [{ role: 'system', content: getBasePrompt(promptOptions) }]
-          }
+        channelHistories[channelId] = {
+          time: Date.now(),
+          messages: [{ role: 'system', content: getBasePrompt(promptOptions) }]
+        }
 
-          // Populate initial context with last 20 messages for better situational awareness
-          try {
-            const history = (!waitedForQueue && interaction.recentMessages)
-              ? interaction.recentMessages
-              : await fetchAndFormatContext(interaction.channel, interaction.client.user.id, 20, interaction.triggeringMessageId || interaction.id)
-            channelHistories[channelId].messages.push(...history)
-            logger.info(`Populated ${history.length} historical messages for channel context.`)
-          } catch (err) {
-            logger.warn(`Failed to fetch historical context for channel ${channelId}: ${err.message}`)
-          }
-          // Prune oldest histories if we exceed the cap
-          const historyKeys = Object.keys(channelHistories)
-          if (historyKeys.length > MAX_CHANNEL_HISTORIES) {
-            const oldest = historyKeys.sort((a, b) => channelHistories[a].time - channelHistories[b].time)[0]
-            delete channelHistories[oldest]
-          }
+        // Always populate fresh context with the latest 20 messages for real-time situational awareness
+        try {
+          const history = (!waitedForQueue && interaction.recentMessages)
+            ? interaction.recentMessages
+            : await fetchAndFormatContext(interaction.channel, interaction.client?.user?.id, 20, interaction.triggeringMessageId || interaction.id)
+          channelHistories[channelId].messages.push(...history)
+          logger.info(`Populated ${history.length} historical messages for channel context.`)
+        } catch (err) {
+          logger.warn(`Failed to fetch historical context for channel ${channelId}: ${err.message}`)
+        }
+        // Prune oldest histories if we exceed the cap
+        const historyKeys = Object.keys(channelHistories)
+        if (historyKeys.length > MAX_CHANNEL_HISTORIES) {
+          const oldest = historyKeys.sort((a, b) => channelHistories[a].time - channelHistories[b].time)[0]
+          delete channelHistories[oldest]
         }
       }
 
@@ -283,7 +281,17 @@ async function execute (interaction, database) {
             attachmentLabel = ` [Attachments: ${types}]`
           }
 
-          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle} | Text: "${enrichedContent.substring(0, 100)}${enrichedContent.length > 100 ? '...' : ''}"${attachmentLabel} ${reactions ? `| Reactions: [${reactions}]` : ''}`
+          let replyTag = ''
+          if (m.reference?.messageId) {
+            const repliedTo = recentMessages.get(m.reference.messageId)
+            if (repliedTo) {
+              replyTag = ` (in reply to @${repliedTo.author?.username || 'user'})`
+            } else if (m.mentions?.repliedUser?.username) {
+              replyTag = ` (in reply to @${m.mentions.repliedUser.username})`
+            }
+          }
+
+          return `ID: ${m.id} | Time: ${timeLabel} | Author: ${authorHandle}${replyTag} | Text: "${enrichedContent.substring(0, 300)}${enrichedContent.length > 300 ? '...' : ''}"${attachmentLabel} ${reactions ? `| Reactions: [${reactions}]` : ''}`
         }).reverse().join('\n')
         logger.info(`Context Enrichment: Fetched ${recentMessages.size} messages for context.`)
       } catch (e) {

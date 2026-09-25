@@ -86,7 +86,17 @@ async function formatMessagesForContext (messages, botId) {
       }
     }
 
-    const messageContent = `[ID: ${m.id} | ${timeLabel}]${reactionsLabel} ${handle}: ${content}`
+    let replyTag = ''
+    if (m.reference?.messageId) {
+      const repliedMsg = sorted.find(x => x.id === m.reference.messageId)
+      if (repliedMsg) {
+        replyTag = ` (in reply to @${repliedMsg.author?.username || 'user'})`
+      } else if (m.mentions?.repliedUser?.username) {
+        replyTag = ` (in reply to @${m.mentions.repliedUser.username})`
+      }
+    }
+
+    const messageContent = `[ID: ${m.id} | ${timeLabel}]${reactionsLabel} ${handle}${replyTag}: ${content}`
     const lastMsg = formatted[formatted.length - 1]
     if (lastMsg && lastMsg.role === role) {
       lastMsg.content += '\n' + messageContent
