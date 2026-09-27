@@ -986,16 +986,193 @@ function calculateSeriesEndDate (media, startDate, episodeCountOverride) {
   return null
 }
 
+/**
+ * Query AniList GraphQL for sequels of anime currently on the user's MyAnimeList watchlist.
+ * Filters for newly announced or airing sequels (status: RELEASING or NOT_YET_RELEASED)
+ * that are not already present on the user's watchlist.
+ * Auto-enrolls new sequels to MyAnimeList (if malClient is authenticated) and returns detected items.
+ *
+ * @param {Array<object>} malItems Full MyAnimeList watchlist entries
+ * @param {object} options Options: { dryRun, batchSize }
+ * @returns {Promise<Array<object>>} List of newly detected and enrolled sequels
+ */
+async function detectWatchlistSequels (malItems, options = {}) {
+  if (!Array.isArray(malItems) || malItems.length === 0) return []
+
+  const dryRun = Boolean(options.dryRun)
+  const batchSize = options.batchSize || 40
+
+  // 1. Build set of all known MAL IDs on the current watchlist
+  const existingMalIds = new Set(
+    malItems.map(i => parseInt(i.anime_id, 10)).filter(id => !isNaN(id) && id > 0)
+  )
+
+  // 2. Filter candidates: only series user is watching (1), completed (2), on hold (3), or planning (6).
+  // Exclude dropped series (4) and dub releases.
+  const candidates = malItems.filter(item => {
+    if (item.status === 4) return false
+    if (isDubEntry(item.anime_title) || isDubEntry(item.anime_title_eng)) return false
+    const malId = parseInt(item.anime_id, 10)
+    return !isNaN(malId) && malId > 0
+  })
+
+  if (candidates.length === 0) return []
+
+  const query = `
+    query ($idMalList: [Int]) {
+      Page(perPage: 50) {
+        media(idMal_in: $idMalList, type: ANIME) {
+          id
+          idMal
+          title {
+            english
+            romaji
+          }
+          relations {
+            edges {
+              relationType
+              node {
+                id
+                idMal
+                type
+                format
+                status
+                title {
+                  english
+                  romaji
+                }
+                startDate {
+                  year
+                  month
+                  day
+                }
+                nextAiringEpisode {
+                  episode
+                  airingAt
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+
+  const detectedSequels = []
+  const validFormats = ['TV', 'TV_SHORT', 'ONA', 'OVA', 'SPECIAL']
+
+  for (let i = 0; i < candidates.length; i += batchSize) {
+    const chunk = candidates.slice(i, i + batchSize)
+    const idMalList = chunk.map(c => parseInt(c.anime_id, 10))
+
+    let pageMedia = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await axios.post(
+          ANILIST_API,
+          { query, variables: { idMalList } },
+          { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 12000 }
+        )
+        pageMedia = res.data?.data?.Page?.media || []
+        break
+      } catch (err) {
+        if (err.response?.status === 429 && attempt < 2) {
+          const retryAfter = parseInt(err.response.headers?.['retry-after'], 10) || 5
+          logger.warn(`anime_sync: AniList rate limited in sequel scan. Waiting ${retryAfter + 1}s...`)
+          await new Promise(resolve => setTimeout(resolve, (retryAfter + 1) * 1000))
+          continue
+        }
+        logger.warn(`anime_sync: AniList sequel scan failed for batch ${Math.floor(i / batchSize) + 1}: ${err.message}`)
+        break
+      }
+    }
+
+    if (!pageMedia || pageMedia.length === 0) {
+      continue
+    }
+
+    for (const parent of pageMedia) {
+      const edges = parent.relations?.edges || []
+      for (const edge of edges) {
+        if (edge.relationType !== 'SEQUEL') continue
+        const node = edge.node
+        if (!node || node.type !== 'ANIME' || !node.idMal) continue
+
+        const sequelMalId = parseInt(node.idMal, 10)
+        if (existingMalIds.has(sequelMalId)) continue
+
+        // Strictly check for releasing or upcoming sequels
+        if (node.status !== 'RELEASING' && node.status !== 'NOT_YET_RELEASED') continue
+
+        // Check valid episodic formats
+        if (node.format && !validFormats.includes(node.format.toUpperCase())) continue
+
+        const canonicalTitle = node.title?.english || node.title?.romaji
+        if (!canonicalTitle || isDubEntry(canonicalTitle)) continue
+
+        const parentTitle = parent.title?.english || parent.title?.romaji || `MAL ID ${parent.idMal}`
+        const targetStatus = node.status === 'RELEASING' ? 'watching' : 'plan_to_watch'
+
+        existingMalIds.add(sequelMalId)
+        detectedSequels.push({
+          parentMalId: parent.idMal,
+          parentTitle,
+          idMal: sequelMalId,
+          title: canonicalTitle,
+          romajiTitle: node.title?.romaji,
+          status: node.status,
+          format: node.format,
+          nextAiringEpisode: node.nextAiringEpisode,
+          startDate: node.startDate,
+          targetMalStatus: targetStatus
+        })
+      }
+    }
+
+    if (i + batchSize < candidates.length) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+  }
+
+  // 3. Auto-enroll detected sequels to MyAnimeList
+  let malClient = null
+  try {
+    malClient = require('../malClient')
+  } catch (_) {}
+
+  const enrolledSequels = []
+  for (const sequel of detectedSequels) {
+    let enrolledOnMal = false
+    if (!dryRun && malClient && typeof malClient.isAuthenticated === 'function' && malClient.isAuthenticated()) {
+      try {
+        await malClient.addAnime(sequel.idMal, { status: sequel.targetMalStatus })
+        enrolledOnMal = true
+        logger.info(`anime_sync: Auto-enrolled new sequel "${sequel.title}" (MAL ID: ${sequel.idMal}) as ${sequel.targetMalStatus}.`)
+      } catch (err) {
+        logger.warn(`anime_sync: Failed to auto-enroll sequel "${sequel.title}" (MAL ${sequel.idMal}) to MAL: ${err.message}`)
+      }
+    }
+
+    enrolledSequels.push({
+      ...sequel,
+      enrolledOnMal
+    })
+  }
+
+  return enrolledSequels
+}
+
 module.exports = {
   name: 'anime_sync',
   description: 'Sync anime releases from MyAnimeList/Crunchyroll to Google Calendar and audit/cleanup completed seasonal runs.',
   ownerOnly: true,
   schema: {
-    operation: 'Operation: "sync_watchlist" or "check_ended_series"',
+    operation: 'Operation: "sync_watchlist", "detect_sequels", or "check_ended_series"',
     username: 'MyAnimeList username (defaults to MYANIMELIST_USERNAME in .env or "skynetanimelist")',
     calendar: 'Target calendar name or ID (defaults to GOOGLE_CALENDAR_DEFAULT or "Anime Release")',
     max_items: 'Maximum items to scan/schedule from watchlist (default: 10)',
     status: 'Watchlist status to sync (1: Watching [default], 6: Plan to Watch, 7: All)',
+    check_sequels: 'Boolean: whether to scan for and auto-enroll newly airing sequels of watchlist series (default: true)',
     dry_run: 'Boolean: preview what would be added without modifying Google Calendar',
     confirm_delete: 'Boolean: for check_ended_series, set to true to actually remove confirmed ended series from calendar'
   },
@@ -1006,6 +1183,32 @@ module.exports = {
     const dryRun = Boolean(params.dry_run)
 
     // ─────────────────────────────────────────────────────────────
+    // Operation: detect_sequels
+    // ─────────────────────────────────────────────────────────────
+    if (operation === 'detect_sequels') {
+      const statusFilter = params.status ? parseInt(params.status, 10) : 7
+      const malItems = await module.exports.fetchMalList(username, statusFilter)
+      if (malItems.length === 0) {
+        return `[SYSTEM: MyAnimeList list for "${username}" returned 0 items for status ${statusFilter}.]`
+      }
+
+      const detected = await module.exports.detectWatchlistSequels(malItems, { dryRun })
+      if (detected.length === 0) {
+        return `[SYSTEM: No new sequels detected for watchlist "${username}". All seasons are up-to-date or already tracked.]`
+      }
+
+      const lines = [
+        `✨ **New Anime Seasons Detected (${detected.length}):**`,
+        ...detected.map(s => {
+          const statusLabel = s.status === 'RELEASING' ? 'Currently Airing' : 'Upcoming'
+          const malNote = s.enrolledOnMal ? ' (Added to MyAnimeList)' : (dryRun ? ' [Dry Run]' : '')
+          return `- ✨ **${s.title}**: Sequel to *${s.parentTitle}* (MAL ID: ${s.idMal}) [${statusLabel}]${malNote}`
+        })
+      ]
+      return lines.join('\n')
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Operation: sync_watchlist
     // ─────────────────────────────────────────────────────────────
     if (operation === 'sync_watchlist') {
@@ -1014,6 +1217,25 @@ module.exports = {
 
       if (malItems.length === 0) {
         return `[SYSTEM: MyAnimeList list for "${username}" returned 0 items for status ${statusFilter}.]`
+      }
+
+      // Check for new sequels of existing watchlist items unless explicitly skipped
+      let detectedSequels = []
+      if (params.check_sequels !== false) {
+        try {
+          detectedSequels = await module.exports.detectWatchlistSequels(malItems, { dryRun })
+          for (const s of detectedSequels) {
+            malItems.push({
+              anime_id: s.idMal,
+              anime_title: s.romajiTitle || s.title,
+              anime_title_eng: s.title,
+              anime_airing_status: s.status === 'RELEASING' ? 1 : 3,
+              status: s.targetMalStatus === 'watching' ? 1 : 6
+            })
+          }
+        } catch (seqErr) {
+          logger.warn(`anime_sync: Sequel detection pass encountered an error: ${seqErr.message}`)
+        }
       }
 
       // Filter strictly for currently airing (anime_airing_status: 1) or upcoming TV series (anime_airing_status: 3)
@@ -1155,6 +1377,16 @@ module.exports = {
         }
       }
 
+      if (detectedSequels.length > 0) {
+        results.push('✨ **New Anime Seasons Detected & Auto-Enrolled:**')
+        for (const s of detectedSequels) {
+          const statusLabel = s.status === 'RELEASING' ? 'Currently Airing' : 'Upcoming'
+          const malNote = s.enrolledOnMal ? ' (Added to MyAnimeList)' : (dryRun ? ' [Dry Run]' : '')
+          results.push(`- ✨ **${s.title}**: Sequel to *${s.parentTitle}* (MAL ID: ${s.idMal}) [${statusLabel}]${malNote}`)
+        }
+        results.push('')
+      }
+
       if (endedTruncated.length > 0) {
         results.push('🛑 **Ended Series Future Events Cleared (Past Airings Preserved):**')
         endedTruncated.forEach(t => results.push(`- 🛑 **${t}**: Finished airing (future occurrences removed)`))
@@ -1280,7 +1512,7 @@ module.exports = {
       }
 
       const hasAdditions = addedToCalendar.length > 0
-      const hasSignificantUpdates = hasAdditions || scheduleShifted.length > 0
+      const hasSignificantUpdates = hasAdditions || scheduleShifted.length > 0 || detectedSequels.length > 0
       const isSilentMode = Boolean(params.silent || params.silent_if_no_additions || (context && context.isScheduled))
 
       const summaryText = `🎌 **MyAnimeList / Crunchyroll Watchlist Sync (${username})**\n` +
@@ -1288,9 +1520,10 @@ module.exports = {
         results.join('\n')
 
       if (context && context.isScheduled && channel && typeof channel.send === 'function') {
-        if (hasAdditions || scheduleShifted.length > 0) {
+        if (hasSignificantUpdates) {
           const updateText = '🎌 **Anime Watchlist Daily Update**\n\n' +
-            (addedToCalendar.length > 0 ? `✨ **New Additions Starting / Scheduled:**\n${addedToCalendar.join('\n')}\n\n` : '') +
+            (detectedSequels.length > 0 ? `✨ **New Seasons Detected & Enrolled:**\n${detectedSequels.map(s => `- ✨ **${s.title}** (Sequel to *${s.parentTitle}*)`).join('\n')}\n\n` : '') +
+            (addedToCalendar.length > 0 ? `📅 **New Additions Starting / Scheduled:**\n${addedToCalendar.join('\n')}\n\n` : '') +
             (scheduleShifted.length > 0 ? `🔄 **Broadcast Schedule Shifts:**\n${scheduleShifted.join('\n')}\n\n` : '') +
             (endedTruncated.length > 0 ? `🛑 **Ended Series Future Events Cleared:**\n${endedTruncated.map(t => `- 🛑 **${t}**: Finished airing`).join('\n')}\n` : '')
           await channel.send(updateText).catch(e => logger.warn(`anime_sync: Failed to send scheduled update: ${e.message}`))
@@ -1315,6 +1548,7 @@ module.exports = {
           upcomingCount: toProcess.filter(i => i.anime_airing_status === 3).length,
           alreadyPresent,
           addedToCalendar,
+          detectedSequels,
           pendingBroadcast,
           scheduleShifted,
           endedTruncated,
@@ -1499,8 +1733,9 @@ module.exports = {
         (updatedList.length > 0 ? updatedList.join('\n') : 'All eligible events already have colors assigned.')
     }
 
-    throw new Error(`Unknown operation: "${operation}". Supported operations: "sync_watchlist", "check_ended_series", "update_calendar_colors".`)
+    throw new Error(`Unknown operation: "${operation}". Supported operations: "sync_watchlist", "detect_sequels", "check_ended_series", "update_calendar_colors".`)
   },
+  detectWatchlistSequels,
   getAnimeDetails,
   fetchMalList,
   formatCstSchedule,

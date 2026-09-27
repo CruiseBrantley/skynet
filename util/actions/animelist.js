@@ -8,7 +8,7 @@ module.exports = {
   description: 'Manage the server anime watchlist on MyAnimeList and Google Calendar (add, remove, list, seed, sync).',
   ownerOnly: false,
   schema: {
-    operation: 'Operation: "add", "remove", "list", "seed", or "sync"',
+    operation: 'Operation: "add", "remove", "list", "seed", "sync", or "detect_sequels"',
     title: 'Anime title for add or remove',
     platform: 'Streaming platform (Crunchyroll, Netflix, HIDIVE, etc.)',
     episodes: 'Episode count override',
@@ -53,7 +53,7 @@ module.exports = {
       return `[SYSTEM: Permission denied. The animelist tool is only available in server ${TARGET_GUILD_ID}.]`
     }
 
-    if (['add', 'remove', 'sync', 'seed'].includes(operation) && !isOwner && !isAllowedChannel) {
+    if (['add', 'remove', 'sync', 'seed', 'detect_sequels'].includes(operation) && !isOwner && !isAllowedChannel) {
       return `[SYSTEM: Permission denied. Modifying the anime list is only allowed in channel #${ANIME_CHANNEL_ID} or with owner permissions.]`
     }
 
@@ -205,11 +205,11 @@ module.exports = {
       }
     }
 
-    if (operation === 'sync') {
+    if (operation === 'sync' || operation === 'detect_sequels') {
       const animeSync = require('./anime_sync')
-      return animeSync.execute(bot, channel, { operation: 'sync_watchlist' }, context)
+      return animeSync.execute(bot, channel, { operation: operation === 'detect_sequels' ? 'detect_sequels' : 'sync_watchlist' }, context)
     }
 
-    return `[MAL Watchlist: Unknown operation "${operation}". Supported: add, remove, list, seed, sync]`
+    return `[MAL Watchlist: Unknown operation "${operation}". Supported: add, remove, list, seed, sync, detect_sequels]`
   }
 }

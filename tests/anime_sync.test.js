@@ -2,6 +2,7 @@ const axios = require('axios')
 const animeSync = require('../util/actions/anime_sync')
 const googleCalendar = require('../util/actions/google_calendar')
 const actionExecutor = require('../util/ActionExecutor')
+const malClient = require('../util/malClient')
 
 jest.mock('axios')
 jest.mock('../logger')
@@ -808,6 +809,297 @@ describe('anime_sync action', () => {
         expect(schedule.pendingSchedule).toBe(false)
         expect(schedule.startDate).toBeInstanceOf(Date)
         expect(schedule.simulcastStr).toContain('Sunday')
+      })
+    })
+
+    describe('Sequel Detection & Auto-Enrollment', () => {
+      test('detectWatchlistSequels identifies new RELEASING sequel and auto-enrolls to MAL', async () => {
+        const malItems = [
+          {
+            anime_id: 52034,
+            anime_title: 'Yasei no Last Boss ga Arawareta!',
+            anime_title_eng: 'A Wild Last Boss Appeared!',
+            status: 2
+          }
+        ]
+
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    id: 152034,
+                    idMal: 52034,
+                    title: { english: 'A Wild Last Boss Appeared!', romaji: 'Yasei no Last Boss ga Arawareta!' },
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            id: 163140,
+                            idMal: 63140,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'RELEASING',
+                            title: {
+                              english: 'A Wild Last Boss Appeared! Season 2',
+                              romaji: 'Yasei no Last Boss ga Arawareta! 2nd Season'
+                            },
+                            startDate: { year: 2026, month: 10, day: 2 },
+                            nextAiringEpisode: { episode: 1, airingAt: 1790958600 }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        jest.spyOn(malClient, 'isAuthenticated').mockReturnValue(true)
+        const addAnimeSpy = jest.spyOn(malClient, 'addAnime').mockResolvedValue({ success: true })
+
+        const results = await animeSync.detectWatchlistSequels(malItems, { dryRun: false })
+
+        expect(results.length).toBe(1)
+        expect(results[0].idMal).toBe(63140)
+        expect(results[0].title).toBe('A Wild Last Boss Appeared! Season 2')
+        expect(results[0].targetMalStatus).toBe('watching')
+        expect(results[0].enrolledOnMal).toBe(true)
+        expect(addAnimeSpy).toHaveBeenCalledWith(63140, { status: 'watching' })
+      })
+
+      test('detectWatchlistSequels skips sequels already present on the watchlist', async () => {
+        const malItems = [
+          { anime_id: 52034, anime_title: 'A Wild Last Boss Appeared!', status: 2 },
+          { anime_id: 63140, anime_title: 'A Wild Last Boss Appeared! Season 2', status: 1 }
+        ]
+
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    id: 152034,
+                    idMal: 52034,
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            idMal: 63140,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'RELEASING',
+                            title: { english: 'A Wild Last Boss Appeared! Season 2' }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        const addAnimeSpy = jest.spyOn(malClient, 'addAnime')
+        const results = await animeSync.detectWatchlistSequels(malItems)
+        expect(results.length).toBe(0)
+        expect(addAnimeSpy).not.toHaveBeenCalled()
+      })
+
+      test('detectWatchlistSequels skips sequels with status FINISHED', async () => {
+        const malItems = [
+          { anime_id: 100, anime_title: 'Old Anime S1', status: 2 }
+        ]
+
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    idMal: 100,
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            idMal: 200,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'FINISHED',
+                            title: { english: 'Old Anime S2' }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        const results = await animeSync.detectWatchlistSequels(malItems)
+        expect(results.length).toBe(0)
+      })
+
+      test('detectWatchlistSequels skips dub releases', async () => {
+        const malItems = [
+          { anime_id: 100, anime_title: 'Chainsaw Man', status: 2 }
+        ]
+
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    idMal: 100,
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            idMal: 201,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'RELEASING',
+                            title: { english: 'Chainsaw Man English Dub' }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        const results = await animeSync.detectWatchlistSequels(malItems)
+        expect(results.length).toBe(0)
+      })
+
+      test('detectWatchlistSequels respects dryRun flag', async () => {
+        const malItems = [
+          { anime_id: 100, anime_title: 'Test Series', status: 2 }
+        ]
+
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    idMal: 100,
+                    title: { english: 'Test Series' },
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            idMal: 200,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'NOT_YET_RELEASED',
+                            title: { english: 'Test Series Season 2' }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        jest.spyOn(malClient, 'isAuthenticated').mockReturnValue(true)
+        const addAnimeSpy = jest.spyOn(malClient, 'addAnime')
+
+        const results = await animeSync.detectWatchlistSequels(malItems, { dryRun: true })
+        expect(results.length).toBe(1)
+        expect(results[0].enrolledOnMal).toBe(false)
+        expect(results[0].targetMalStatus).toBe('plan_to_watch')
+        expect(addAnimeSpy).not.toHaveBeenCalled()
+      })
+
+      test('operation "detect_sequels" formats output and returns findings', async () => {
+        jest.spyOn(animeSync, 'fetchMalList').mockResolvedValueOnce([
+          { anime_id: 52034, anime_title: 'A Wild Last Boss Appeared!', status: 2 }
+        ])
+
+        jest.spyOn(animeSync, 'detectWatchlistSequels').mockResolvedValueOnce([
+          {
+            title: 'A Wild Last Boss Appeared! Season 2',
+            parentTitle: 'A Wild Last Boss Appeared!',
+            idMal: 63140,
+            status: 'RELEASING',
+            enrolledOnMal: true
+          }
+        ])
+
+        const result = await animeSync.execute({}, {}, { operation: 'detect_sequels' }, { isOwner: true })
+        expect(result).toContain('New Anime Seasons Detected (1)')
+        expect(result).toContain('A Wild Last Boss Appeared! Season 2')
+        expect(result).toContain('Added to MyAnimeList')
+      })
+
+      test('sync_watchlist integrates detected sequels into calendar additions', async () => {
+        jest.spyOn(animeSync, 'fetchMalList').mockResolvedValueOnce([
+          {
+            anime_id: 52034,
+            anime_title: 'A Wild Last Boss Appeared!',
+            anime_title_eng: 'A Wild Last Boss Appeared!',
+            anime_airing_status: 2, // S1 finished
+            status: 2 // Completed
+          }
+        ])
+
+        jest.spyOn(animeSync, 'detectWatchlistSequels').mockResolvedValueOnce([
+          {
+            parentMalId: 52034,
+            parentTitle: 'A Wild Last Boss Appeared!',
+            idMal: 63140,
+            title: 'A Wild Last Boss Appeared! Season 2',
+            romajiTitle: 'Yasei no Last Boss ga Arawareta! 2nd Season',
+            status: 'RELEASING',
+            format: 'TV',
+            targetMalStatus: 'watching',
+            enrolledOnMal: true
+          }
+        ])
+
+        jest.spyOn(googleCalendar, 'getAccessToken').mockResolvedValue('token')
+        jest.spyOn(googleCalendar, 'resolveCalendar').mockResolvedValue({ id: 'cal_id', summary: 'Anime Release', accessRole: 'writer' })
+        axios.get.mockResolvedValueOnce({ data: { items: [] } })
+
+        jest.spyOn(animeSync, 'getAnimeDetails').mockResolvedValueOnce({
+          idMal: 63140,
+          title: { english: 'A Wild Last Boss Appeared! Season 2' },
+          status: 'RELEASING',
+          episodes: 12,
+          nextAiringEpisode: { episode: 1, airingAt: 1790958600 },
+          externalLinks: [{ site: 'Crunchyroll', url: 'https://crunchyroll.com/series/test' }]
+        })
+
+        jest.spyOn(googleCalendar, 'execute').mockResolvedValue('✅ Added to Google Calendar')
+
+        const result = await animeSync.execute({}, {}, {
+          operation: 'sync_watchlist',
+          username: 'skynetanimelist'
+        }, { isOwner: true })
+
+        expect(result).toContain('New Anime Seasons Detected & Auto-Enrolled')
+        expect(result).toContain('A Wild Last Boss Appeared! Season 2')
+        expect(result).toContain('Added to Calendar')
       })
     })
   })
