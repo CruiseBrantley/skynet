@@ -63,13 +63,13 @@ class AgentLoop {
   /**
        * Trigger a manual evaluation immediately (e.g. for testing or external triggers).
        */
-  async runOnce () {
-    return this._tick()
+  async runOnce (options = {}) {
+    return this._tick({ force: true, ...options })
   }
 
   // ─── Internal ───────────────────────────────────────────────────────────────
 
-  async _tick () {
+  async _tick (options = {}) {
     if (this._isRunning) {
       logger.info('AgentLoop: Skipping tick — previous evaluation still in progress.')
       return
@@ -79,7 +79,7 @@ class AgentLoop {
     logger.info(`AgentLoop: Tick #${this._tickCount} started.`)
     try {
       // 1. Evaluate internal state (maintenance, schedules, etc.)
-      await this._evaluate(0)
+      await this._evaluate(0, options)
 
       // 2. Periodic Twitch Webhook & Ingress Health Check (Every ~6 hours / 72 ticks)
       if (this._tickCount % 72 === 0) {
@@ -426,7 +426,7 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
     }
   }
 
-  async _evaluate (loopDepth) {
+  async _evaluate (loopDepth, options = {}) {
     if (loopDepth > MAX_LOOP_DEPTH) {
       logger.warn(`AgentLoop: MAX_LOOP_DEPTH (${MAX_LOOP_DEPTH}) reached — stopping recursion.`)
       return
@@ -497,10 +497,9 @@ Standard Emojis: 👍, 😂, 🔥, ✨, ❤️, 💯, 🤔, 👎, 🖕, 🤖, �
     } catch (_) {}
 
     const hasErrors = telemetrySummary !== 'No recent command errors.'
-    const hasTriggers = triggersSummary !== 'No active watchdog triggers.'
     const hasRepairs = pendingRepairsSummary !== 'No pending code repairs.'
-    if (!hasErrors && !hasTriggers && !hasRepairs) {
-      logger.info('AgentLoop: System healthy, no active triggers, errors, or pending repairs. Skipping autonomous LLM query.')
+    if (!options.force && !hasErrors && !hasRepairs) {
+      logger.info('AgentLoop: System healthy, no active errors or pending repairs. Skipping autonomous LLM query.')
       return
     }
 
@@ -581,7 +580,7 @@ Reason: Recording health check timestamp for diagnostics.`
           num_ctx: 8192,
           temperature: 0.3
         }
-      })
+      }, null, { allowCloudFallback: false })
     } catch (err) {
       logger.error(`AgentLoop: Ollama query failed: ${err.message}`)
       return

@@ -438,6 +438,11 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
   // Level 2: Gemini API Tier (Secondary Cloud Fallback)
   if (fallbackLevel === 2) {
+    if (options.allowCloudFallback === false) {
+      logger.info('Cloud fallback disabled via options. Cascading directly to Level 3 (Local Ollama).')
+      return queryOllama(endpoint, payload, 3, onToken, options)
+    }
+
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
       logger.error('GEMINI_API_KEY is not configured in .env and fallback reached Level 2.')
@@ -749,6 +754,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
     throw new Error('Malformed Ollama response: Missing valid message.content or response fields.')
   } catch (err) {
+    if (options.allowCloudFallback === false) {
+      logger.info(`Primary Ollama failed (${err.message}) and cloud fallback disabled. Cascading to Level 3 (Local Ollama).`)
+      return queryOllama(endpoint, payload, 3, onToken, options)
+    }
     logger.info(`Primary Ollama failed (${err.message}). Falling back directly to Level 2 (Gemini).`)
     return queryOllama(endpoint, payload, 2, onToken, options)
   }

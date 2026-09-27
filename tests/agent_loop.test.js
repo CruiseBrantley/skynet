@@ -106,4 +106,23 @@ describe('AgentLoop Proactive Presence', () => {
     expect(res).toContain('trigger_self_healing: Dispatched repair proposal for slash command "/netstats"')
     healSpy.mockRestore()
   })
+
+  test('_evaluate skips autonomous LLM query when system has no errors or repairs', async () => {
+    const ollama = require('../util/ollama')
+    const querySpy = jest.spyOn(ollama, 'queryLocalOrRemote').mockResolvedValue({ message: { content: 'NOOP' } })
+
+    const triggerEngine = require('../util/TriggerEngine')
+    jest.spyOn(triggerEngine, 'listTriggers').mockReturnValue([{ id: 'watchdog_1', enabled: true, conditionType: 'host_cpu' }])
+
+    const telemetry = require('../util/telemetry')
+    jest.spyOn(telemetry, 'getRecentLogs').mockReturnValue([])
+
+    const selfHealing = require('../util/chat/SelfHealingEngine')
+    jest.spyOn(selfHealing, 'getPendingProposals').mockReturnValue([])
+
+    await agentLoop._evaluate(0)
+
+    expect(querySpy).not.toHaveBeenCalled()
+    querySpy.mockRestore()
+  })
 })

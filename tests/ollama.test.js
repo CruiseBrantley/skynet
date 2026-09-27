@@ -282,4 +282,32 @@ describe('queryLocalOrRemote — Standard cascade delegation', () => {
 
     await expect(queryLocalOrRemote('/api/chat', { messages: [] })).rejects.toThrow('All tiers dead')
   })
+
+  test('bypasses Gemini and cascades directly to Level 3 when allowCloudFallback is false', async () => {
+    // Remote port check fails
+    mockSocket.connect.mockImplementation((p, h, cb) => {
+      if (p === 11434 && h === 'remote-host') {
+        // timeout
+      }
+    })
+    mockSocket.once.mockImplementation((event, cb) => {
+      if (event === 'error' || event === 'timeout') setImmediate(cb)
+    })
+
+    axios.post.mockImplementation((url) => {
+      if (url.includes('127.0.0.1')) {
+        return Promise.resolve({ data: { message: { content: 'from-local-no-cloud' } } })
+      }
+      return Promise.reject(new Error('Unexpected remote/cloud call'))
+    })
+
+    const result = await queryLocalOrRemote('/api/chat', { messages: [] }, null, { allowCloudFallback: false })
+
+    expect(result.message.content).toBe('from-local-no-cloud')
+    // Ensure no calls were made to googleapis
+    const googleCalls = axios.post.mock.calls.filter(c => c[0].includes('googleapis'))
+    expect(googleCalls).toHaveLength(0)
+    const localCall = axios.post.mock.calls.find(c => c[0].includes('127.0.0.1'))
+    expect(localCall).toBeDefined()
+  })
 })
