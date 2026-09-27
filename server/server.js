@@ -308,10 +308,13 @@ function setupServer (coreOrBot, database) {
     }
   })
 
-  // Conversation History Endpoint (GET /api/conversations/history)
-  server.get('/api/conversations/history', async (req, res) => {
+  // Conversation History Endpoint (GET /api/conversations/history & GET /api/chat/history)
+  server.get(['/api/conversations/history', '/api/chat/history', '/api/chat/conversations/history'], async (req, res) => {
     const conversationStore = require('../core/conversationStore')
     const session = authManager.resolveSession(req)
+
+    const isLan = req.ip?.startsWith('192.168.') || req.ip?.startsWith('10.') || req.ip?.startsWith('::ffff:192.168.') || req.ip?.startsWith('::ffff:10.')
+    const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1'
 
     let profile = 'guest_session'
     let discordUserId = null
@@ -324,6 +327,12 @@ function setupServer (coreOrBot, database) {
       if (discordIdentity) {
         discordUserId = discordIdentity.id
       } else if (session.isOwner) {
+        discordUserId = process.env.OWNER_ID
+      }
+    } else if (isLocalhost || isLan) {
+      // Local machine / LAN connection defaults to bot owner (matching POST /api/chat)
+      profile = req.query.profile || 'sirian'
+      if (profile === 'sirian') {
         discordUserId = process.env.OWNER_ID
       }
     } else if (req.query.profile && req.query.profile !== 'sirian') {

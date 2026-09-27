@@ -15,8 +15,11 @@ export function useChat(user: AuthUser | null) {
   const loadHistory = useCallback(async (isInitial = false) => {
     if (streamingRef.current) return;
     try {
-      const res = await fetch("/api/conversations/history?limit=40");
-      if (res.ok) {
+      let res = await fetch("/api/chat/history?limit=40").catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch("/api/conversations/history?limit=40").catch(() => null);
+      }
+      if (res && res.ok) {
         const data = await res.json();
         if (Array.isArray(data.history)) {
           if (data.history.length > 0) {

@@ -116,7 +116,7 @@ describe('Server Webhook Deduplication', () => {
     })
     const token = authManager.createSessionToken(user)
 
-    const historyCall = mockApp.get.mock.calls.find(call => call[0] === '/api/conversations/history')
+    const historyCall = mockApp.get.mock.calls.find(call => Array.isArray(call[0]) ? call[0].includes('/api/conversations/history') : call[0] === '/api/conversations/history')
     expect(historyCall).toBeDefined()
     const historyHandler = historyCall[1]
 
