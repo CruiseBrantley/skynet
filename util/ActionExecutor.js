@@ -480,11 +480,20 @@ Example output:
     const channel = await this.resolveChannel(bot, task, classified.override_channel_id)
     if (channel) {
       try {
+        const isTaskOwner = Boolean(
+          task.userId === process.env.OWNER_ID ||
+          task.createdBy?.toLowerCase() === 'sirian'
+        )
         await action.execute(bot, channel, classified.params || {}, {
           isScheduled: true,
           isInteractive: false,
           taskId: task.id,
-          task
+          task,
+          userId: task.userId,
+          user: { id: task.userId, username: task.createdBy },
+          isOwner: isTaskOwner,
+          guildId: task.guildId,
+          channelId: channel.id || task.channelId
         })
         logger.info(`ActionExecutor: Successfully executed "${classified.action}" for task ${task.id} in channel ${channel.id || 'DM'}`)
         return true
@@ -738,6 +747,8 @@ ${codeToValidate.split('\n').map(l => '        ' + l).join('\n')}
         safeContext.isOwner ||
         safeContext.userId === process.env.OWNER_ID ||
         safeContext.user?.id === process.env.OWNER_ID ||
+        safeContext.task?.userId === process.env.OWNER_ID ||
+        safeContext.task?.createdBy?.toLowerCase() === 'sirian' ||
         safeContext.profileId === 'sirian' ||
         safeContext.user?.username?.toLowerCase() === 'sirian'
       )

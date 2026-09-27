@@ -636,12 +636,25 @@ async function scheduleAnimeOnCalendar (params = {}) {
   let isFailed = false
   try {
     const ActionExecutor = require('../ActionExecutor')
-    const actionRes = await ActionExecutor.executeAction('google_calendar', calParams, { ...context, isInteractive: true })
+    const isOwner = Boolean(
+      context?.isOwner ||
+      context?.userId === process.env.OWNER_ID ||
+      context?.user?.id === process.env.OWNER_ID ||
+      context?.task?.userId === process.env.OWNER_ID ||
+      context?.task?.createdBy?.toLowerCase() === 'sirian'
+    )
+    const actionRes = await ActionExecutor.executeAction('google_calendar', calParams, {
+      ...context,
+      isOwner,
+      userId: context?.userId || context?.task?.userId || process.env.OWNER_ID,
+      isInteractive: true
+    })
     if (actionRes.success) {
       calResult = actionRes.output || 'Success'
     } else {
       isFailed = true
       calResult = actionRes.error || 'Calendar operation failed'
+      logger.warn(`anime_sync: Google Calendar execution failed for "${schedule.canonicalTitle}": ${calResult}`)
     }
   } catch (_) {
     calResult = await googleCalendar.execute(bot, channel, calParams, { ...context, isInteractive: true })
@@ -996,7 +1009,7 @@ module.exports = {
     // Operation: sync_watchlist
     // ─────────────────────────────────────────────────────────────
     if (operation === 'sync_watchlist') {
-      const statusFilter = params.status ? parseInt(params.status, 10) : 1
+      const statusFilter = params.status ? parseInt(params.status, 10) : 7
       const malItems = await module.exports.fetchMalList(username, statusFilter)
 
       if (malItems.length === 0) {
@@ -1282,6 +1295,10 @@ module.exports = {
             (endedTruncated.length > 0 ? `🛑 **Ended Series Future Events Cleared:**\n${endedTruncated.map(t => `- 🛑 **${t}**: Finished airing`).join('\n')}\n` : '')
           await channel.send(updateText).catch(e => logger.warn(`anime_sync: Failed to send scheduled update: ${e.message}`))
         }
+      }
+
+      if (syncErrors.length > 0) {
+        logger.warn(`anime_sync: Encountered errors adding series to calendar: ${syncErrors.join('; ')}`)
       }
 
       if (isSilentMode && !hasSignificantUpdates) {
