@@ -479,7 +479,15 @@ async function resolveAnimeSchedule (params = {}) {
   if (media?.nextAiringEpisode?.airingAt) {
     const cst = formatCstSchedule(media.nextAiringEpisode.airingAt)
     if (cst) {
-      startDate = cst.date
+      const currentEp = media.nextAiringEpisode.episode || 1
+      if (currentEp > 1) {
+        // Roll back to the season premiere episode date so current season's aired episodes appear on the calendar
+        const premiereTimestamp = media.nextAiringEpisode.airingAt - (currentEp - 1) * 7 * 86400
+        const premiereCst = formatCstSchedule(premiereTimestamp)
+        startDate = premiereCst ? premiereCst.date : cst.date
+      } else {
+        startDate = cst.date
+      }
       simulcastStr = cst.simulcastString
       const isWithinWeek = (media.nextAiringEpisode.airingAt * 1000 - Date.now() <= 7 * 24 * 60 * 60 * 1000)
       hasBroadcastSchedule = !isUpcoming || isWithinWeek
@@ -536,7 +544,7 @@ async function resolveAnimeSchedule (params = {}) {
     pendingSchedule,
     timeDesc,
     startDate,
-    timeZone: media?.broadcast?.timezone || 'Asia/Tokyo',
+    timeZone: 'America/Chicago',
     simulcastStr,
     calculatedEndDate,
     isContinuing,
@@ -619,7 +627,7 @@ async function scheduleAnimeOnCalendar (params = {}) {
     episodes_count: schedule.episodesCount,
     simulcast: schedule.simulcastStr,
     start: schedule.startDate.toISOString(),
-    timeZone: schedule.timeZone || 'Asia/Tokyo',
+    timeZone: schedule.timeZone || 'America/Chicago',
     link: schedule.link,
     mal_id: schedule.animeId,
     idMal: schedule.animeId
