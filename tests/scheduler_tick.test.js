@@ -38,6 +38,7 @@ describe('AgentScheduler.processDueTasks', () => {
 
     // Reset scheduler state (but use the real class logic)
     AgentScheduler._tasks = []
+    AgentScheduler._inFlight = new Set()
   })
 
   test('delivers DM tasks and marks them complete', async () => {
@@ -122,5 +123,52 @@ describe('AgentScheduler.processDueTasks', () => {
 
     AgentScheduler.update(taskCli.id, { channelId: 'current' })
     expect(taskCli.channelId).toBe('dm')
+  })
+
+  test('does not re-execute tasks that are currently in-flight during concurrent ticks', async () => {
+    let finishFirstExecution
+    const slowExecutionPromise = new Promise(resolve => {
+      finishFirstExecution = resolve
+    })
+
+    mockActionExecute.mockImplementationOnce(() => slowExecutionPromise)
+
+    const task = AgentScheduler.add({
+      description: 'Slow running task',
+      scheduledAt: Date.now() - 1000,
+      userId: 'user-123',
+      channelId: 'dm',
+      repeat: 'daily'
+    })
+
+    // First tick starts executing the task, but awaits slow execution
+    const firstTickPromise = AgentScheduler.processDueTasks(bot)
+    expect(AgentScheduler.isInFlight(task.id)).toBe(true)
+
+    // Second tick fires while the first is still awaiting
+    await AgentScheduler.processDueTasks(bot)
+
+    // ActionExecutor should only have been called once
+    expect(mockActionExecute).toHaveBeenCalledTimes(1)
+
+    // Complete the first execution
+    finishFirstExecution(true)
+    await firstTickPromise
+
+    expect(AgentScheduler.isInFlight(task.id)).toBe(false)
+  })
+
+  test('releases in-flight status after task failure or exception', async () => {
+    mockActionExecute.mockRejectedValueOnce(new Error('Simulated failure'))
+
+    const task = AgentScheduler.add({
+      description: 'Failing task',
+      scheduledAt: Date.now() - 1000,
+      userId: 'user-123',
+      channelId: 'dm'
+    })
+
+    await AgentScheduler.processDueTasks(bot)
+    expect(AgentScheduler.isInFlight(task.id)).toBe(false)
   })
 })

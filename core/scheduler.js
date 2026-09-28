@@ -16,6 +16,7 @@ class AgentScheduler {
     this._tasks = this._load()
     this._interval = null
     this._core = null
+    this._inFlight = new Set()
   }
 
   _ensureDataDir () {
@@ -65,6 +66,16 @@ class AgentScheduler {
       this._interval = null
       logger.info('AgentScheduler: Stopped.')
     }
+    this._inFlight.clear()
+  }
+
+  /**
+   * Check whether a task is currently executing.
+   * @param {string} id
+   * @returns {boolean}
+   */
+  isInFlight (id) {
+    return this._inFlight.has(id)
   }
 
   /**
@@ -99,7 +110,7 @@ class AgentScheduler {
 
   getDue () {
     const now = Date.now()
-    return this._tasks.filter(t => t.scheduledAt <= now)
+    return this._tasks.filter(t => t.scheduledAt <= now && !this._inFlight.has(t.id))
   }
 
   complete (id) {
@@ -151,6 +162,7 @@ class AgentScheduler {
   }
 
   cancel (id) {
+    this._inFlight.delete(id)
     const before = this._tasks.length
     this._tasks = this._tasks.filter(t => t.id !== id)
     if (this._tasks.length < before) {
@@ -184,6 +196,9 @@ class AgentScheduler {
                    coreOrBot
 
     for (const task of dueTasks) {
+      if (this._inFlight.has(task.id)) continue
+      this._inFlight.add(task.id)
+
       try {
         const delivered = await actionExecutor.execute(target, task)
 
@@ -199,6 +214,8 @@ class AgentScheduler {
         }
       } catch (err) {
         logger.error(`AgentScheduler: Unexpected error processing task ${task.id}: ${err.message}`)
+      } finally {
+        this._inFlight.delete(task.id)
       }
     }
   }
