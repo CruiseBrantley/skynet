@@ -60,11 +60,22 @@ describe('proactiveInsight (Helpful Topic Insights with Ephemeral Buttons)', () 
 
       const mockMessage = {
         author: { username: 'User' },
+        content: 'Why does my application fail to launch with directx error?'
+      }
+
+      const res = await proactiveInsight.generateTopicInsight(mockMessage)
+      expect(res).toBeNull()
+    })
+
+    test('returns null immediately for messages that are too short without querying inference', async () => {
+      const mockMessage = {
+        author: { username: 'User' },
         content: 'hello'
       }
 
       const res = await proactiveInsight.generateTopicInsight(mockMessage)
       expect(res).toBeNull()
+      expect(ollama.queryOllama).not.toHaveBeenCalled()
     })
   })
 

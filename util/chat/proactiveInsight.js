@@ -66,7 +66,11 @@ function clearInsightStore () {
  */
 async function generateTopicInsight (message) {
   const authorName = message.author?.username || 'User'
-  const text = message.content || ''
+  const text = (message.content || '').trim()
+
+  if (!text || text.length < 20 || text.split(/\s+/).length < 4) {
+    return null
+  }
 
   const prompt = `You are Skynet, an expert AI assistant observing a Discord channel.
 A user asked or mentioned: "${authorName}: ${text}"

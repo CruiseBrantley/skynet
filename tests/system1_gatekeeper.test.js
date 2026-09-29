@@ -83,6 +83,14 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
     })
 
+    test('rejects conversational filler and acknowledgments like "yeah", "ok", "ight", "thank you"', () => {
+      const fillers = ['yeah', 'yeah!', 'yeah?', 'yes', 'yep', 'ok', 'okay', 'ight', 'cool', 'nice', 'Thank you!!', 'Us, too', 'sure bro']
+      for (const text of fillers) {
+        const msg = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: text }
+        expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
+      }
+    })
+
     test('rejects when reaction, interjection, and insight cooldowns are all active', () => {
       gatekeeper.lastReactionTimeByChannel.set('c1', Date.now())
       gatekeeper.lastInterjectTimeByChannel.set('c1', Date.now())
@@ -232,5 +240,57 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       expect(res).toBeNull()
       expect(proactivePersonality.selectProactiveEmoji).not.toHaveBeenCalled()
     })
+
+    test('blocks insight, interjection, and reaction on conversational filler even if model returns score 1.0', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'yeah'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 1.0 },
+          interject: { noul: 1.0 },
+          insight: { noul: 1.0 }
+        }
+      })
+
+      // Even if shouldEvaluate were bypassed, evaluateMessage blocks filler
+      jest.spyOn(gatekeeper, 'shouldEvaluate').mockReturnValueOnce(true)
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'ignore' })
+      expect(proactiveInsight.executeProactiveInsight).not.toHaveBeenCalled()
+      expect(proactivePersonality.executeProactiveInterjection).not.toHaveBeenCalled()
+      expect(proactivePersonality.selectProactiveEmoji).not.toHaveBeenCalled()
+    })
+
+    test('blocks topic insight on messages that are too short to discuss a substantive topic', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'tech-chat' },
+        content: 'broken server'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.1 },
+          interject: { noul: 0.1 },
+          insight: { noul: 0.95 }
+        }
+      })
+
+      jest.spyOn(gatekeeper, 'shouldEvaluate').mockReturnValueOnce(true)
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'ignore' })
+      expect(proactiveInsight.executeProactiveInsight).not.toHaveBeenCalled()
+    })
   })
 })
+
