@@ -48,10 +48,18 @@ function resolveEmojiForReaction (raw, guild) {
  * @param {Array<object>} recentContext - Optional recent context messages
  * @returns {Promise<string|null>} The reacted emoji or null
  */
-async function selectProactiveEmoji (message, recentContext = []) {
+async function selectProactiveEmoji (message, recentContext = null) {
   if (!message || !message.channel) return null
 
   try {
+    let contextMessages = recentContext
+    if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
+      try {
+        const fetched = await message.channel.messages.fetch({ limit: 8 })
+        contextMessages = Array.from(fetched.values()).reverse()
+      } catch (e) {}
+    }
+
     const guild = message.guild
     let customEmojisText = 'None'
     if (guild?.emojis?.cache?.size > 0) {
@@ -61,8 +69,8 @@ async function selectProactiveEmoji (message, recentContext = []) {
         .join('\n')
     }
 
-    const contextSnippet = Array.isArray(recentContext) && recentContext.length > 0
-      ? recentContext.slice(-3).map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
+    const contextSnippet = Array.isArray(contextMessages) && contextMessages.length > 0
+      ? contextMessages.slice(-8).map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
       : `${message.author?.username || 'User'}: ${message.content}`
 
     const prompt = `${getBasePrompt()}

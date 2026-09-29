@@ -61,28 +61,46 @@ function clearInsightStore () {
 
 /**
  * Generates substantive topic insight using local or remote inference.
+ * Evaluates whether the message and recent conversation warrant an insight before generating.
  * @param {import('discord.js').Message} message
+ * @param {Array<object>} recentContext - Optional recent channel context messages
  * @returns {Promise<{ teaser: string, insight: string }|null>}
  */
-async function generateTopicInsight (message) {
+async function generateTopicInsight (message, recentContext = []) {
+  if (!message) return null
+
   const authorName = message.author?.username || 'User'
   const text = (message.content || '').trim()
+  if (!text) return null
 
-  if (!text || text.length < 20 || text.split(/\s+/).length < 4) {
-    return null
-  }
+  const contextSnippet = Array.isArray(recentContext) && recentContext.length > 0
+    ? recentContext.map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
+    : `${authorName}: ${text}`
 
-  const prompt = `You are Skynet, an expert AI assistant observing a Discord channel.
-A user asked or mentioned: "${authorName}: ${text}"
+  const prompt = `You are Skynet, an expert AI assistant observing a Discord channel (#${message.channel?.name || 'channel'}).
 
-Your task is to provide a genuinely helpful, factual insight, explanation, documentation reference, or troubleshooting tip on the topic.
-DO NOT provide generic greetings, filler, or fluff. Provide high-density, accurate information.
+Recent Chat Context:
+${contextSnippet}
 
-Respond strictly in the following JSON format:
+Triggering Message from @${authorName}:
+"${text}"
+
+=== TASK: PROACTIVE TOPIC INSIGHT EVALUATION ===
+First, evaluate whether this message is actually asking a technical question, describing a bug or problem, or discussing a topic where factual context, documentation, or troubleshooting would be genuinely helpful and welcomed.
+
+Evaluation Criteria:
+1. If the message is casual chatter, agreement or acknowledgment (e.g. "yeah", "ok", "cool"), banter, rhetorical remarks, or does NOT ask a question or discuss a problem where technical context is helpful, respond strictly with NONE.
+2. If responding with an insight would be intrusive, awkward, or unsolicited noise, respond strictly with NONE.
+3. Only if the message asks a technical question, reports a problem/bug, or discusses a topic where a substantive factual tip would be genuinely helpful, provide the insight.
+
+If worth an insight, output STRICTLY a JSON object with this format:
 {
   "teaser": "A 1-sentence hook under 80 characters for chat (e.g. '💡 I found some relevant context regarding this error.')",
   "insight": "The substantive, detailed explanation or troubleshooting steps (under 900 characters). Format cleanly with markdown."
-}`
+}
+
+Otherwise, output STRICTLY:
+NONE`
 
   try {
     const res = await ollama.queryOllama(
@@ -90,20 +108,27 @@ Respond strictly in the following JSON format:
       {
         prompt,
         options: {
-          temperature: 0.2,
+          temperature: 0.1,
           num_predict: 350
         }
       },
       0
     )
 
-    const raw = res?.response || ''
+    const raw = res?.response || res?.message?.content || ''
+    const trimmed = raw.trim()
+    if (!trimmed || trimmed.toUpperCase() === 'NONE' || trimmed.toUpperCase().startsWith('NONE')) {
+      return null
+    }
+
     // Extract JSON block from response
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) return null
 
     const repaired = jsonrepair(jsonMatch[0])
     const parsed = JSON.parse(repaired)
+
+    if (parsed.worthInsight === false) return null
 
     const teaser = (parsed.teaser || '').trim()
     const insight = (parsed.insight || '').trim()
@@ -124,14 +149,26 @@ Respond strictly in the following JSON format:
  * Dispatches an unobtrusive insight teaser with a View Insight button.
  * @param {import('discord.js').Message} message
  * @param {import('discord.js').Client} client
+ * @param {Array<object>} recentContext - Optional recent channel context messages
  * @returns {Promise<object|null>}
  */
-async function executeProactiveInsight (message, client) {
+async function executeProactiveInsight (message, client, recentContext = null) {
   if (!message || !message.channel) return null
 
   try {
-    const result = await generateTopicInsight(message)
-    if (!result || !result.insight) return null
+    let contextMessages = recentContext
+    if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
+      try {
+        const fetched = await message.channel.messages.fetch({ limit: 8 })
+        contextMessages = Array.from(fetched.values()).reverse()
+      } catch (e) {}
+    }
+
+    const result = await generateTopicInsight(message, contextMessages)
+    if (!result || !result.insight) {
+      logger.info(`ProactiveInsight: Evaluator decided against insight for message ${message.id} in #${message.channel.name || 'channel'}.`)
+      return null
+    }
 
     const insightId = crypto.randomUUID().slice(0, 8)
     storeInsight(insightId, result.insight, result.teaser)

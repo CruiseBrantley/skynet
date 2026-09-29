@@ -67,15 +67,18 @@ describe('proactiveInsight (Helpful Topic Insights with Ephemeral Buttons)', () 
       expect(res).toBeNull()
     })
 
-    test('returns null immediately for messages that are too short without querying inference', async () => {
+    test('returns null if greater LLM evaluates message as not worth an insight (NONE)', async () => {
+      ollama.queryOllama.mockResolvedValueOnce({
+        response: 'NONE'
+      })
+
       const mockMessage = {
-        author: { username: 'User' },
-        content: 'hello'
+        author: { username: 'sirian' },
+        content: 'yeah'
       }
 
       const res = await proactiveInsight.generateTopicInsight(mockMessage)
       expect(res).toBeNull()
-      expect(ollama.queryOllama).not.toHaveBeenCalled()
     })
   })
 
@@ -134,6 +137,25 @@ describe('proactiveInsight (Helpful Topic Insights with Ephemeral Buttons)', () 
       const res = await proactiveInsight.executeProactiveInsight(mockMessage, {})
       expect(res).not.toBeNull()
       expect(mockSend).toHaveBeenCalledTimes(1)
+    })
+
+    test('does not post insight if greater LLM decides against it (NONE)', async () => {
+      ollama.queryOllama.mockResolvedValueOnce({
+        response: 'NONE'
+      })
+
+      const mockReply = jest.fn().mockResolvedValue({ id: 'botMsg1' })
+      const mockMessage = {
+        id: 'userMsg1',
+        author: { username: 'sirian' },
+        content: 'yeah',
+        channel: { name: 'general', messages: { fetch: jest.fn().mockResolvedValue(new Map()) } },
+        reply: mockReply
+      }
+
+      const res = await proactiveInsight.executeProactiveInsight(mockMessage, {})
+      expect(res).toBeNull()
+      expect(mockReply).not.toHaveBeenCalled()
     })
   })
 

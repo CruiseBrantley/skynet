@@ -337,7 +337,7 @@ async function execute (interaction, database) {
 
       let effectiveSystemPrompt = enhancedSystemPrompt
       if (interaction.isProactive) {
-        effectiveSystemPrompt += '\n\n[PROACTIVE CASUAL CHAT MODE: You are chiming in casually in #' + (interaction.channel?.name || 'chat') + '. Keep your reply to 1-2 SHORT sentences max (under 180 characters). Speak casually and directly like a Discord server member. DO NOT monologue, DO NOT list tools or commands, DO NOT ask how you can assist as a bot. Output only your conversational remark.]'
+        effectiveSystemPrompt += '\n\n[PROACTIVE CASUAL CHAT MODE: You are observing a conversation in #' + (interaction.channel?.name || 'chat') + ' and deciding whether to chime in.\n- If chiming in is natural, witty, or helpful, reply in 1-2 SHORT sentences max (under 180 characters) like a Discord server member.\n- If chiming in would be intrusive, awkward, or the message is simple chatter/acknowledgment (e.g. "yeah", "ok", "cool") not calling on you, respond strictly with NOOP.\n- Output ONLY your conversational remark or NOOP. DO NOT monologue, DO NOT list tools or commands, DO NOT ask how you can assist as a bot.]'
       } else if (isCodeTask) {
         effectiveSystemPrompt += '\n\n[SYSTEM DIRECTIVE: CODE & ERROR REMEDIATION SYNTHESIS]\nIf creating, fixing, or patching a Discord slash command or internal action, you MUST invoke create_slash_command or create_action via tool calls in your response.\nNEVER output conversational promises like "Fixing it now" or "Let me check" without executing the tool in the same turn.'
 

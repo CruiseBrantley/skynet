@@ -24,7 +24,8 @@ class DiscordResponder {
 
     // 1. Proactive interjection responses: strictly single message, max 400 chars, no follow-ups
     if (interaction.isProactive) {
-      if (!cleanReply) {
+      const isNoop = !cleanReply || ['NOOP', '[NOOP]', 'NONE', '[NONE]'].includes(cleanReply.toUpperCase())
+      if (isNoop) {
         await interaction.deleteReply().catch(() => {})
         return
       }

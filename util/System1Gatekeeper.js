@@ -12,44 +12,6 @@ function noul (instructions, criteria = null) {
   }
 }
 
-/**
- * Detects common conversational filler, acknowledgments, agreements, greetings, or short banter.
- * These should never trigger unsolicited interjections, topic insights, or reactive messages.
- * @param {string} text
- * @returns {boolean}
- */
-function isConversationalFiller (text) {
-  if (!text || typeof text !== 'string') return true
-  const cleaned = text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!cleaned) return true
-
-  const FILLER_WORDS = new Set([
-    'yeah', 'yea', 'yep', 'yup', 'yes', 'ya', 'yah', 'aye',
-    'ok', 'okay', 'k', 'kk', 'sure', 'alright', 'ight', 'aight',
-    'true', 'facts', 'fr', 'ong', 'word', 'bet', 'same', 'same here', 'me too', 'us too',
-    'nah', 'no', 'nope', 'nahh', 'noo',
-    'lol', 'lmao', 'rofl', 'lmfao', 'haha', 'hahaha', 'hahahaha', 'hehe', 'hehehe',
-    'cool', 'nice', 'sweet', 'neat', 'good', 'great', 'awesome', 'dope',
-    'ty', 'thx', 'thanks', 'thank you', 'np', 'yw', 'gg', 'rip', 'oof', 'f', 'welp', 'bruh', 'bro', 'dude', 'man',
-    'idk', 'idc', 'ikr', 'tbh', 'imo', 'imho', 'nvm', 'smh',
-    'hi', 'hey', 'hello', 'yo', 'sup', 'bye', 'cya', 'gn', 'gm', 'wb',
-    'what', 'huh', 'why', 'wait', 'wait what', 'wait really', 'really', 'wow', 'damn', 'sheesh', 'yikes'
-  ])
-
-  // Single filler word or filler + punctuation (e.g. "yeah", "yeah!", "yeah?")
-  if (FILLER_WORDS.has(cleaned)) return true
-
-  // Short 2-word filler combinations (e.g., "oh yeah", "yeah man", "yeah lol", "ok cool", "sure bro", "no way", "thank you", "oh ok")
-  const parts = cleaned.split(/\s+/)
-  if (parts.length === 2) {
-    if (FILLER_WORDS.has(parts[0]) && FILLER_WORDS.has(parts[1])) return true
-    if (['oh', 'ah', 'well', 'so', 'just'].includes(parts[0]) && FILLER_WORDS.has(parts[1])) return true
-    if (FILLER_WORDS.has(parts[0]) && ['man', 'bro', 'dude', 'guys', 'all', 'then', 'too', 'though'].includes(parts[1])) return true
-  }
-
-  return false
-}
-
 class VonClient {
   constructor (options = {}) {
     const envBase = typeof process !== 'undefined' ? process.env?.VON_BASE_URL || process.env?.TYPESAFE_BASE_URL : undefined
@@ -153,15 +115,6 @@ class System1Gatekeeper {
   }
 
   /**
-   * Check if text is conversational filler or acknowledgment.
-   * @param {string} text
-   * @returns {boolean}
-   */
-  isConversationalFiller (text) {
-    return isConversationalFiller(text)
-  }
-
-  /**
    * Fast in-memory filter to determine if a message should even be scored by Von.
    * @param {import('discord.js').Message} message
    * @param {string} botId
@@ -197,9 +150,6 @@ class System1Gatekeeper {
     // Skip trivial or empty messages (< 4 chars)
     const text = (message.content || '').trim()
     if (text.length < 4) return false
-
-    // Skip common conversational filler, acknowledgments, greetings, or short banter
-    if (this.isConversationalFiller(text)) return false
 
     // If all cooldowns are active, no need to query System 1
     const reactionBlocked = this.isReactionOnCooldown(message.channel.id)
@@ -251,11 +201,7 @@ class System1Gatekeeper {
       const rawText = message.content || ''
       const hasQuestion = rawText.includes('?')
       const mentionsBot = /\b(skynet|bot|ai)\b/i.test(rawText)
-      const isFiller = this.isConversationalFiller(rawText)
-      const wordCount = rawText.trim().split(/\s+/).filter(Boolean).length
-
-      // Interjection gate: cannot be conversational filler unless explicitly calling on the bot
-      const canInterject = !isFiller && (hasQuestion || mentionsBot)
+      const canInterject = hasQuestion || mentionsBot
 
       // Priority 1: High-confidence Interjection (Conversational 1-line flavor)
       if (canInterject && interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
@@ -274,10 +220,7 @@ class System1Gatekeeper {
       }
 
       // Priority 2: High-confidence Topic Insight (Helpful context with Ephemeral Button)
-      // Must be a substantive message (at least 5 words and 25 characters) discussing an issue or topic,
-      // never on brief conversational chatter, acknowledgments, or short banter.
-      const canInsight = !isFiller && wordCount >= 5 && rawText.trim().length >= 25
-      if (canInsight && insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
+      if (insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
         this.lastInsightTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Insight triggered in #${channelName} ` +
@@ -292,8 +235,7 @@ class System1Gatekeeper {
       }
 
       // Priority 3: High-confidence Reaction
-      const canReact = !isFiller
-      if (canReact && reactionProb >= this.reactionThreshold && !this.isReactionOnCooldown(channelId)) {
+      if (reactionProb >= this.reactionThreshold && !this.isReactionOnCooldown(channelId)) {
         this.lastReactionTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Reaction triggered in #${channelName} ` +

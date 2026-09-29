@@ -902,11 +902,18 @@ class AgentTurnManager {
 
     // Resolve @mentions back to <@ID> using persistent mention resolver
     if (finalReplyContent) {
-      if (isProactive && finalReplyContent.length > 300) {
-        finalReplyContent = finalReplyContent.slice(0, 300).trim()
+      if (isProactive) {
+        const isNoop = ['NOOP', '[NOOP]', 'NONE', '[NONE]'].includes(finalReplyContent.trim().toUpperCase())
+        if (isNoop) {
+          finalReplyContent = ''
+        } else if (finalReplyContent.length > 300) {
+          finalReplyContent = finalReplyContent.slice(0, 300).trim()
+        }
       }
-      const mentionResolver = require('../MentionResolver')
-      finalReplyContent = mentionResolver.resolve(finalReplyContent, interaction.guildId)
+      if (finalReplyContent) {
+        const mentionResolver = require('../MentionResolver')
+        finalReplyContent = mentionResolver.resolve(finalReplyContent, interaction.guildId)
+      }
     }
 
     try {

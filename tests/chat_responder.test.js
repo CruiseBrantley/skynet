@@ -207,6 +207,20 @@ describe('DiscordResponder', () => {
     expect(mockInteraction.editReply).not.toHaveBeenCalled()
     expect(mockInteraction.followUp).not.toHaveBeenCalled()
   })
+
+  test('Proactive interjection: deletes reply when AI output is NOOP or NONE', async () => {
+    mockInteraction.isProactive = true
+
+    await responder.sendFinalResponse({
+      interaction: mockInteraction,
+      replyContent: 'NOOP',
+      sharedState
+    })
+
+    expect(mockInteraction.deleteReply).toHaveBeenCalledTimes(1)
+    expect(mockInteraction.editReply).not.toHaveBeenCalled()
+    expect(mockInteraction.followUp).not.toHaveBeenCalled()
+  })
 })
 
 
