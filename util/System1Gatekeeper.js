@@ -14,14 +14,14 @@ function noul (instructions, criteria = null) {
 
 class VonClient {
   constructor (options = {}) {
-    const envBase = typeof process !== 'undefined' ? process.env?.VON_BASE_URL || process.env?.TYPESAFE_BASE_URL : undefined
+    const envBase = typeof process !== 'undefined' ? process.env?.SYSTEM1_BASE_URL || process.env?.VON_BASE_URL || process.env?.TYPESAFE_BASE_URL : undefined
     this.baseURL = (options.baseURL || envBase || 'http://localhost:8000').replace(/\/$/, '')
-    const envKey = typeof process !== 'undefined' ? process.env?.VON_API_KEY || process.env?.TYPESAFE_API_KEY : undefined
+    const envKey = typeof process !== 'undefined' ? process.env?.SYSTEM1_API_KEY || process.env?.VON_API_KEY || process.env?.TYPESAFE_API_KEY : undefined
     this.apiKey = options.apiKey || envKey || undefined
     this.timeout = options.timeout ?? 30000
   }
 
-  async systemOne ({ state, questions, model = 'von-1.1.0' }) {
+  async systemOne ({ state, questions, model = process.env.VON_MODEL || process.env.SYSTEM1_MODEL || 'default' }) {
     const url = `${this.baseURL}/v1/systemone`
     const headers = { 'Content-Type': 'application/json' }
     if (this.apiKey) {
@@ -54,7 +54,7 @@ class VonClient {
 
 class System1Gatekeeper {
   constructor () {
-    this.baseURL = process.env.VON_BASE_URL || 'http://127.0.0.1:8000'
+    this.baseURL = process.env.SYSTEM1_BASE_URL || process.env.VON_BASE_URL || 'http://127.0.0.1:8000'
     this.client = new VonClient({ baseURL: this.baseURL })
 
     // Cooldown configurations (in ms)
@@ -63,9 +63,9 @@ class System1Gatekeeper {
     this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 30 * 60 * 1000 // 30 minutes
 
     // Probability thresholds (0.0 - 1.0)
-    this.reactionThreshold = parseFloat(process.env.VON_REACTION_THRESHOLD) || 0.80
-    this.interjectThreshold = parseFloat(process.env.VON_INTERJECT_THRESHOLD) || 0.80
-    this.insightThreshold = parseFloat(process.env.VON_INSIGHT_THRESHOLD) || 0.80
+    this.reactionThreshold = parseFloat(process.env.SYSTEM1_REACTION_THRESHOLD || process.env.VON_REACTION_THRESHOLD) || 0.75
+    this.interjectThreshold = parseFloat(process.env.SYSTEM1_INTERJECT_THRESHOLD || process.env.VON_INTERJECT_THRESHOLD) || 0.75
+    this.insightThreshold = parseFloat(process.env.SYSTEM1_INSIGHT_THRESHOLD || process.env.VON_INSIGHT_THRESHOLD) || 0.70
 
     // In-memory cooldown tracking per channel ID
     this.lastReactionTimeByChannel = new Map()
@@ -254,7 +254,7 @@ class System1Gatekeeper {
     } catch (err) {
       if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
         if (!this._hasLoggedOffline) {
-          logger.warn(`System1Gatekeeper: Von server offline at ${this.baseURL}. Skipping proactive evaluation.`)
+          logger.warn(`System1Gatekeeper: Decision server offline at ${this.baseURL}. Skipping proactive evaluation.`)
           this._hasLoggedOffline = true
         }
       } else {
