@@ -180,7 +180,7 @@ class System1Gatekeeper {
         state: message.content,
         questions: {
           reaction: noul('Is this message funny, shocking, hype, or notable enough to react to?'),
-          interject: noul('Does this message explicitly address Skynet, ask Skynet a question, or clearly call on the bot to speak?'),
+          interject: noul('Does this message explicitly address the bot/assistant (Skynet), ask it a question, or clearly call on it to speak?'),
           insight: noul('Does this message ask a technical question, describe a bug or problem, or discuss a topic where factual context or troubleshooting would be helpful?')
         }
       })
@@ -202,13 +202,14 @@ class System1Gatekeeper {
       const hasQuestion = rawText.includes('?')
       const mentionsBot = /\b(skynet|bot|ai)\b/i.test(rawText)
       const canInterject = hasQuestion || mentionsBot
+      const effectiveInterjectThreshold = mentionsBot ? Math.min(this.interjectThreshold, 0.50) : this.interjectThreshold
 
       // Priority 1: High-confidence Interjection (Conversational 1-line flavor)
-      if (canInterject && interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
+      if (canInterject && interjectProb >= effectiveInterjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +
-          `(score: ${interjectProb.toFixed(2)} >= ${this.interjectThreshold}) for "${message.content.slice(0, 50)}"`
+          `(score: ${interjectProb.toFixed(2)} >= ${effectiveInterjectThreshold}) for "${message.content.slice(0, 50)}"`
         )
         // Execute asynchronously so gatekeeper returns immediately
         setImmediate(() => {
