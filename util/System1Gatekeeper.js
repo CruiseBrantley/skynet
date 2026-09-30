@@ -60,10 +60,10 @@ class System1Gatekeeper {
     this.baseURL = process.env.SYSTEM1_BASE_URL || process.env.VON_BASE_URL || 'http://127.0.0.1:11434'
     this.client = new System1Client({ baseURL: this.baseURL })
 
-    // Cooldown configurations (in ms)
-    this.reactionCooldownMs = parseInt(process.env.GATEKEEPER_REACTION_COOLDOWN_MS, 10) || 10 * 60 * 1000 // 10 minutes
-    this.interjectCooldownMs = parseInt(process.env.GATEKEEPER_INTERJECT_COOLDOWN_MS, 10) || 60 * 60 * 1000 // 60 minutes
-    this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 30 * 60 * 1000 // 30 minutes
+    // Cooldown configurations (in ms) - default to 0 (no artificial rate limits)
+    this.reactionCooldownMs = parseInt(process.env.GATEKEEPER_REACTION_COOLDOWN_MS, 10) || 0
+    this.interjectCooldownMs = parseInt(process.env.GATEKEEPER_INTERJECT_COOLDOWN_MS, 10) || 0
+    this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 0
 
     // Probability thresholds (0.0 - 1.0)
     this.reactionThreshold = parseFloat(process.env.SYSTEM1_REACTION_THRESHOLD || process.env.VON_REACTION_THRESHOLD) || 0.75
@@ -93,6 +93,7 @@ class System1Gatekeeper {
    * @returns {boolean}
    */
   isReactionOnCooldown (channelId) {
+    if (this.reactionCooldownMs <= 0) return false
     const last = this.lastReactionTimeByChannel.get(channelId) || 0
     return Date.now() - last < this.reactionCooldownMs
   }
@@ -103,6 +104,7 @@ class System1Gatekeeper {
    * @returns {boolean}
    */
   isInterjectOnCooldown (channelId) {
+    if (this.interjectCooldownMs <= 0) return false
     const last = this.lastInterjectTimeByChannel.get(channelId) || 0
     return Date.now() - last < this.interjectCooldownMs
   }
@@ -113,6 +115,7 @@ class System1Gatekeeper {
    * @returns {boolean}
    */
   isInsightOnCooldown (channelId) {
+    if (this.insightCooldownMs <= 0) return false
     const last = this.lastInsightTimeByChannel.get(channelId) || 0
     return Date.now() - last < this.insightCooldownMs
   }
@@ -154,10 +157,10 @@ class System1Gatekeeper {
     const text = (message.content || '').trim()
     if (text.length < 4) return false
 
-    // If all cooldowns are active, no need to query System 1
-    const reactionBlocked = this.isReactionOnCooldown(message.channel.id)
-    const interjectBlocked = this.isInterjectOnCooldown(message.channel.id)
-    const insightBlocked = this.isInsightOnCooldown(message.channel.id)
+    // If all configured cooldowns are active, no need to query System 1
+    const reactionBlocked = this.reactionCooldownMs > 0 && this.isReactionOnCooldown(message.channel.id)
+    const interjectBlocked = this.interjectCooldownMs > 0 && this.isInterjectOnCooldown(message.channel.id)
+    const insightBlocked = this.insightCooldownMs > 0 && this.isInsightOnCooldown(message.channel.id)
     if (reactionBlocked && interjectBlocked && insightBlocked) return false
 
     return true

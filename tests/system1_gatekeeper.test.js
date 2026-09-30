@@ -16,6 +16,9 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     gatekeeper.resetCooldowns()
+    gatekeeper.reactionCooldownMs = 0
+    gatekeeper.interjectCooldownMs = 0
+    gatekeeper.insightCooldownMs = 0
     configManager.isProactiveChannelAllowed.mockReturnValue(true)
     inFlightChannels.isChannelInFlight.mockReturnValue(false)
   })
@@ -84,6 +87,9 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
     })
 
     test('rejects when reaction, interjection, and insight cooldowns are all active', () => {
+      gatekeeper.reactionCooldownMs = 60000
+      gatekeeper.interjectCooldownMs = 60000
+      gatekeeper.insightCooldownMs = 60000
       gatekeeper.lastReactionTimeByChannel.set('c1', Date.now())
       gatekeeper.lastInterjectTimeByChannel.set('c1', Date.now())
       gatekeeper.lastInsightTimeByChannel.set('c1', Date.now())
@@ -92,6 +98,9 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
     })
 
     test('allows valid unmentioned message when at least one cooldown is available', () => {
+      gatekeeper.reactionCooldownMs = 60000
+      gatekeeper.interjectCooldownMs = 60000
+      gatekeeper.insightCooldownMs = 60000
       gatekeeper.lastReactionTimeByChannel.set('c1', Date.now())
       gatekeeper.lastInterjectTimeByChannel.set('c1', Date.now())
       // insight is NOT on cooldown
@@ -141,7 +150,7 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
 
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(res).toMatchObject({ action: 'react', score: 0.92 })
-      expect(gatekeeper.isReactionOnCooldown('c1')).toBe(true)
+      expect(gatekeeper.lastReactionTimeByChannel.has('c1')).toBe(true)
       // Allow async setImmediate to tick
       await new Promise(resolve => setImmediate(resolve))
       expect(proactivePersonality.selectProactiveEmoji).toHaveBeenCalledWith(msg)
@@ -165,7 +174,7 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
 
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(res).toMatchObject({ action: 'interject', score: 0.88 })
-      expect(gatekeeper.isInterjectOnCooldown('c1')).toBe(true)
+      expect(gatekeeper.lastInterjectTimeByChannel.has('c1')).toBe(true)
       await new Promise(resolve => setImmediate(resolve))
       expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
     })
@@ -188,8 +197,8 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
 
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(res).toMatchObject({ action: 'interject+react', actions: ['interject', 'react'] })
-      expect(gatekeeper.isReactionOnCooldown('c1')).toBe(true)
-      expect(gatekeeper.isInterjectOnCooldown('c1')).toBe(true)
+      expect(gatekeeper.lastReactionTimeByChannel.has('c1')).toBe(true)
+      expect(gatekeeper.lastInterjectTimeByChannel.has('c1')).toBe(true)
       await new Promise(resolve => setImmediate(resolve))
       expect(proactivePersonality.selectProactiveEmoji).toHaveBeenCalledWith(msg)
       expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
@@ -235,9 +244,37 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
 
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(res).toMatchObject({ action: 'insight', score: 0.91 })
-      expect(gatekeeper.isInsightOnCooldown('c1')).toBe(true)
+      expect(gatekeeper.lastInsightTimeByChannel.has('c1')).toBe(true)
       await new Promise(resolve => setImmediate(resolve))
       expect(proactiveInsight.executeProactiveInsight).toHaveBeenCalledWith(msg, mockClient)
+    })
+
+    test('does not block consecutive interjections when cooldowns are disabled (0ms)', async () => {
+      gatekeeper.interjectCooldownMs = 0
+      const msg1 = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'Skynet, what time is it?'
+      }
+      const msg2 = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'Skynet, and what is the date?'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne')
+        .mockResolvedValueOnce({ answers: { interject: { noul: 0.90 } } })
+        .mockResolvedValueOnce({ answers: { interject: { noul: 0.92 } } })
+
+      const res1 = await gatekeeper.evaluateMessage(msg1, mockClient, {})
+      expect(res1).toMatchObject({ action: 'interject' })
+
+      const res2 = await gatekeeper.evaluateMessage(msg2, mockClient, {})
+      expect(res2).toMatchObject({ action: 'interject' })
     })
 
     test('handles connection refusal gracefully without throwing', async () => {
