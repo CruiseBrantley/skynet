@@ -9,7 +9,7 @@ jest.mock('../util/inFlightChannels')
 jest.mock('../util/chat/proactivePersonality')
 jest.mock('../util/chat/proactiveInsight')
 
-describe('System1Gatekeeper (Real-time Von Sentry)', () => {
+describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
   const botId = '558428214805135370'
   const mockClient = { user: { id: botId } }
 
@@ -215,7 +215,7 @@ describe('System1Gatekeeper (Real-time Von Sentry)', () => {
       expect(proactiveInsight.executeProactiveInsight).toHaveBeenCalledWith(msg, mockClient)
     })
 
-    test('handles Von connection refusal gracefully without throwing', async () => {
+    test('handles connection refusal gracefully without throwing', async () => {
       const msg = {
         author: { bot: false, id: 'user1' },
         guildId: 'g1',

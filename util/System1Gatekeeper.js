@@ -12,7 +12,7 @@ function noul (instructions, criteria = null) {
   }
 }
 
-class VonClient {
+class System1Client {
   constructor (options = {}) {
     const envBase = typeof process !== 'undefined' ? process.env?.SYSTEM1_BASE_URL || process.env?.VON_BASE_URL || process.env?.TYPESAFE_BASE_URL : undefined
     this.baseURL = (options.baseURL || envBase || 'http://localhost:11434').replace(/\/$/, '')
@@ -41,7 +41,7 @@ class VonClient {
       })
       if (!res.ok) {
         const errText = await res.text()
-        const err = new Error(`Von server error (${res.status}): ${errText}`)
+        const err = new Error(`System 1 server error (${res.status}): ${errText}`)
         err.status = res.status
         throw err
       }
@@ -55,7 +55,7 @@ class VonClient {
 class System1Gatekeeper {
   constructor () {
     this.baseURL = process.env.SYSTEM1_BASE_URL || process.env.VON_BASE_URL || 'http://127.0.0.1:11434'
-    this.client = new VonClient({ baseURL: this.baseURL })
+    this.client = new System1Client({ baseURL: this.baseURL })
 
     // Cooldown configurations (in ms)
     this.reactionCooldownMs = parseInt(process.env.GATEKEEPER_REACTION_COOLDOWN_MS, 10) || 10 * 60 * 1000 // 10 minutes
@@ -115,7 +115,7 @@ class System1Gatekeeper {
   }
 
   /**
-   * Fast in-memory filter to determine if a message should even be scored by Von.
+   * Fast in-memory filter to determine if a message should even be scored by System 1.
    * @param {import('discord.js').Message} message
    * @param {string} botId
    * @returns {boolean} True if message should be evaluated
@@ -161,7 +161,7 @@ class System1Gatekeeper {
   }
 
   /**
-   * Evaluate an incoming message using the local Von System One model and dispatch if warranted.
+   * Evaluate an incoming message using the local System One model and dispatch if warranted.
    * @param {import('discord.js').Message} message
    * @param {import('discord.js').Client} discordClient
    * @param {object} database - Firebase database instance
@@ -267,4 +267,6 @@ class System1Gatekeeper {
 }
 
 const gatekeeper = new System1Gatekeeper()
+gatekeeper.System1Client = System1Client
+gatekeeper.VonClient = System1Client
 module.exports = gatekeeper
