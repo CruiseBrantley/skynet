@@ -15,13 +15,13 @@ function noul (instructions, criteria = null) {
 class VonClient {
   constructor (options = {}) {
     const envBase = typeof process !== 'undefined' ? process.env?.SYSTEM1_BASE_URL || process.env?.VON_BASE_URL || process.env?.TYPESAFE_BASE_URL : undefined
-    this.baseURL = (options.baseURL || envBase || 'http://localhost:8000').replace(/\/$/, '')
+    this.baseURL = (options.baseURL || envBase || 'http://localhost:11434').replace(/\/$/, '')
     const envKey = typeof process !== 'undefined' ? process.env?.SYSTEM1_API_KEY || process.env?.VON_API_KEY || process.env?.TYPESAFE_API_KEY : undefined
     this.apiKey = options.apiKey || envKey || undefined
     this.timeout = options.timeout ?? 30000
   }
 
-  async systemOne ({ state, questions, model = process.env.VON_MODEL || process.env.SYSTEM1_MODEL || 'default' }) {
+  async systemOne ({ state, questions, model = process.env.SYSTEM1_MODEL || process.env.VON_MODEL || 'nimble' }) {
     const url = `${this.baseURL}/v1/systemone`
     const headers = { 'Content-Type': 'application/json' }
     if (this.apiKey) {
@@ -54,7 +54,7 @@ class VonClient {
 
 class System1Gatekeeper {
   constructor () {
-    this.baseURL = process.env.SYSTEM1_BASE_URL || process.env.VON_BASE_URL || 'http://127.0.0.1:8000'
+    this.baseURL = process.env.SYSTEM1_BASE_URL || process.env.VON_BASE_URL || 'http://127.0.0.1:11434'
     this.client = new VonClient({ baseURL: this.baseURL })
 
     // Cooldown configurations (in ms)
