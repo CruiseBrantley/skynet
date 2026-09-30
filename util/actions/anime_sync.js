@@ -374,6 +374,7 @@ function isTitleOnCalendar (title, calendarTitles) {
   const cleanTitle = title.toLowerCase()
     .replace(/\([^)]*\)/g, '')
     .replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '')
+    .replace(/\s+([ivx]+)$/gi, '')
     .replace(/[^a-z0-9]/g, ' ')
     .trim()
   const titleWords = new Set(cleanTitle.split(/\s+/).filter(w => w.length > 2))
@@ -381,13 +382,16 @@ function isTitleOnCalendar (title, calendarTitles) {
   return calendarTitles.some(ct => {
     if (!ct) return false
     const ctSeason = extractSeasonNumber(ct)
-    if (titleSeason !== null && ctSeason !== null && titleSeason !== ctSeason) {
+    const effectiveTitleSeason = titleSeason !== null ? titleSeason : 1
+    const effectiveCtSeason = ctSeason !== null ? ctSeason : 1
+    if (effectiveTitleSeason !== effectiveCtSeason) {
       return false
     }
 
     const cleanCt = ct.toLowerCase()
       .replace(/\([^)]*\)/g, '')
       .replace(/season\s*\d+|cour\s*\d+|part\s*\d+|s\d+|(\d+)(?:nd|rd|th|st)\s*season/gi, '')
+      .replace(/\s+([ivx]+)$/gi, '')
       .replace(/[^a-z0-9]/g, ' ')
       .trim()
 
@@ -995,9 +999,58 @@ function calculateSeriesEndDate (media, startDate, episodeCountOverride) {
 }
 
 /**
+ * Recursively walks SEQUEL relation edges to discover upcoming or releasing sequels
+ * across multi-hop chains (e.g. Season 1 [Finished] -> Season 2 [Finished] -> Season 3 [Upcoming]).
+ */
+function traverseSequels (parentMedia, currentEdge, detectedSequels, existingMalIds, validFormats, visitedMalIds) {
+  if (currentEdge.relationType !== 'SEQUEL') return
+  const node = currentEdge.node
+  if (!node || node.type !== 'ANIME' || !node.idMal) return
+
+  const sequelMalId = parseInt(node.idMal, 10)
+  if (isNaN(sequelMalId) || visitedMalIds.has(sequelMalId)) return
+  visitedMalIds.add(sequelMalId)
+
+  // Strictly check for releasing or upcoming sequels
+  if (node.status === 'RELEASING' || node.status === 'NOT_YET_RELEASED') {
+    if (!existingMalIds.has(sequelMalId)) {
+      if (!node.format || validFormats.includes(node.format.toUpperCase())) {
+        const canonicalTitle = node.title?.english || node.title?.romaji
+        if (canonicalTitle && !isDubEntry(canonicalTitle)) {
+          const parentTitle = parentMedia.title?.english || parentMedia.title?.romaji || `MAL ID ${parentMedia.idMal}`
+          const targetStatus = node.status === 'RELEASING' ? 'watching' : 'plan_to_watch'
+
+          existingMalIds.add(sequelMalId)
+          detectedSequels.push({
+            parentMalId: parentMedia.idMal,
+            parentTitle,
+            idMal: sequelMalId,
+            title: canonicalTitle,
+            romajiTitle: node.title?.romaji,
+            status: node.status,
+            format: node.format,
+            nextAiringEpisode: node.nextAiringEpisode,
+            startDate: node.startDate,
+            targetMalStatus: targetStatus
+          })
+        }
+      }
+    }
+  }
+
+  // Recurse down nested relations (for multi-hop sequels across finished seasons)
+  if (node.relations?.edges && Array.isArray(node.relations.edges)) {
+    for (const nestedEdge of node.relations.edges) {
+      traverseSequels(node, nestedEdge, detectedSequels, existingMalIds, validFormats, visitedMalIds)
+    }
+  }
+}
+
+/**
  * Query AniList GraphQL for sequels of anime currently on the user's MyAnimeList watchlist.
  * Filters for newly announced or airing sequels (status: RELEASING or NOT_YET_RELEASED)
  * that are not already present on the user's watchlist.
+ * Recursively traverses multi-hop sequel chains across intermediate finished seasons.
  * Auto-enrolls new sequels to MyAnimeList (if malClient is authenticated) and returns detected items.
  *
  * @param {Array<object>} malItems Full MyAnimeList watchlist entries
@@ -1058,6 +1111,56 @@ async function detectWatchlistSequels (malItems, options = {}) {
                   episode
                   airingAt
                 }
+                relations {
+                  edges {
+                    relationType
+                    node {
+                      id
+                      idMal
+                      type
+                      format
+                      status
+                      title {
+                        english
+                        romaji
+                      }
+                      startDate {
+                        year
+                        month
+                        day
+                      }
+                      nextAiringEpisode {
+                        episode
+                        airingAt
+                      }
+                      relations {
+                        edges {
+                          relationType
+                          node {
+                            id
+                            idMal
+                            type
+                            format
+                            status
+                            title {
+                              english
+                              romaji
+                            }
+                            startDate {
+                              year
+                              month
+                              day
+                            }
+                            nextAiringEpisode {
+                              episode
+                              airingAt
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -1101,39 +1204,9 @@ async function detectWatchlistSequels (malItems, options = {}) {
 
     for (const parent of pageMedia) {
       const edges = parent.relations?.edges || []
+      const visitedMalIds = new Set([parent.idMal])
       for (const edge of edges) {
-        if (edge.relationType !== 'SEQUEL') continue
-        const node = edge.node
-        if (!node || node.type !== 'ANIME' || !node.idMal) continue
-
-        const sequelMalId = parseInt(node.idMal, 10)
-        if (existingMalIds.has(sequelMalId)) continue
-
-        // Strictly check for releasing or upcoming sequels
-        if (node.status !== 'RELEASING' && node.status !== 'NOT_YET_RELEASED') continue
-
-        // Check valid episodic formats
-        if (node.format && !validFormats.includes(node.format.toUpperCase())) continue
-
-        const canonicalTitle = node.title?.english || node.title?.romaji
-        if (!canonicalTitle || isDubEntry(canonicalTitle)) continue
-
-        const parentTitle = parent.title?.english || parent.title?.romaji || `MAL ID ${parent.idMal}`
-        const targetStatus = node.status === 'RELEASING' ? 'watching' : 'plan_to_watch'
-
-        existingMalIds.add(sequelMalId)
-        detectedSequels.push({
-          parentMalId: parent.idMal,
-          parentTitle,
-          idMal: sequelMalId,
-          title: canonicalTitle,
-          romajiTitle: node.title?.romaji,
-          status: node.status,
-          format: node.format,
-          nextAiringEpisode: node.nextAiringEpisode,
-          startDate: node.startDate,
-          targetMalStatus: targetStatus
-        })
+        traverseSequels(parent, edge, detectedSequels, existingMalIds, validFormats, visitedMalIds)
       }
     }
 

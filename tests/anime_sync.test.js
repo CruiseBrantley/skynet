@@ -109,10 +109,10 @@ describe('anime_sync action', () => {
     expect(createCallArgs.simulcast).toContain('Fridays at')
   })
 
-  test('isTitleOnCalendar matches core anime titles across seasons and formats', () => {
+  test('isTitleOnCalendar matches core anime titles across variations and formats', () => {
     const calendarTitles = [
-      'Hell\'s Paradise',
-      'JUJUTSU KAISEN',
+      'Hell\'s Paradise Season 2',
+      'JUJUTSU KAISEN Season 3',
       'Fire Force S3',
       'One Piece'
     ]
@@ -541,6 +541,18 @@ describe('anime_sync action', () => {
         expect(animeSync.isTitleOnCalendar('Bleach Part 1', calendar)).toBe(true)
       })
 
+      test('prevents Season 2 or sequel candidate from matching unnumbered Season 1 calendar title', () => {
+        const cal = [
+          'A Returner\'s Magic Should Be Special',
+          'The Iceblade Sorcerer Shall Rule the World',
+          'The Apothecary Diaries'
+        ]
+        expect(animeSync.isTitleOnCalendar('A Returner\'s Magic Should Be Special Season 2', cal)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('The Iceblade Sorcerer Shall Rule the World II', cal)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('The Apothecary Diaries Season 3', cal)).toBe(false)
+        expect(animeSync.isTitleOnCalendar('A Returner\'s Magic Should Be Special', cal)).toBe(true)
+      })
+
       test('never false-matches substring words like Kill la Kill to Appraisal Skill', () => {
         expect(animeSync.isTitleOnCalendar('Kill la Kill', calendar)).toBe(false)
       })
@@ -948,6 +960,68 @@ describe('anime_sync action', () => {
 
         const results = await animeSync.detectWatchlistSequels(malItems)
         expect(results.length).toBe(0)
+      })
+
+      test('detectWatchlistSequels traverses multi-hop sequel chains through finished seasons', async () => {
+        const malItems = [
+          { anime_id: 54492, anime_title: 'The Apothecary Diaries', status: 2 }
+        ]
+
+        // S1 (54492, FINISHED) -> S2 (58514, FINISHED) -> S3 (61987, NOT_YET_RELEASED)
+        axios.post.mockResolvedValueOnce({
+          data: {
+            data: {
+              Page: {
+                media: [
+                  {
+                    id: 161645,
+                    idMal: 54492,
+                    title: { english: 'The Apothecary Diaries', romaji: 'Kusuriya no Hitorigoto' },
+                    relations: {
+                      edges: [
+                        {
+                          relationType: 'SEQUEL',
+                          node: {
+                            id: 176301,
+                            idMal: 58514,
+                            type: 'ANIME',
+                            format: 'TV',
+                            status: 'FINISHED',
+                            title: { english: 'The Apothecary Diaries Season 2', romaji: 'Kusuriya no Hitorigoto 2nd Season' },
+                            relations: {
+                              edges: [
+                                {
+                                  relationType: 'SEQUEL',
+                                  node: {
+                                    id: 195516,
+                                    idMal: 61987,
+                                    type: 'ANIME',
+                                    format: 'TV',
+                                    status: 'NOT_YET_RELEASED',
+                                    title: { english: 'The Apothecary Diaries Season 3', romaji: 'Kusuriya no Hitorigoto 3rd Season' },
+                                    startDate: { year: 2026, month: 10, day: 2 },
+                                    nextAiringEpisode: null
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })
+
+        const results = await animeSync.detectWatchlistSequels(malItems, { dryRun: true })
+        expect(results.length).toBe(1)
+        expect(results[0].idMal).toBe(61987)
+        expect(results[0].title).toBe('The Apothecary Diaries Season 3')
+        expect(results[0].targetMalStatus).toBe('plan_to_watch')
+        expect(results[0].parentMalId).toBe(58514)
       })
 
       test('detectWatchlistSequels skips dub releases', async () => {
