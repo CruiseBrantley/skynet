@@ -207,54 +207,74 @@ class System1Gatekeeper {
       const canInterject = hasQuestion || mentionsBot
       const effectiveInterjectThreshold = mentionsBot ? Math.min(this.interjectThreshold, 0.50) : this.interjectThreshold
 
+      const triggeredActions = []
+
       // Priority 1: High-confidence Interjection (Conversational 1-line flavor)
+      let interjected = false
       if (canInterject && interjectProb >= effectiveInterjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +
           `(score: ${interjectProb.toFixed(2)} >= ${effectiveInterjectThreshold}) for "${message.content.slice(0, 50)}"`
         )
+        interjected = true
+        triggeredActions.push('interject')
         // Execute asynchronously so gatekeeper returns immediately
         setImmediate(() => {
           Promise.resolve(executeProactiveInterjection(message, discordClient, database)).catch(err => {
             logger.error(`System1Gatekeeper: Proactive interjection error: ${err.message}`)
           })
         })
-        return { action: 'interject', score: interjectProb, latencyMs }
       }
 
       // Priority 2: High-confidence Topic Insight (Helpful context with Ephemeral Button)
-      if (insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
+      // Only triggered if not already interjecting with spoken text to avoid duplicate text replies
+      if (!interjected && insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
         this.lastInsightTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Insight triggered in #${channelName} ` +
           `(score: ${insightProb.toFixed(2)} >= ${this.insightThreshold}) for "${message.content.slice(0, 50)}"`
         )
+        triggeredActions.push('insight')
         setImmediate(() => {
           Promise.resolve(executeProactiveInsight(message, discordClient)).catch(err => {
             logger.error(`System1Gatekeeper: Proactive insight error: ${err.message}`)
           })
         })
-        return { action: 'insight', score: insightProb, latencyMs }
       }
 
-      // Priority 3: High-confidence Reaction
+      // Priority 3: High-confidence Reaction (non-intrusive emoji; can trigger alongside interject/insight or alone)
       if (reactionProb >= this.reactionThreshold && !this.isReactionOnCooldown(channelId)) {
         this.lastReactionTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Reaction triggered in #${channelName} ` +
           `(score: ${reactionProb.toFixed(2)} >= ${this.reactionThreshold}) for "${message.content.slice(0, 50)}"`
         )
+        triggeredActions.push('react')
         // Execute asynchronously so gatekeeper returns immediately
         setImmediate(() => {
           Promise.resolve(selectProactiveEmoji(message)).catch(err => {
             logger.error(`System1Gatekeeper: Proactive reaction error: ${err.message}`)
           })
         })
-        return { action: 'react', score: reactionProb, latencyMs }
       }
 
-      return { action: 'ignore', reactionProb, interjectProb, insightProb, latencyMs }
+      if (triggeredActions.length === 0) {
+        return { action: 'ignore', reactionProb, interjectProb, insightProb, latencyMs }
+      }
+
+      const primaryAction = triggeredActions.length === 1 ? triggeredActions[0] : triggeredActions.join('+')
+      const primaryScore = triggeredActions[0] === 'react' ? reactionProb : (triggeredActions[0] === 'interject' ? interjectProb : insightProb)
+
+      return {
+        action: primaryAction,
+        actions: triggeredActions,
+        score: primaryScore,
+        reactionProb,
+        interjectProb,
+        insightProb,
+        latencyMs
+      }
     } catch (err) {
       if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
         if (!this._hasLoggedOffline) {

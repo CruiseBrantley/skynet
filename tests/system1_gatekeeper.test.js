@@ -170,6 +170,31 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
     })
 
+    test('triggers both reaction and interjection when both probabilities exceed threshold', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'Skynet, did you really just delete the database? LMAOOOO'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.95 },
+          interject: { noul: 0.90 }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'interject+react', actions: ['interject', 'react'] })
+      expect(gatekeeper.isReactionOnCooldown('c1')).toBe(true)
+      expect(gatekeeper.isInterjectOnCooldown('c1')).toBe(true)
+      await new Promise(resolve => setImmediate(resolve))
+      expect(proactivePersonality.selectProactiveEmoji).toHaveBeenCalledWith(msg)
+      expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
+    })
+
     test('blocks interjection when message lacks explicit question or bot keyword even with high score', async () => {
       const msg = {
         author: { bot: false, id: 'user1' },
