@@ -5,11 +5,14 @@ const { selectProactiveEmoji, executeProactiveInterjection } = require('./chat/p
 const { executeProactiveInsight } = require('./chat/proactiveInsight')
 
 function noul (instructions, criteria = null) {
-  return {
+  const q = {
     type: 'noul',
-    instructions,
-    criteria: criteria ?? null
+    instructions
   }
+  if (criteria && typeof criteria === 'object' && Object.keys(criteria).length > 0) {
+    q.criteria = criteria
+  }
+  return q
 }
 
 class System1Client {
