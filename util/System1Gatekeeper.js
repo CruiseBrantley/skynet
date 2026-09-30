@@ -65,10 +65,10 @@ class System1Gatekeeper {
     this.interjectCooldownMs = parseInt(process.env.GATEKEEPER_INTERJECT_COOLDOWN_MS, 10) || 0
     this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 0
 
-    // Probability thresholds (0.0 - 1.0)
+    // High-confidence probability thresholds (0.0 - 1.0)
     this.reactionThreshold = parseFloat(process.env.SYSTEM1_REACTION_THRESHOLD || process.env.VON_REACTION_THRESHOLD) || 0.75
-    this.interjectThreshold = parseFloat(process.env.SYSTEM1_INTERJECT_THRESHOLD || process.env.VON_INTERJECT_THRESHOLD) || 0.75
-    this.insightThreshold = parseFloat(process.env.SYSTEM1_INSIGHT_THRESHOLD || process.env.VON_INSIGHT_THRESHOLD) || 0.70
+    this.interjectThreshold = parseFloat(process.env.SYSTEM1_INTERJECT_THRESHOLD || process.env.VON_INTERJECT_THRESHOLD) || 0.80
+    this.insightThreshold = parseFloat(process.env.SYSTEM1_INSIGHT_THRESHOLD || process.env.VON_INSIGHT_THRESHOLD) || 0.85
 
     // In-memory cooldown tracking per channel ID
     this.lastReactionTimeByChannel = new Map()
@@ -153,9 +153,9 @@ class System1Gatekeeper {
       return false
     }
 
-    // Skip trivial or empty messages (< 4 chars)
+    // Skip empty or whitespace-only messages
     const text = (message.content || '').trim()
-    if (text.length < 4) return false
+    if (!text) return false
 
     // If all configured cooldowns are active, no need to query System 1
     const reactionBlocked = this.reactionCooldownMs > 0 && this.isReactionOnCooldown(message.channel.id)
@@ -164,6 +164,37 @@ class System1Gatekeeper {
     if (reactionBlocked && interjectBlocked && insightBlocked) return false
 
     return true
+  }
+
+  /**
+   * Helper to build conversational context string for System 1.
+   * Uses cached channel messages to provide recent conversational history.
+   * @param {import('discord.js').Message} message
+   * @param {string} botId
+   * @returns {string} Formatted context
+   */
+  buildEvaluationState (message, botId) {
+    const rawContent = (message.content || '').trim()
+    if (!message.channel?.messages?.cache || message.channel.messages.cache.size <= 1) {
+      return rawContent
+    }
+
+    try {
+      const recent = Array.from(message.channel.messages.cache.values())
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+        .slice(-5)
+
+      if (recent.length > 1) {
+        return recent.map(m => {
+          const author = (botId && m.author?.id === botId) ? 'Skynet (bot)' : (m.author?.username || 'User')
+          return `[${author}]: ${(m.content || '').trim()}`
+        }).join('\n')
+      }
+    } catch {
+      // Fallback to raw content if cache manipulation fails
+    }
+
+    return rawContent
   }
 
   /**
@@ -182,12 +213,13 @@ class System1Gatekeeper {
 
     try {
       const start = Date.now()
+      const state = this.buildEvaluationState(message, botId)
       const res = await this.client.systemOne({
-        state: message.content,
+        state,
         questions: {
-          reaction: noul('Is this message funny, shocking, hype, or notable enough to react to?'),
-          interject: noul('Does this message explicitly address the bot/assistant (Skynet), ask it a question, or clearly call on it to speak?'),
-          insight: noul('Does this message ask a technical question, describe a bug or problem, or discuss a topic where factual context or troubleshooting would be helpful?')
+          reaction: noul('Is this message funny, shocking, hype, or notable enough to warrant an emoji reaction?'),
+          interject: noul('Is the user trying to talk to or about the bot (Skynet) specifically, answering a question from Skynet, or asking it to respond?'),
+          insight: noul('Does this message ask a question, describe a problem, or present an opportunity where the bot can assist with timely, helpful information without being obtrusive?')
         }
       })
 
@@ -202,23 +234,15 @@ class System1Gatekeeper {
         `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}, insight: ${insightProb.toFixed(2)}]`
       )
 
-      // Spoken interjections interrupt human conversation and must NEVER trigger on arbitrary banter
-      // unless it contains an explicit question mark or mentions the bot/AI.
-      const rawText = message.content || ''
-      const hasQuestion = rawText.includes('?')
-      const mentionsBot = /\b(skynet|bot|ai)\b/i.test(rawText)
-      const canInterject = hasQuestion || mentionsBot
-      const effectiveInterjectThreshold = mentionsBot ? Math.min(this.interjectThreshold, 0.50) : this.interjectThreshold
-
       const triggeredActions = []
 
-      // Priority 1: High-confidence Interjection (Conversational 1-line flavor)
+      // Priority 1: High-confidence Interjection (Talking directly to/about the bot or answering it)
       let interjected = false
-      if (canInterject && interjectProb >= effectiveInterjectThreshold && !this.isInterjectOnCooldown(channelId)) {
+      if (interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +
-          `(score: ${interjectProb.toFixed(2)} >= ${effectiveInterjectThreshold}) for "${message.content.slice(0, 50)}"`
+          `(score: ${interjectProb.toFixed(2)} >= ${this.interjectThreshold}) for "${message.content.slice(0, 50)}"`
         )
         interjected = true
         triggeredActions.push('interject')
@@ -230,7 +254,7 @@ class System1Gatekeeper {
         })
       }
 
-      // Priority 2: High-confidence Topic Insight (Helpful context with Ephemeral Button)
+      // Priority 2: High-confidence Topic Insight (Timely, unobtrusive assistance)
       // Only triggered if not already interjecting with spoken text to avoid duplicate text replies
       if (!interjected && insightProb >= this.insightThreshold && !this.isInsightOnCooldown(channelId)) {
         this.lastInsightTimeByChannel.set(channelId, Date.now())

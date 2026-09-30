@@ -81,9 +81,16 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
     })
 
-    test('rejects messages shorter than 4 characters', () => {
-      const msg = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: 'k' }
-      expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(false)
+    test('rejects empty or whitespace-only messages', () => {
+      const msg1 = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: '' }
+      const msg2 = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: '   ' }
+      expect(gatekeeper.shouldEvaluate(msg1, botId)).toBe(false)
+      expect(gatekeeper.shouldEvaluate(msg2, botId)).toBe(false)
+    })
+
+    test('allows short conversational messages for context evaluation', () => {
+      const msg = { author: { bot: false, id: 'user1' }, guildId: 'g1', guild: {}, channel: { id: 'c1' }, content: 'yea' }
+      expect(gatekeeper.shouldEvaluate(msg, botId)).toBe(true)
     })
 
     test('rejects when reaction, interjection, and insight cooldowns are all active', () => {
@@ -204,25 +211,40 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       expect(proactivePersonality.executeProactiveInterjection).toHaveBeenCalled()
     })
 
-    test('blocks interjection when message lacks explicit question or bot keyword even with high score', async () => {
+    test('evaluates short response using recent channel message history for context', async () => {
+      const channelMessagesCache = new Map()
+      channelMessagesCache.set('m1', {
+        id: 'm1',
+        content: 'Would you like me to check the schedule?',
+        createdTimestamp: 1000,
+        author: { id: botId, username: 'Skynet' }
+      })
+      channelMessagesCache.set('m2', {
+        id: 'm2',
+        content: 'yea',
+        createdTimestamp: 2000,
+        author: { id: 'user1', username: 'sirian' }
+      })
+
       const msg = {
         author: { bot: false, id: 'user1' },
         guildId: 'g1',
         guild: {},
-        channel: { id: 'c1', name: 'general' },
-        content: 'i was waiting forever and nothing happened'
+        channel: { id: 'c1', name: 'general', messages: { cache: channelMessagesCache } },
+        content: 'yea'
       }
 
-      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+      const spy = jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
         answers: {
-          reaction: { noul: 0.10 },
-          interject: { noul: 0.95 }
+          interject: { noul: 0.92 }
         }
       })
 
       const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
-      expect(res).toMatchObject({ action: 'ignore' })
-      expect(proactivePersonality.executeProactiveInterjection).not.toHaveBeenCalled()
+      expect(res).toMatchObject({ action: 'interject', score: 0.92 })
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        state: '[Skynet (bot)]: Would you like me to check the schedule?\n[sirian]: yea'
+      }))
     })
 
     test('triggers topic insight when insight probability exceeds threshold', async () => {
