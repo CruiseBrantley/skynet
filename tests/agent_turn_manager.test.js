@@ -362,6 +362,25 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(evalResult.suggestedAction).toContain("Execute read_system_file")
   })
 
+  test("evaluatePendingWork detects intermediate intent ending with period as pending fallback", async () => {
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: { role: "assistant", content: "I am unable to evaluate." }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [{ name: "read_system_file" }],
+      assistantText: "Let me find the actual System One model integration to show a real example.",
+      channelHistory: {
+        messages: [{ role: "user", content: "give an example of your system one model response to the last message" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("Assistant gave intermediate intent")
+  })
+
   test("extractToolCalls handles unclosed RUN_COMMAND tags without trailing >>>", () => {
     const raw = '<<<RUN_COMMAND: {"command": "host_exec", "params": {"command": "ls frontend/public"}}'
     const res = turnManager.extractToolCalls(raw)

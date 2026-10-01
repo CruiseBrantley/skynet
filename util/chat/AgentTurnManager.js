@@ -98,7 +98,11 @@ class AgentTurnManager {
       ]
 
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
-      const evalResp = await queryFn(evaluationPrompt, { ...ollamaContext, isCodeTask: false, think: false }, this.botName)
+      const evalResp = await queryFn(
+        evaluationPrompt,
+        { ...ollamaContext, isCodeTask: false, think: false, format: 'json' },
+        this.botName
+      )
       const evalContent = evalResp?.message?.content || ''
       const cleanedContent = (evalContent || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 
@@ -122,6 +126,10 @@ class AgentTurnManager {
           }
         } catch (e) {}
       }
+
+      if (!cleanedContent || jsonCandidateMatches.length === 0) {
+        logger.warn(`AgentTurnManager: Coordinator did not output valid evaluation JSON: "${(cleanedContent || '').slice(0, 200)}"`)
+      }
     } catch (evalErr) {
       logger.warn(`AgentTurnManager: LLM Coordinator evaluation failed: ${evalErr.message}`)
     }
@@ -136,7 +144,10 @@ class AgentTurnManager {
       }
     }
 
-    if (trimmed.length === 0 || /^(I will|Let me|I'm going to|Checking|Inspecting)[^.!?]*\.\.\.?$/i.test(trimmed)) {
+    if (
+      trimmed.length === 0 ||
+      /^(?:I will|Let me|I'm going to|I am going to|Checking|Inspecting|Looking into|Allow me to|I'll|I need to)\b/i.test(trimmed)
+    ) {
       return {
         isPending: true,
         isSufficient: false,
