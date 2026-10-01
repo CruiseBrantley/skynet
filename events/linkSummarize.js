@@ -4,7 +4,11 @@ const { extractUrls, shouldSkipUrl, summarizeUrl, splitMessage } = require('../u
 
 const firebase = require('../firebase-login')
 const processedMessages = new Set()
+const summarizedUrls = new Map()
+const lastSummaryTimeByChannel = new Map()
 const CACHE_SIZE = 100
+const URL_DEDUP_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const CHANNEL_COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
 
 function linkSummarize (bot) {
   bot.on('messageCreate', async message => {
@@ -13,7 +17,10 @@ function linkSummarize (bot) {
     // Skip messages sent more than 5 minutes ago
     if (Date.now() - message.createdAt.getTime() > 5 * 60 * 1000) return
 
-    // Deduplication Check
+    // Skip if channel is a Discord thread to avoid polluting focused discussion threads
+    if (typeof message.channel?.isThread === 'function' && message.channel.isThread()) return
+
+    // Deduplication Check by message ID
     if (message.id) {
       if (processedMessages.has(message.id)) return
       processedMessages.add(message.id)
@@ -22,6 +29,23 @@ function linkSummarize (bot) {
         processedMessages.delete(first)
       }
     }
+
+    const urls = extractUrls(message.content)
+    if (urls.length === 0) return
+
+    const url = urls[0]
+    if (shouldSkipUrl(url)) return
+
+    const channelId = message.channel?.id || message.channelId
+    const urlKey = `${channelId}:${url}`
+
+    // Deduplication by URL per channel (prevent re-summarizing the same link)
+    const lastUrlTime = summarizedUrls.get(urlKey) || 0
+    if (Date.now() - lastUrlTime < URL_DEDUP_TTL_MS) return
+
+    // Rate limit automatic link summaries per channel
+    const lastChannelTime = lastSummaryTimeByChannel.get(channelId) || 0
+    if (Date.now() - lastChannelTime < CHANNEL_COOLDOWN_MS) return
 
     // Fetch guild-level settings
     const database = firebase()
@@ -33,12 +57,6 @@ function linkSummarize (bot) {
 
     // If the bot is mentioned, let the chat command handle the link instead of the auto-summarizer
     if (message.mentions.has(bot.user)) return
-
-    const urls = extractUrls(message.content)
-    if (urls.length === 0) return
-
-    const url = urls[0]
-    if (shouldSkipUrl(url)) return
 
     // Selective Check: Ask local LLM if this link is worth an automatic summary
     const { queryLocalOrRemote } = require('../util/ollama')
@@ -60,6 +78,9 @@ function linkSummarize (bot) {
 
       const summary = await summarizeUrl(url, false)
       if (summary) {
+        summarizedUrls.set(urlKey, Date.now())
+        lastSummaryTimeByChannel.set(channelId, Date.now())
+
         const summarizeCmd = require('../commands/summarize')
         const id = summarizeCmd._cacheUrl(url)
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js')
@@ -92,6 +113,12 @@ function linkSummarize (bot) {
       logger.error(`Link summary error: ${err.message}`)
     }
   })
+}
+
+linkSummarize._resetCache = () => {
+  processedMessages.clear()
+  summarizedUrls.clear()
+  lastSummaryTimeByChannel.clear()
 }
 
 module.exports = linkSummarize

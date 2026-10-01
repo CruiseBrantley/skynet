@@ -31,6 +31,9 @@ describe('Link Summarize Event', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    if (typeof linkSummarize._resetCache === 'function') {
+      linkSummarize._resetCache()
+    }
     mockBot = {
       user: { id: 'bot_123' },
       on: jest.fn((event, handler) => {
@@ -39,6 +42,7 @@ describe('Link Summarize Event', () => {
     }
 
     mockMessage = {
+      id: 'msg_1',
       author: { bot: false },
       guild: { id: 'guild_123' },
       guildId: 'guild_123',
@@ -48,7 +52,7 @@ describe('Link Summarize Event', () => {
       mentions: {
         has: jest.fn(() => false)
       },
-      channel: { sendTyping: jest.fn() },
+      channel: { sendTyping: jest.fn(), isThread: jest.fn(() => false) },
       reply: jest.fn().mockResolvedValue()
     }
 
@@ -72,6 +76,27 @@ describe('Link Summarize Event', () => {
 
     expect(summarizeUrl).toHaveBeenCalledWith('https://example.com', false)
     expect(mockMessage.reply).toHaveBeenCalled()
+  })
+
+  test('skips summarization if channel is a thread', async () => {
+    mockMessage.channel.isThread = jest.fn(() => true)
+
+    await eventHandler(mockMessage)
+
+    expect(summarizeUrl).not.toHaveBeenCalled()
+    expect(mockMessage.reply).not.toHaveBeenCalled()
+  })
+
+  test('skips duplicate summarization of the same URL in the same channel', async () => {
+    summarizeUrl.mockResolvedValue('Excellent article summary.')
+
+    await eventHandler(mockMessage)
+    expect(summarizeUrl).toHaveBeenCalledTimes(1)
+
+    // Second message with different message ID but same URL in same channel
+    const msg2 = { ...mockMessage, id: 'msg_2', channel: { sendTyping: jest.fn(), isThread: jest.fn(() => false) }, reply: jest.fn() }
+    await eventHandler(msg2)
+    expect(summarizeUrl).toHaveBeenCalledTimes(1)
   })
 
   test('skips if message is from a bot', async () => {
