@@ -133,9 +133,10 @@ function clearInsightStore () {
  * Evaluates whether the message and recent conversation warrant an insight before generating.
  * @param {import('discord.js').Message} message
  * @param {Array<object>} recentContext - Optional recent channel context messages
+ * @param {string} serverNews - Optional recent headlines or announcements from related server channels
  * @returns {Promise<{ directAnswer: string, extendedSteps: string|null, teaser: string, insight: string }|null>}
  */
-async function generateTopicInsight (message, recentContext = []) {
+async function generateTopicInsight (message, recentContext = [], serverNews = '') {
   if (!message) return null
 
   const authorName = message.author?.username || 'User'
@@ -146,23 +147,32 @@ async function generateTopicInsight (message, recentContext = []) {
     ? recentContext.map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
     : `${authorName}: ${text}`
 
+  const newsSection = serverNews && serverNews.trim()
+    ? `\nRecent Related Server News / Announcements:\n${serverNews.trim()}\n`
+    : ''
+
   const prompt = `You are Skynet, an expert AI assistant observing a Discord channel (#${message.channel?.name || 'channel'}).
 
 Recent Chat Context:
 ${contextSnippet}
-
+${newsSection}
 Triggering Message from @${authorName}:
 "${text}"
 
 === TASK: PROACTIVE TOPIC INSIGHT EVALUATION ===
-First, evaluate whether this message is asking a technical question, describing a bug or problem, or discussing a topic where factual context, documentation, or troubleshooting would be genuinely helpful and welcomed.
+Evaluate whether this message is asking a question, describing a bug or problem, or discussing a topic where factual context, documentation, or troubleshooting would be genuinely helpful and welcomed.
+
+CORE PRINCIPLE: ASSUME ANOMALIES & SPECIFIC UNUSUAL CIRCUMSTANCES, NOT ROUTINE
+- When a user asks about a schedule, downtime, server state, bug, or game/system behavior, DO NOT assume they want basic or textbook advice (e.g. reciting standard Tuesday resets, telling them to restart their router, or quoting beginner manuals). Community members usually already know the routine.
+- If someone is asking, assume something UNUSUAL, off-schedule, or recent has happened or is currently happening (e.g. an off-cycle patch/build, emergency maintenance/hotfix, beta/PTR build, unexpected outage, or recent edge case).
+- Directly target what is specifically happening right now, any deviations from the norm, off-cycle announcements, or active edge cases rather than boilerplate generic rules.
 
 Evaluation Criteria:
-1. If the message is casual chatter, agreement or acknowledgment (e.g. "yeah", "ok", "cool"), banter, rhetorical remarks, or does NOT ask a question or discuss a problem where technical context is helpful, respond strictly with NONE.
+1. If the message is casual chatter, agreement or acknowledgment (e.g. "yeah", "ok", "cool"), banter, rhetorical remarks, or does NOT ask a question or discuss a problem where timely context is helpful, respond strictly with NONE.
 2. If responding with an insight would be intrusive, awkward, or unsolicited noise, respond strictly with NONE.
-3. If the user asks a question that can be answered directly and concisely (under 280 characters), such as a schedule, quick explanation, or direct factual answer:
+3. If the user asks a question that can be answered directly and concisely (under 280 characters)—such as addressing a specific off-cycle event, unusual schedule, or direct factual clarification:
    Provide "directAnswer" and set "extendedSteps": null.
-4. Only if the question reports an issue or error requiring multi-step troubleshooting, provide a brief 1-2 sentence directAnswer (under 280 characters) and put the multi-step troubleshooting checklist in "extendedSteps" (under 900 characters).
+4. Only if the question reports an issue or error requiring multi-step troubleshooting, provide a brief 1-2 sentence directAnswer (under 280 characters) highlighting the unusual root cause, and put the multi-step troubleshooting checklist in "extendedSteps" (under 900 characters).
 
 If worth an insight, output STRICTLY a JSON object with this format:
 {
@@ -258,7 +268,39 @@ async function executeProactiveInsight (message, client, recentContext = null) {
       } catch (e) {}
     }
 
-    const result = await generateTopicInsight(message, contextMessages)
+    let serverNewsSnippet = ''
+    if (message.guild?.channels?.cache) {
+      try {
+        const currentChannelName = (message.channel?.name || '').toLowerCase()
+        const topicPrefix = currentChannelName.split('-')[0]
+
+        const newsChannel = Array.from(message.guild.channels.cache.values()).find(c => {
+          if (!c.isTextBased?.() || c.id === message.channel.id) return false
+          const name = (c.name || '').toLowerCase()
+          if (topicPrefix && topicPrefix.length > 2 && name.includes(topicPrefix) && (name.includes('news') || name.includes('update') || name.includes('announc'))) {
+            return true
+          }
+          return name.includes('news') || name.includes('announcements') || name.includes('updates')
+        })
+
+        if (newsChannel && typeof newsChannel.messages?.fetch === 'function') {
+          const newsFetched = await newsChannel.messages.fetch({ limit: 3 }).catch(() => null)
+          if (newsFetched && newsFetched.size > 0) {
+            const newsList = Array.from(newsFetched.values())
+              .reverse()
+              .map(m => `[#${newsChannel.name}] ${(m.content || '').slice(0, 200)}`)
+              .filter(line => line.length > 10)
+            if (newsList.length > 0) {
+              serverNewsSnippet = newsList.join('\n')
+            }
+          }
+        }
+      } catch (err) {
+        // Silently continue if guild channel inspection fails
+      }
+    }
+
+    const result = await generateTopicInsight(message, contextMessages, serverNewsSnippet)
     if (!result || !result.directAnswer) {
       logger.info(`ProactiveInsight: Evaluator decided against insight for message ${message.id} in #${message.channel.name || 'channel'}.`)
       return null

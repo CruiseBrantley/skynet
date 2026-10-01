@@ -232,6 +232,59 @@ describe('proactiveInsight (Helpful Topic Insights with Ephemeral Buttons)', () 
       expect(cached).not.toBeNull()
       expect(cached.content).toContain('1. Update GPU drivers.')
     })
+
+    test('gathers related guild news channels and includes them in evaluation prompt', async () => {
+      const mockNewsChannel = {
+        id: 'news1',
+        name: 'wow-news',
+        isTextBased: () => true,
+        messages: {
+          fetch: jest.fn().mockResolvedValue(new Map([
+            ['n1', { content: 'WoW: Forever Beta going down for maintenance in 45 minutes to prepare for level 30 build' }]
+          ]))
+        }
+      }
+
+      const mockGeneralChannel = {
+        id: 'gen1',
+        name: 'wow-general',
+        isTextBased: () => true,
+        messages: { fetch: jest.fn().mockResolvedValue(new Map()) },
+        reply: jest.fn().mockResolvedValue({ id: 'botMsg5' })
+      }
+
+      const channelsCache = new Map([
+        ['gen1', mockGeneralChannel],
+        ['news1', mockNewsChannel]
+      ])
+
+      const mockMessage = {
+        id: 'userMsg5',
+        author: { username: 'arkrazor.' },
+        content: 'Is the wow maintenance today scheduled for later today/evening?',
+        channel: mockGeneralChannel,
+        guild: { channels: { cache: channelsCache } },
+        reply: mockGeneralChannel.reply
+      }
+
+      ollama.queryOllama.mockResolvedValueOnce({
+        response: JSON.stringify({
+          directAnswer: 'Yes, Blizzard announced WoW: Forever Beta maintenance today for the level 30 build.',
+          extendedSteps: null
+        })
+      })
+
+      const res = await proactiveInsight.executeProactiveInsight(mockMessage, {})
+      expect(res).not.toBeNull()
+      expect(res.directAnswer).toContain('WoW: Forever Beta maintenance today')
+
+      // Verify that queryOllama was called with prompt containing both the anomaly core principle and news
+      const callArgs = ollama.queryOllama.mock.calls[0]
+      const prompt = callArgs[1].prompt
+      expect(prompt).toContain('CORE PRINCIPLE: ASSUME ANOMALIES & SPECIFIC UNUSUAL CIRCUMSTANCES, NOT ROUTINE')
+      expect(prompt).toContain('Recent Related Server News / Announcements:')
+      expect(prompt).toContain('[#wow-news] WoW: Forever Beta going down for maintenance')
+    })
   })
 
   describe('handleInsightButton', () => {
