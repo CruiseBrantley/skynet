@@ -24,15 +24,16 @@ class System1Client {
     this.timeout = options.timeout ?? 30000
   }
 
-  async systemOne ({ state, questions, model = process.env.SYSTEM1_MODEL || process.env.VON_MODEL || 'nimble' }) {
+  async systemOne ({ state, questions, model = process.env.SYSTEM1_MODEL || process.env.VON_MODEL || 'nimble', timeout }) {
     const url = `${this.baseURL}/v1/systemone`
     const headers = { 'Content-Type': 'application/json' }
     if (this.apiKey) {
       headers.Authorization = `Bearer ${this.apiKey}`
     }
     const payload = { model, state, questions }
+    const timeoutMs = timeout ?? this.timeout
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.timeout)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     if (timer.unref) timer.unref()
 
     try {
@@ -346,4 +347,5 @@ class System1Gatekeeper {
 const gatekeeper = new System1Gatekeeper()
 gatekeeper.System1Client = System1Client
 gatekeeper.VonClient = System1Client
+gatekeeper.noul = noul
 module.exports = gatekeeper

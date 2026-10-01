@@ -8,6 +8,7 @@ const SelfHealingEngine = require('./SelfHealingEngine')
 const DiscordResponder = require('./DiscordResponder')
 const { createMockInteraction } = require('./createMockInteraction')
 const { COMMAND_REGEX } = require('./constants')
+const gatekeeper = require('../System1Gatekeeper')
 
 const MUTATION_TOOLS = new Set([
   'create_slash_command',
@@ -31,19 +32,21 @@ const MUTATION_TOOLS = new Set([
 ])
 
 class AgentTurnManager {
-  constructor ({ botName = 'Skynet', queryOllamaWithContext = null } = {}) {
+  constructor ({ botName = 'Skynet', queryOllamaWithContext = null, system1Client = null } = {}) {
     this.botName = botName || process.env.BOT_NAME || 'Skynet'
     this.queryOllamaWithContext = queryOllamaWithContext
+    this.system1Client = system1Client || (process.env.NODE_ENV !== 'test' && gatekeeper && gatekeeper.client ? gatekeeper.client : null)
   }
 
   /**
    * Generically determines if the current turn has unfinished work before ending.
-   * Uses clear state-based short-circuits, then queries an LLM coordinator evaluation if ambiguous.
+   * Uses clear protocol short-circuits, fast System 1 model-driven evaluation,
+   * and falls back to LLM coordinator reflection when needed.
    */
-  async evaluatePendingWork ({ ollamaContext, executedTools = [], assistantText = '', channelHistory }) {
+  async evaluatePendingWork ({ ollamaContext, executedTools = [], assistantText = '', channelHistory, visualActionExecuted = false }) {
     const trimmed = (assistantText || '').trim()
 
-    // Deterministic check: Leaked command syntax or unexecuted tool tags are NEVER a sufficient final response
+    // Deterministic protocol check: Leaked command syntax or unexecuted tool tags are NEVER a sufficient final response
     if (/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(trimmed)) {
       logger.info('AgentTurnManager: Deterministic pending check: Assistant leaked unexecuted command syntax.')
       return {
@@ -54,7 +57,7 @@ class AgentTurnManager {
       }
     }
 
-    // Deterministic check: Status placeholders or bullet progress lines are NEVER a sufficient final response
+    // Deterministic protocol check: Status placeholders or bullet progress lines are NEVER a sufficient final response
     if (/^\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?$/i.test(trimmed) || /^[•✓]\s+/.test(trimmed)) {
       logger.info('AgentTurnManager: Deterministic pending check: Assistant echoed a status placeholder.')
       return {
@@ -65,16 +68,91 @@ class AgentTurnManager {
       }
     }
 
-    // If assistant is explicitly asking the user a clarifying question or confirmation, it is waiting for user input
-    if (trimmed.endsWith('?') || /\b(do you want me to|would you like me to|should i|which option|please confirm)\b/i.test(trimmed)) {
-      return { isPending: false, isSufficient: true, reason: 'Waiting for user input' }
+    if (!trimmed) {
+      const hasVisualAction = visualActionExecuted || (executedTools || []).some(t => {
+        const name = typeof t === 'string' ? t : t.name
+        return ['send_embed', 'send_poll', 'send_message', 'send_thread', 'add_reaction', 'remove_reaction'].includes(name)
+      })
+      if (hasVisualAction) {
+        return { isPending: false, isSufficient: true, reason: 'Visual action executed with intentional silent completion' }
+      }
+      return {
+        isPending: true,
+        isSufficient: false,
+        reason: 'Assistant produced an empty response',
+        suggestedAction: 'Provide a complete, grounded response answering the user\'s question'
+      }
     }
 
-    // Universal AI Turn Coordinator Reflection:
-    try {
-      const userPrompt = channelHistory?.messages?.find(m => m.role === 'user')?.content || 'User request'
-      const executedNames = executedTools.map(t => (typeof t === 'string' ? t : t.name)).join(', ') || 'None'
+    const userPrompt = channelHistory?.messages?.find(m => m.role === 'user')?.content || 'User request'
+    const executedNames = executedTools.map(t => (typeof t === 'string' ? t : t.name)).join(', ') || 'None'
 
+    // System 1 Fast Semantic Evaluation (Model-Driven Decision Engine)
+    if (this.system1Client && typeof this.system1Client.systemOne === 'function') {
+      try {
+        const s1State = `[USER]:\n${userPrompt.slice(0, 400)}\n\n` +
+          `[TOOLS EXECUTED]:\n${executedNames}\n\n` +
+          `[ASSISTANT]:\n${trimmed.slice(0, 600)}`
+
+        const s1Questions = {
+          intermediate_intent: {
+            type: 'noul',
+            instructions: 'Does the assistant reply express intermediate intent to do work, check, inspect, or find something instead of delivering the completed answer?',
+            criteria: {
+              true: 'The reply is an intermediate statement of intent to do work, inspect, or check something (e.g. "Let me check", "I will find", "Looking into this").',
+              false: 'The reply is a finished answer, polite closing, direct question, or explanation.'
+            }
+          },
+          is_sufficient: {
+            type: 'noul',
+            instructions: 'Is the assistant reply sufficient, fully answering the request or asking a clarifying question, rather than stopping prematurely or failing to answer?',
+            criteria: {
+              true: 'The assistant fully answered the user request or asked a direct clarifying question to proceed.',
+              false: 'The assistant stopped prematurely, gave an unfulfilled promise of work, or left the request unanswered.'
+            }
+          }
+        }
+
+        const s1Res = await this.system1Client.systemOne({ state: s1State, questions: s1Questions, timeout: 5000 })
+        const intermediateIntentProb = s1Res?.answers?.intermediate_intent?.noul
+        const isSufficientProb = s1Res?.answers?.is_sufficient?.noul
+
+        if (typeof intermediateIntentProb === 'number') {
+          logger.info(`AgentTurnManager: System 1 evaluation: intermediate_intent=${intermediateIntentProb.toFixed(3)}, is_sufficient=${typeof isSufficientProb === 'number' ? isSufficientProb.toFixed(3) : 'N/A'}`)
+
+          if (intermediateIntentProb >= 0.70) {
+            return {
+              isPending: true,
+              isSufficient: false,
+              reason: 'System 1 detected intermediate intent without completing the requested action or answer',
+              suggestedAction: 'Execute the required tools or provide the complete final response directly'
+            }
+          }
+
+          if (typeof isSufficientProb === 'number' && isSufficientProb < 0.20) {
+            return {
+              isPending: true,
+              isSufficient: false,
+              reason: 'System 1 detected insufficient response that leaves the request unanswered',
+              suggestedAction: 'Answer the user request completely using the findings from executed tools'
+            }
+          }
+
+          if (typeof isSufficientProb === 'number' && isSufficientProb >= 0.70 && intermediateIntentProb < 0.30) {
+            return {
+              isPending: false,
+              isSufficient: true,
+              reason: 'System 1 confirmed complete response'
+            }
+          }
+        }
+      } catch (s1Err) {
+        logger.debug(`AgentTurnManager: System 1 evaluation bypassed or unavailable: ${s1Err.message}`)
+      }
+    }
+
+    // Universal AI Turn Coordinator Reflection (Fallback for ambiguous cases or when System 1 is unavailable):
+    try {
       const evaluationPrompt = [
         {
           role: 'system',
@@ -132,28 +210,6 @@ class AgentTurnManager {
       }
     } catch (evalErr) {
       logger.warn(`AgentTurnManager: LLM Coordinator evaluation failed: ${evalErr.message}`)
-    }
-
-    // Heuristic fallbacks if LLM evaluation was unavailable or unparseable:
-    if (/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(trimmed)) {
-      return {
-        isPending: true,
-        isSufficient: false,
-        reason: 'Assistant leaked unexecuted command syntax instead of answering the question',
-        suggestedAction: 'Execute the command or provide a natural answer without command tags'
-      }
-    }
-
-    if (
-      trimmed.length === 0 ||
-      /^(?:I will|Let me|I'm going to|I am going to|Checking|Inspecting|Looking into|Allow me to|I'll|I need to)\b/i.test(trimmed)
-    ) {
-      return {
-        isPending: true,
-        isSufficient: false,
-        reason: 'Assistant gave intermediate intent without answering the question',
-        suggestedAction: 'Answer the question directly or execute the required action'
-      }
     }
 
     return { isPending: false, isSufficient: true, reason: 'Default completion' }
@@ -774,7 +830,8 @@ class AgentTurnManager {
             ollamaContext,
             executedTools,
             assistantText: finalReplyContent || rawContent,
-            channelHistory
+            channelHistory,
+            visualActionExecuted: sharedState.visualActionExecuted
           })
         }
 

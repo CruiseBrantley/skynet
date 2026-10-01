@@ -362,10 +362,15 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(evalResult.suggestedAction).toContain("Execute read_system_file")
   })
 
-  test("evaluatePendingWork detects intermediate intent ending with period as pending fallback", async () => {
-    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
-      message: { role: "assistant", content: "I am unable to evaluate." }
-    })
+  test("evaluatePendingWork uses System 1 to detect intermediate intent statements", async () => {
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          intermediate_intent: { noul: 0.985 },
+          is_sufficient: { noul: 0.71 }
+        }
+      })
+    }
 
     const evalResult = await turnManager.evaluatePendingWork({
       ollamaContext: {},
@@ -378,7 +383,84 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
 
     expect(evalResult.isSufficient).toBe(false)
     expect(evalResult.isPending).toBe(true)
-    expect(evalResult.reason).toContain("Assistant gave intermediate intent")
+    expect(evalResult.reason).toContain("System 1 detected intermediate intent")
+    expect(turnManager.system1Client.systemOne).toHaveBeenCalledTimes(1)
+  })
+
+  test("evaluatePendingWork uses System 1 to detect insufficient responses", async () => {
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          intermediate_intent: { noul: 0.10 },
+          is_sufficient: { noul: 0.05 }
+        }
+      })
+    }
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [{ name: "read_system_file" }],
+      assistantText: "I read the logs file.",
+      channelHistory: {
+        messages: [{ role: "user", content: "What is the error in the logs?" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("System 1 detected insufficient response")
+  })
+
+  test("evaluatePendingWork uses System 1 to confirm complete responses", async () => {
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          intermediate_intent: { noul: 0.01 },
+          is_sufficient: { noul: 0.99 }
+        }
+      })
+    }
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [{ name: "read_system_file" }],
+      assistantText: "The error in the logs is ECONNREFUSED on port 5432.",
+      channelHistory: {
+        messages: [{ role: "user", content: "What is the error in the logs?" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(true)
+    expect(evalResult.isPending).toBe(false)
+    expect(evalResult.reason).toContain("System 1 confirmed complete response")
+  })
+
+  test("evaluatePendingWork falls back to LLM coordinator when System 1 is unavailable or offline", async () => {
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockRejectedValue(new Error("ECONNREFUSED"))
+    }
+    turnManager.queryOllamaWithContext = jest.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify({
+          is_sufficient: false,
+          reason: "LLM coordinator detected missing follow-up action"
+        })
+      }
+    })
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [],
+      assistantText: "Some text here",
+      channelHistory: {
+        messages: [{ role: "user", content: "Can you fix the test?" }]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("LLM coordinator detected missing follow-up action")
   })
 
   test("extractToolCalls handles unclosed RUN_COMMAND tags without trailing >>>", () => {
