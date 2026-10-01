@@ -316,6 +316,69 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       expect(res).toBeNull()
       expect(proactivePersonality.selectProactiveEmoji).not.toHaveBeenCalled()
     })
+
+    test('truncates prior long summary messages in history while keeping current message intact', async () => {
+      const channelMessagesCache = new Map()
+      const longSummary = 'A'.repeat(500)
+      channelMessagesCache.set('m1', {
+        id: 'm1',
+        content: longSummary,
+        createdTimestamp: 1000,
+        author: { id: botId, username: 'Skynet' }
+      })
+      channelMessagesCache.set('m2', {
+        id: 'm2',
+        content: 'Ollama also launched System One api today, link their blog or docs on that Skynet',
+        createdTimestamp: 2000,
+        author: { id: 'user1', username: 'sirian' }
+      })
+
+      const msg = {
+        id: 'm2',
+        author: { bot: false, id: 'user1', username: 'sirian' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general', messages: { cache: channelMessagesCache } },
+        content: 'Ollama also launched System One api today, link their blog or docs on that Skynet'
+      }
+
+      const spy = jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          interject: { noul: 0.95 }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'interject' })
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        state: expect.stringContaining(`[Skynet (bot)]: ${'A'.repeat(300)}...`)
+      }))
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        state: expect.stringContaining('[sirian]: Ollama also launched System One api today, link their blog or docs on that Skynet')
+      }))
+    })
+
+    test('triggers interjection with keyword mention of skynet at lower threshold', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: 'c1', name: 'general' },
+        content: 'Hey Skynet can you help?'
+      }
+
+      // Gatekeeper default threshold is 0.80, but score is 0.65; should trigger because "skynet" is mentioned
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          interject: { noul: 0.65 }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'interject', score: 0.65 })
+      expect(gatekeeper.lastInterjectTimeByChannel.has('c1')).toBe(true)
+    })
   })
 })
+
 

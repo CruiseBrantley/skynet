@@ -187,7 +187,12 @@ class System1Gatekeeper {
       if (recent.length > 1) {
         return recent.map(m => {
           const author = (botId && m.author?.id === botId) ? 'Skynet (bot)' : (m.author?.username || 'User')
-          return `[${author}]: ${(m.content || '').trim()}`
+          let content = (m.content || '').trim()
+          // Truncate previous long messages so massive summaries don't drown out conversational intent
+          if (m.id !== message.id && content.length > 300) {
+            content = content.slice(0, 300) + '...'
+          }
+          return `[${author}]: ${content}`
         }).join('\n')
       }
     } catch {
@@ -217,9 +222,27 @@ class System1Gatekeeper {
       const res = await this.client.systemOne({
         state,
         questions: {
-          reaction: noul('Is this message funny, shocking, hype, or notable enough to warrant an emoji reaction?'),
-          interject: noul('Is the user trying to talk to or about the bot (Skynet) specifically, answering a question from Skynet, or asking it to respond?'),
-          insight: noul('Does this message ask a question, describe a problem, or present an opportunity where the bot can assist with timely, helpful information without being obtrusive?')
+          reaction: noul(
+            'Is this message funny, shocking, hype, or notable enough to warrant an emoji reaction?',
+            {
+              true: 'The message is humorous, exciting, surprising, or notable enough to warrant an emoji.',
+              false: 'The message is routine text, a direct command, or ordinary.'
+            }
+          ),
+          interject: noul(
+            'Does the message address Skynet, command Skynet, or request a response from Skynet?',
+            {
+              true: 'The user is talking directly to Skynet, answering Skynet, asking Skynet to do something, or requesting a response.',
+              false: 'The user is talking to other users or not addressing Skynet.'
+            }
+          ),
+          insight: noul(
+            'Does this message ask a question, describe a problem, or present an opportunity where the bot can assist with timely, helpful information without being obtrusive?',
+            {
+              true: 'The user is seeking information or help that the bot can assist with in a timely, helpful way.',
+              false: 'The user is not seeking assistance or the bot should not interrupt.'
+            }
+          )
         }
       })
 
@@ -238,7 +261,11 @@ class System1Gatekeeper {
 
       // Priority 1: High-confidence Interjection (Talking directly to/about the bot or answering it)
       let interjected = false
-      if (interjectProb >= this.interjectThreshold && !this.isInterjectOnCooldown(channelId)) {
+      const effectiveInterjectThreshold = (message.content && /\bskynet\b/i.test(message.content))
+        ? Math.min(this.interjectThreshold, 0.60)
+        : this.interjectThreshold
+
+      if (interjectProb >= effectiveInterjectThreshold && !this.isInterjectOnCooldown(channelId)) {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +
