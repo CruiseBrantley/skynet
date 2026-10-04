@@ -138,7 +138,7 @@ class AgentTurnManager {
             }
           }
 
-          if (typeof isSufficientProb === 'number' && isSufficientProb >= 0.70 && intermediateIntentProb < 0.30) {
+          if (typeof isSufficientProb === 'number' && isSufficientProb >= 0.55 && intermediateIntentProb < 0.30) {
             return {
               isPending: false,
               isSufficient: true,
@@ -147,7 +147,7 @@ class AgentTurnManager {
           }
         }
       } catch (s1Err) {
-        logger.debug(`AgentTurnManager: System 1 evaluation bypassed or unavailable: ${s1Err.message}`)
+        logger.warn(`AgentTurnManager: System 1 evaluation bypassed or unavailable: ${s1Err.message}`)
       }
     }
 

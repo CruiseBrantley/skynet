@@ -2,7 +2,7 @@ const logger = require('../../logger')
 
 module.exports = {
   name: 'edit_message',
-  description: 'Edits an existing Discord message previously sent by Skynet. Requires message_id and new content.',
+  description: 'Edits a prior Discord message previously sent by Skynet. Requires message_id and new content. Do NOT use this tool to respond to the user\'s current prompt or thinking message; simply output your response as normal text.',
   schema: {
     message_id: {
       type: 'string',

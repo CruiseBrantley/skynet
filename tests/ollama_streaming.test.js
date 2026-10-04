@@ -239,7 +239,7 @@ describe('Ollama Streaming Integration', () => {
 
   test('queryOllama Level 2 (Gemini) streams SSE and fails over to candidate model when stream stalls', async () => {
     delete process.env.OLLAMA_REMOTE_HOST
-    process.env.GEMINI_MODEL = 'gemini-3.8-flash'
+    process.env.GEMINI_MODEL = 'gemini-2.5-flash'
     process.env.GEMINI_TTFT_MS = '60'
     process.env.GEMINI_INACTIVITY_MS = '40'
 
@@ -247,7 +247,7 @@ describe('Ollama Streaming Integration', () => {
     const stalledStream = new PassThrough()
     // Second model: successful SSE stream
     const successStream = Readable.from([
-      'data: {"candidates": [{"content": {"parts": [{"text": "Success from 3.7-flash"}]}}]}\n\n'
+      'data: {"candidates": [{"content": {"parts": [{"text": "Success from 1.5-flash"}]}}]}\n\n'
     ])
 
     axios.post
@@ -264,9 +264,9 @@ describe('Ollama Streaming Integration', () => {
 
     const result = await queryOllama('/api/chat', { messages: [{ role: 'user', content: 'test' }] }, 2, onToken)
 
-    expect(result.message.content).toBe('Success from 3.7-flash')
+    expect(result.message.content).toBe('Success from 1.5-flash')
     expect(axios.post).toHaveBeenCalledTimes(2)
-    expect(axios.post.mock.calls[0][0]).toContain('gemini-3.8-flash')
-    expect(axios.post.mock.calls[1][0]).toContain('gemini-3.7-flash')
+    expect(axios.post.mock.calls[0][0]).toContain('gemini-2.5-flash')
+    expect(axios.post.mock.calls[1][0]).toContain('gemini-1.5-flash')
   })
 })

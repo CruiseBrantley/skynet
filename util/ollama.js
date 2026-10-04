@@ -453,10 +453,10 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
       throw new Error('All fallback tiers (Remote PC, Gemini API) are unreachable.')
     }
 
-    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-    const candidateModels = [primaryModel, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-2.5-flash'].filter((v, i, a) => a.indexOf(v) === i)
-    const geminiTtftMs = parseInt(process.env.GEMINI_TTFT_MS, 10) || 25000
-    const geminiInactivityMs = parseInt(process.env.GEMINI_INACTIVITY_MS, 10) || 15000
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+    const candidateModels = [primaryModel, 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest'].filter((v, i, a) => a.indexOf(v) === i)
+    const geminiTtftMs = parseInt(process.env.GEMINI_TTFT_MS, 10) || 10000
+    const geminiInactivityMs = parseInt(process.env.GEMINI_INACTIVITY_MS, 10) || 10000
 
     let geminiContents = []
     if (payload.messages) {
