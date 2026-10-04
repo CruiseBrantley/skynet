@@ -1,6 +1,7 @@
 const net = require('net')
 const axios = require('axios')
 const logger = require('../logger')
+const { areGameServersActive } = require('./gameServerDetector')
 
 /**
  * Perform a quick TCP connection check.
@@ -591,10 +592,147 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
     const finalErrMsg = lastError?.response?.data?.error?.message || lastError?.message || 'Unknown error'
     logger.error(`Gemini fallback failed across all candidate models: ${finalErrMsg}`)
     if (options.allowLocalFallback !== false) {
+      const secondaryHost = process.env.OLLAMA_SECONDARY_HOST
+      const secondaryModel = process.env.OLLAMA_SECONDARY_MODEL
+      if (secondaryHost && secondaryModel && options.allowSecondaryFallback !== false && !options.hasTriedSecondary) {
+        const gameServersActive = await areGameServersActive()
+        if (!gameServersActive) {
+          const isSecondaryOnline = await checkPortOpen(secondaryHost, parseInt(process.env.OLLAMA_SECONDARY_PORT, 10) || 11434, 1000)
+          if (isSecondaryOnline) {
+            try {
+              logger.warn(`Gemini failed across all models. Dropping to Secondary Host (${secondaryHost}) before Local Mac Mini.`)
+              return await querySecondaryRemote(endpoint, payload, onToken, options)
+            } catch (secErr) {
+              logger.warn(`Secondary Ollama host failed: ${secErr.message}.`)
+            }
+          }
+        }
+      }
       logger.warn('Dropping to Level 3: Local Mac Mini Ollama.')
       return queryOllama(endpoint, payload, 3, onToken, options)
     }
     throw new Error(`All fallback tiers are unreachable: Gemini failed (${finalErrMsg})`)
+  }
+
+  /**
+   * Queries the secondary remote host (e.g. dedicated game server machine running Ollama).
+   */
+  async function querySecondaryRemote (endpoint, payload, onToken = null, options = {}) {
+    const secondaryHost = process.env.OLLAMA_SECONDARY_HOST
+    const secondaryPort = parseInt(process.env.OLLAMA_SECONDARY_PORT, 10) || 11434
+    const secondaryUrl = `http://${secondaryHost}:${secondaryPort}${endpoint}`
+    const secondaryModel = process.env.OLLAMA_SECONDARY_MODEL || 'qwen3.5:9b'
+    const ollamaTtftMs = parseInt(process.env.OLLAMA_TTFT_MS, 10) || 30000
+    const ollamaInactivityMs = parseInt(process.env.OLLAMA_INACTIVITY_MS, 10) || 15000
+    const timeoutMs = 180000
+    const isStream = typeof onToken === 'function'
+    const abortController = new AbortController()
+
+    let response
+    try {
+      response = await axios.post(
+        secondaryUrl,
+        { ...payload, model: secondaryModel, stream: isStream, keep_alive: payload.keep_alive || '5m' },
+        {
+          timeout: isStream ? ollamaTtftMs : timeoutMs,
+          ...(isStream ? { responseType: 'stream', signal: abortController.signal } : {})
+        }
+      )
+    } catch (postErr) {
+      abortController.abort()
+      if (postErr.response?.status === 500) {
+        logger.warn(`Secondary Model [${secondaryModel}] returned 500 (likely loading weights into VRAM). Retrying once in 1.5s...`)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        const retryAbort = new AbortController()
+        response = await axios.post(
+          secondaryUrl,
+          { ...payload, model: secondaryModel, stream: isStream, keep_alive: payload.keep_alive || '5m' },
+          {
+            timeout: isStream ? ollamaTtftMs : timeoutMs,
+            ...(isStream ? { responseType: 'stream', signal: retryAbort.signal } : {})
+          }
+        )
+      } else {
+        throw postErr
+      }
+    }
+
+    if (isStream && (response.data?.[Symbol.asyncIterator] || typeof response.data?.on === 'function')) {
+      const data = await consumeOllamaStream(response.data, onToken, {
+        ttftMs: ollamaTtftMs,
+        inactivityMs: ollamaInactivityMs,
+        abortController
+      })
+      if (data && data.message && typeof data.message.content === 'string' && data.message.content.trim().length > 0) {
+        return data
+      }
+      if (data?.message?.thinking && typeof data.message.thinking === 'string' && data.message.thinking.trim().length > 0) {
+        logger.info(`querySecondaryRemote: Recovered streaming thinking text as response from ${secondaryHost}`)
+        const thinkingText = data.message.thinking.trim()
+        if (typeof onToken === 'function') onToken(thinkingText)
+        return { message: { role: 'assistant', content: thinkingText } }
+      }
+      throw new Error(`Secondary Model ${secondaryModel} produced empty content.`)
+    }
+
+    const data = response.data
+    if (data && data.message) {
+      if (data.message.thinking) {
+        logger.info(`Secondary Model [${secondaryModel}] Thinking from ${secondaryHost}: ${data.message.thinking.substring(0, 150)}...`)
+      }
+      if (
+        (typeof data.message.content === 'string' && data.message.content.trim().length > 0) ||
+        (Array.isArray(data.message.tool_calls) && data.message.tool_calls.length > 0)
+      ) {
+        logger.info(`querySecondaryRemote: Chat Success from ${secondaryHost}`)
+        return data
+      }
+      if (data.message.thinking && typeof data.message.thinking === 'string' && data.message.thinking.trim().length > 0) {
+        logger.info(`querySecondaryRemote: Recovered thinking text as response from ${secondaryHost}`)
+        return { message: { role: 'assistant', content: data.message.thinking.trim() } }
+      }
+      throw new Error(`Secondary Model ${secondaryModel} produced empty content.`)
+    } else if (data && data.response && data.response.trim().length > 0) {
+      logger.info(`querySecondaryRemote: Legacy Success from ${secondaryHost}`)
+      return { message: { role: 'assistant', content: data.response } }
+    }
+
+    throw new Error('Malformed Ollama response from secondary host.')
+  }
+
+  /**
+   * Cascades from Primary Remote PC to Secondary Remote PC (if game servers inactive) before Gemini.
+   */
+  async function fallbackFromPrimary (endpoint, payload, onToken, options, failureReason) {
+    const secondaryHost = process.env.OLLAMA_SECONDARY_HOST
+    const secondaryPort = parseInt(process.env.OLLAMA_SECONDARY_PORT, 10) || 11434
+    const secondaryModel = process.env.OLLAMA_SECONDARY_MODEL
+
+    if (secondaryHost && secondaryModel && options.allowSecondaryFallback !== false) {
+      const gameServersActive = await areGameServersActive()
+      if (!gameServersActive) {
+        const isSecondaryOnline = await checkPortOpen(secondaryHost, secondaryPort, 1000)
+        if (isSecondaryOnline) {
+          logger.info(`Primary Ollama unavailable (${failureReason}). Routing to Secondary Host (${secondaryHost} - ${secondaryModel}).`)
+          try {
+            return await querySecondaryRemote(endpoint, payload, onToken, options)
+          } catch (secErr) {
+            logger.warn(`Secondary Ollama host (${secondaryHost}) failed: ${secErr.message}. Cascading to Level 2 (Gemini).`)
+          }
+        } else {
+          logger.info(`Secondary Ollama host (${secondaryHost}) is unreachable via TCP. Cascading to Level 2 (Gemini).`)
+        }
+      } else {
+        logger.info(`Dedicated game servers are currently active on ${secondaryHost}. Bypassing secondary Ollama to preserve gaming resources.`)
+      }
+    }
+
+    if (options.allowCloudFallback === false) {
+      logger.info(`Primary Ollama failed (${failureReason}) and cloud fallback disabled. Cascading to Level 3 (Local Ollama).`)
+      return queryOllama(endpoint, payload, 3, onToken, options)
+    }
+    logger.info(`Primary Ollama failed (${failureReason}). Falling back directly to Level 2 (Gemini).`)
+    return queryOllama(endpoint, payload, 2, onToken, { ...options, hasTriedSecondary: true })
   }
 
   // Level 0: Primary Remote Workstation
@@ -603,17 +741,17 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
   const remoteUrl = `http://${remoteHost}:${remotePort}${endpoint}`
   const remoteModel = process.env.OLLAMA_REMOTE_MODEL
 
-  // If no remote host is configured, skip straight to Level 2 (Gemini API)
+  // If no remote host is configured, skip straight to Level 2 (Gemini API) or Secondary
   if (!remoteHost || !remoteModel) {
-    logger.info('No remote Ollama host/model configured. Falling back to Level 2 (Gemini).')
-    return queryOllama(endpoint, payload, 2, onToken, options)
+    logger.info('No remote Ollama host/model configured. Falling back.')
+    return fallbackFromPrimary(endpoint, payload, onToken, options, 'No remote host configured')
   }
 
   // Quick TCP pre-flight check (1s timeout)
   const isOnline = await checkPortOpen(remoteHost, remotePort, 1000)
   if (!isOnline) {
-    logger.info('Primary Ollama PC is unreachable via TCP. Falling back directly to Level 2 (Gemini).')
-    return queryOllama(endpoint, payload, 2, onToken, options)
+    logger.info('Primary Ollama PC is unreachable via TCP. Falling back.')
+    return fallbackFromPrimary(endpoint, payload, onToken, options, 'Unreachable via TCP')
   }
   try {
     const isStream = typeof onToken === 'function'
@@ -751,12 +889,8 @@ async function queryOllama (endpoint, payload, fallbackLevel = 0, onToken = null
 
     throw new Error('Malformed Ollama response: Missing valid message.content or response fields.')
   } catch (err) {
-    if (options.allowCloudFallback === false) {
-      logger.info(`Primary Ollama failed (${err.message}) and cloud fallback disabled. Cascading to Level 3 (Local Ollama).`)
-      return queryOllama(endpoint, payload, 3, onToken, options)
-    }
-    logger.info(`Primary Ollama failed (${err.message}). Falling back directly to Level 2 (Gemini).`)
-    return queryOllama(endpoint, payload, 2, onToken, options)
+    logger.info(`Primary Ollama failed (${err.message}). Falling back.`)
+    return fallbackFromPrimary(endpoint, payload, onToken, options, err.message)
   }
 }
 
