@@ -86,22 +86,22 @@ describe('Ollama Fallback Hierarchy', () => {
 
   test('should cascade across candidateModels when primary Gemini model returns 503 high demand', async () => {
     delete process.env.OLLAMA_REMOTE_HOST
-    process.env.GEMINI_MODEL = 'gemini-2.5-flash'
+    process.env.GEMINI_MODEL = 'gemini-3.8-flash'
 
-    // First model (2.5-flash) fails with 503
+    // First model (3.8-flash) fails with 503
     const err503 = new Error('High demand')
     err503.response = { status: 503, data: { error: { message: 'High demand' } } }
 
     axios.post
       .mockRejectedValueOnce(err503)
-      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-1.5-flash' }] } }] } })
+      .mockResolvedValueOnce({ data: { candidates: [{ content: { parts: [{ text: 'from-3.6-flash' }] } }] } })
 
     const result = await queryOllama('/api/chat', { messages: [] })
 
-    expect(result.message.content).toBe('from-1.5-flash')
+    expect(result.message.content).toBe('from-3.6-flash')
     expect(axios.post).toHaveBeenCalledTimes(2)
-    expect(axios.post.mock.calls[0][0]).toContain('gemini-2.5-flash')
-    expect(axios.post.mock.calls[1][0]).toContain('gemini-1.5-flash')
+    expect(axios.post.mock.calls[0][0]).toContain('gemini-3.8-flash')
+    expect(axios.post.mock.calls[1][0]).toContain('gemini-3.6-flash')
   })
 
   test('should failover to Level 3 (Local Mac Mini) with keep_alive 2m when Gemini fails across all candidate models', async () => {
