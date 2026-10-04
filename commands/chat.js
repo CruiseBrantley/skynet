@@ -398,49 +398,10 @@ async function execute (interaction, database) {
         }
       }
 
-      if (!interaction.streamToken && typeof interaction.editReply === 'function') {
-        let buffer = ''
-        let lastEdit = 0
-        let isEditing = false
-        let hasEdited = false
-        let gen = 0
-        const BATCH_MS = 800 // 800ms throttle to stay comfortably within Discord rate limits
-        const MAX_LEN = 1900
-
-        interaction.streamToken = async (token) => {
-          const myGen = gen
-          if (myGen !== gen) return
-          buffer += token
-          const now = Date.now()
-          if (now - lastEdit < BATCH_MS || isEditing) return
-          lastEdit = now
-          isEditing = true
-          try {
-            if (myGen !== gen) return
-            const visibleText = buffer
-              .replace(/<think[\s\S]*?(?:<\/think>|$)/gi, '')
-              .replace(/<thought[\s\S]*?(?:<\/thought>|$)/gi, '')
-              .replace(/<action[\s\S]*?(?:<\/action>|$)/gi, '')
-              .replace(/<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd][\s\S]*?(?:>>>|$)/gi, '')
-              .replace(/<<<[\s\S]*?(?:>>>|$)/gi, '')
-              .replace(/<[a-zA-Z0-9_]*$/g, '')
-              .replace(/<<*$/g, '')
-              .trim()
-            if (!visibleText) return
-            clearStatusInterval()
-            const toPost = visibleText.length > MAX_LEN
-              ? visibleText.substring(0, MAX_LEN)
-              : visibleText
-            await interaction.editReply({ content: toPost, flags: [4096] })
-            hasEdited = true
-          } catch (e) {
-            logger.warn(`Stream editReply failed: ${e.message}`)
-          } finally {
-            isEditing = false
-          }
-        }
-        interaction.streamToken.reset = () => { buffer = ''; isEditing = false; hasEdited = false; lastEdit = 0; gen++ }
-        interaction.streamToken.hasEdited = () => hasEdited
+      if (!interaction.streamToken) {
+        interaction.streamToken = () => {}
+        interaction.streamToken.reset = () => {}
+        interaction.streamToken.hasEdited = () => false
       }
 
       if (!interaction.showStatus && typeof interaction.editReply === 'function') {

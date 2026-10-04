@@ -812,12 +812,11 @@ class AgentTurnManager {
             interaction.streamToken.reset()
           }
 
-          const synthStream = interaction.streamToken || interaction.onToken || null
           const synthResponse = await queryFn(
             [...channelHistory.messages],
             { ...ollamaContext, tools: [], think: false },
             this.botName,
-            synthStream
+            null // Do not stream partial text to Discord; evaluate in memory first
           )
           candidateReply = (synthResponse?.message?.content || '').replace(COMMAND_REGEX, '').trim()
         }
