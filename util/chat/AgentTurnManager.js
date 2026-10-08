@@ -129,7 +129,12 @@ class AgentTurnManager {
             }
           }
 
-          if (typeof isSufficientProb === 'number' && isSufficientProb < 0.20) {
+          // If is_sufficient is low, only treat as pending/insufficient if:
+          // 1. Tools were executed (grounding needed), or
+          // 2. Intermediate intent is moderate (> 0.25), or
+          // 3. Response is very short (< 40 chars)
+          const requiresStrictSufficiency = executedTools.length > 0 || intermediateIntentProb > 0.25 || trimmed.length < 40
+          if (typeof isSufficientProb === 'number' && isSufficientProb < 0.20 && requiresStrictSufficiency) {
             return {
               isPending: true,
               isSufficient: false,
@@ -854,14 +859,15 @@ class AgentTurnManager {
           continue
         }
 
-        // If retries exhausted or step limit reached, but response is still pending or contains command syntax
-        if (pendingEval.isPending || /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(finalReplyContent)) {
-          if (!finalReplyContent && sharedState.visualActionExecuted) {
-            // Intentional silent completion for visual actions (e.g. embed/poll displayed)
-          } else {
-            logger.warn(`AgentTurnManager: Step ${step + 1} produced insufficient response or leaked tool syntax after retries. Suppressing invalid final reply.`)
-            finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
-          }
+        // If retries exhausted or step limit reached, check for actual leaked tool syntax or empty content
+        const hasLeakedToolSyntax = /<<<[Rr][Uu][Nn]_[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|<<<[a-zA-Z0-9_-]+|\{"tool_calls"|<tool_call>/i.test(finalReplyContent)
+        if (hasLeakedToolSyntax || (!finalReplyContent && !sharedState.visualActionExecuted)) {
+          logger.warn(`AgentTurnManager: Step ${step + 1} produced unparsable tool syntax or empty content after retries. Suppressing invalid final reply.`)
+          finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
+        } else if (pendingEval.isPending && (finalReplyContent || '').length < 30) {
+          // If response is excessively short and still flagged pending, provide polite fallback
+          logger.warn(`AgentTurnManager: Step ${step + 1} produced incomplete reply after retries. Suppressing.`)
+          finalReplyContent = 'I was unable to complete the requested actions to answer your question. Please try again or rephrase.'
         }
 
         if (finalReplyContent) {
