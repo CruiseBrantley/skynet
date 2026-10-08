@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js')
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder } = require('discord.js')
 const fs = require('fs')
 const path = require('path')
 const axios = require('axios')
@@ -50,6 +50,38 @@ async function getTwitchUser (identifier) {
   return user
 }
 
+async function getStreamStatus (userId) {
+  try {
+    const token = await getOAuthToken()
+    const response = await axios.get('https://api.twitch.tv/helix/streams', {
+      headers: {
+        'Client-ID': process.env.TWITCH_CLIENTID,
+        Authorization: `Bearer ${token}`
+      },
+      params: { user_id: userId }
+    })
+    return response.data?.data?.[0] || null
+  } catch (err) {
+    logger.warn(`Failed checking live status for ${userId}:`, err.message)
+    return null
+  }
+}
+
+function resolveGroupForGuild (config, guildId, groupName, channelId) {
+  const guildGroups = config.groups.filter(g => g.guild_id === guildId)
+  if (groupName) {
+    return guildGroups.find(g => g.name === groupName) || null
+  }
+  if (channelId) {
+    const byChannel = guildGroups.find(g => g.channel_id === channelId)
+    if (byChannel) return byChannel
+  }
+  if (guildGroups.length === 1) {
+    return guildGroups[0]
+  }
+  return null
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('twitch-notify')
@@ -60,7 +92,7 @@ module.exports = {
         .setName('add')
         .setDescription('Add a streamer to announcement notifications')
         .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
-        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setRequired(false))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setAutocomplete(true).setRequired(false))
         .addChannelOption(option =>
           option.setName('channel')
             .setDescription('Announcement channel (defaults to current channel or group channel)')
@@ -70,20 +102,20 @@ module.exports = {
       subcommand
         .setName('remove')
         .setDescription('Remove a streamer from announcements')
-        .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
-        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setRequired(false)))
+        .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setAutocomplete(true).setRequired(true))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setAutocomplete(true).setRequired(false)))
     .addSubcommand(subcommand =>
       subcommand
         .setName('social')
         .setDescription('Manage supplemental social links (e.g. youtube) for a streamer')
-        .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
+        .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setAutocomplete(true).setRequired(true))
         .addStringOption(option => option.setName('platform').setDescription('The platform (e.g. youtube)').setRequired(true))
         .addStringOption(option => option.setName('link').setDescription('The URL to the profile (Omit to remove)')))
     .addSubcommand(subcommand =>
       subcommand
         .setName('edit-group')
         .setDescription('Update the settings for an announcement group')
-        .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setAutocomplete(true).setRequired(false))
         .addChannelOption(option =>
           option.setName('channel')
             .setDescription('New announcement channel')
@@ -93,11 +125,48 @@ module.exports = {
       subcommand
         .setName('delete-group')
         .setDescription('Permanently delete an announcement group from this server')
-        .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true)))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setAutocomplete(true).setRequired(false)))
     .addSubcommand(subcommand =>
       subcommand
         .setName('sync')
         .setDescription('Manually re-subscribe to all streamers')),
+
+  async autocomplete (interaction) {
+    try {
+      const config = loadConfig()
+      const guildId = interaction.guildId
+      const focusedOption = interaction.options.getFocused(true)
+      const focusedValue = (focusedOption.value || '').toLowerCase()
+
+      if (focusedOption.name === 'group') {
+        const guildGroups = config.groups.filter(g => g.guild_id === guildId)
+        const filtered = guildGroups
+          .filter(g => g.name.toLowerCase().includes(focusedValue))
+          .map(g => ({ name: `${g.name} (${g.streamers?.length || 0} streamers)`, value: g.name }))
+          .slice(0, 25)
+        return interaction.respond(filtered)
+      }
+
+      if (focusedOption.name === 'username') {
+        const guildGroups = config.groups.filter(g => g.guild_id === guildId)
+        const streamerIds = new Set()
+        guildGroups.forEach(g => (g.streamers || []).forEach(id => streamerIds.add(id)))
+
+        // Fetch display names or IDs
+        const suggestions = []
+        for (const id of streamerIds) {
+          suggestions.push({ name: id, value: id })
+        }
+        const filtered = suggestions
+          .filter(s => s.name.toLowerCase().includes(focusedValue))
+          .slice(0, 25)
+        return interaction.respond(filtered)
+      }
+    } catch (err) {
+      logger.error('Error in twitch-notify autocomplete:', err)
+      return interaction.respond([])
+    }
+  },
 
   async execute (interaction) {
     const ownerId = process.env.OWNER_ID
@@ -121,16 +190,20 @@ module.exports = {
     const guildId = interaction.guildId
 
     if (subcommand === 'edit-group') {
-      const groupName = interaction.options.getString('group')
+      const groupNameInput = interaction.options.getString('group')
       const channel = interaction.options.getChannel('channel')
       const mention = interaction.options.getString('mention')
-      const group = config.groups.find(g => g.name === groupName && g.guild_id === guildId)
+
+      const group = resolveGroupForGuild(config, guildId, groupNameInput, interaction.channelId)
 
       if (!group) {
-        return interaction.reply({ content: `Group "${groupName}" not found in this server.`, ephemeral: true })
+        if (groupNameInput) {
+          return interaction.reply({ content: `Group "${groupNameInput}" not found in this server.`, ephemeral: true })
+        }
+        return interaction.reply({ content: 'Could not automatically identify group. Please specify the `group` option.', ephemeral: true })
       }
 
-      let response = `Successfully updated settings for group **${groupName}**:`
+      let response = `Successfully updated settings for group **${group.name}**:`
 
       if (channel) {
         group.channel_id = channel.id
@@ -154,20 +227,41 @@ module.exports = {
     }
 
     if (subcommand === 'delete-group') {
-      const groupName = interaction.options.getString('group')
-      const groupIndex = config.groups.findIndex(g => g.name === groupName && g.guild_id === guildId)
+      const groupNameInput = interaction.options.getString('group')
+      const group = resolveGroupForGuild(config, guildId, groupNameInput, interaction.channelId)
 
-      if (groupIndex === -1) {
-        return interaction.reply({ content: `Group "${groupName}" not found in this server.`, ephemeral: true })
+      if (!group) {
+        if (groupNameInput) {
+          return interaction.reply({ content: `Group "${groupNameInput}" not found in this server.`, ephemeral: true })
+        }
+        return interaction.reply({ content: 'Could not automatically identify group. Please specify the `group` option.', ephemeral: true })
       }
 
+      const deletedStreamers = [...group.streamers]
+      const groupIndex = config.groups.findIndex(g => g === group)
       config.groups.splice(groupIndex, 1)
       saveConfig(config)
+
       if (interaction.client.configSync) {
         interaction.client.configSync.updateRemote(config)
       }
 
-      return interaction.reply({ content: `Successfully deleted group **${groupName}** and all its streamer associations.`, ephemeral: true })
+      // Cleanup orphaned webhook subscriptions
+      try {
+        const { unsubscribeStreamer } = require('../server/server')
+        if (typeof unsubscribeStreamer === 'function') {
+          for (const sId of deletedStreamers) {
+            const isStillUsed = config.groups.some(g => g.streamers.includes(sId))
+            if (!isStillUsed) {
+              await unsubscribeStreamer(sId)
+            }
+          }
+        }
+      } catch (subErr) {
+        logger.warn('Failed to unsubscribe deleted streamers:', subErr.message)
+      }
+
+      return interaction.reply({ content: `Successfully deleted group **${group.name}** and all its streamer associations.`, ephemeral: true })
     }
 
     if (subcommand === 'social') {
@@ -302,11 +396,39 @@ module.exports = {
           interaction.client.configSync.updateRemote(config)
         }
 
-        let successMsg = `Successfully added **${user.display_name}** to group **${groupName}** (Channel: <#${group.channel_id}>).`
-        if (mention !== null) successMsg += `\nMention updated to: ${mention || '*None*'}`
-        successMsg += '\nNote: Use `/twitch-notify sync` to activate.'
+        // Targeted auto-subscribe with Twitch EventSub
+        try {
+          const { subscribeStreamer } = require('../server/server')
+          if (typeof subscribeStreamer === 'function') {
+            await subscribeStreamer(user.id)
+          }
+        } catch (subErr) {
+          logger.warn(`Auto-subscribe failed for ${user.id}:`, subErr.message)
+        }
 
-        await interaction.editReply(successMsg)
+        // Check if user is currently live right now
+        const liveStream = await getStreamStatus(user.id)
+
+        const embed = new EmbedBuilder()
+          .setTitle(`✅ Added ${user.display_name} to Twitch Watchlist`)
+          .setURL(`https://twitch.tv/${user.login}`)
+          .setThumbnail(user.profile_image_url)
+          .setColor(0x9146FF) // Twitch Purple
+          .addFields(
+            { name: 'Group', value: `\`${groupName}\``, inline: true },
+            { name: 'Channel', value: `<#${group.channel_id}>`, inline: true },
+            { name: 'Mention', value: group.mention || '*None*', inline: true }
+          )
+
+        if (liveStream) {
+          const streamStarted = new Date(liveStream.started_at).toLocaleTimeString()
+          embed.addFields({
+            name: '🔴 Currently Live!',
+            value: `**${liveStream.game_name || 'Streaming'}**: [${liveStream.title}](https://twitch.tv/${user.login})\n*Started at ${streamStarted} with ${liveStream.viewer_count.toLocaleString()} viewers.*`
+          })
+        }
+
+        await interaction.editReply({ embeds: [embed] })
       } catch (err) {
         logger.error('Error adding twitch user:', err)
         await interaction.editReply('Failed to add Twitch user. Check logs.')
@@ -358,6 +480,19 @@ module.exports = {
         saveConfig(config)
         if (interaction.client.configSync) {
           interaction.client.configSync.updateRemote(config)
+        }
+
+        // Targeted auto-unsubscribe if no longer present in any group
+        const isStillUsed = config.groups.some(g => g.streamers.includes(user.id))
+        if (!isStillUsed) {
+          try {
+            const { unsubscribeStreamer } = require('../server/server')
+            if (typeof unsubscribeStreamer === 'function') {
+              await unsubscribeStreamer(user.id)
+            }
+          } catch (unsubErr) {
+            logger.warn(`Auto-unsubscribe failed for ${user.id}:`, unsubErr.message)
+          }
         }
 
         await interaction.editReply(`Successfully removed **${user.display_name}** from group **${groupName}**.`)

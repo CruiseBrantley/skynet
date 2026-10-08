@@ -115,6 +115,36 @@ async function subscribeAll () {
   }
 }
 
+async function subscribeStreamer (streamerId) {
+  try {
+    const url = await getURL()
+    if (!oauthToken) {
+      oauthToken = await oauth()
+    }
+    return await twitchSubscribe(streamerId, url)
+  } catch (err) {
+    logger.error(`Error subscribing streamer ${streamerId}:`, err)
+  }
+}
+
+async function unsubscribeStreamer (streamerId) {
+  try {
+    if (!oauthToken) {
+      oauthToken = await oauth()
+    }
+    const existingSubs = await getSubscriptions(oauthToken)
+    if (existingSubs && existingSubs.data) {
+      const match = existingSubs.data.find(s => s.condition?.broadcaster_user_id === streamerId)
+      if (match) {
+        await deleteSubscription(match.id)
+        logger.info(`Unsubscribed streamer ${streamerId} (sub: ${match.id})`)
+      }
+    }
+  } catch (err) {
+    logger.error(`Error unsubscribing streamer ${streamerId}:`, err)
+  }
+}
+
 async function getGameInfo (id) {
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/games?id=${id}`, {
@@ -722,5 +752,7 @@ module.exports.setupServer = setupServer
 module.exports.getSubscriptions = getSubscriptions
 module.exports.deleteSubscription = deleteSubscription
 module.exports.twitchSubscribe = twitchSubscribe
+module.exports.subscribeStreamer = subscribeStreamer
+module.exports.unsubscribeStreamer = unsubscribeStreamer
 module.exports.subscribeAll = subscribeAll
 module.exports.checkTwitchHealth = checkTwitchHealth

@@ -1,5 +1,4 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js')
-const twitchNotifyCmd = require('../commands/twitch-notify')
 const fs = require('fs')
 const axios = require('axios')
 const getOAuthToken = require('../server/oauth')
@@ -8,6 +7,14 @@ jest.mock('fs')
 jest.mock('axios')
 jest.mock('../server/oauth')
 jest.mock('../logger')
+jest.mock('../server/server', () => ({
+  subscribeAll: jest.fn().mockResolvedValue(true),
+  subscribeStreamer: jest.fn().mockResolvedValue(true),
+  unsubscribeStreamer: jest.fn().mockResolvedValue(true)
+}))
+jest.mock('../server/ngrok', () => jest.fn().mockResolvedValue('https://mock-ngrok.app'))
+
+const twitchNotifyCmd = require('../commands/twitch-notify')
 
 describe('/twitch-notify', () => {
   let mockInteraction
@@ -100,7 +107,13 @@ describe('/twitch-notify', () => {
 
     await twitchNotifyCmd.execute(mockInteraction)
 
-    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Successfully added **IDStreamer**'))
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          title: expect.stringContaining('Added IDStreamer')
+        })
+      })]
+    }))
   })
 
   test('add subcommand successfully handle numeric strings that are actually usernames', async () => {
@@ -116,7 +129,13 @@ describe('/twitch-notify', () => {
 
     await twitchNotifyCmd.execute(mockInteraction)
 
-    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Successfully added **11111**'))
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          title: expect.stringContaining('Added 11111')
+        })
+      })]
+    }))
   })
 
   test('add subcommand successfully creates a new group for the current guild', async () => {
@@ -194,7 +213,13 @@ describe('/twitch-notify', () => {
 
     await twitchNotifyCmd.execute(mockInteraction)
 
-    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Successfully added **AutoStreamer** to group **test_group**'))
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
+      embeds: [expect.objectContaining({
+        data: expect.objectContaining({
+          title: expect.stringContaining('Added AutoStreamer')
+        })
+      })]
+    }))
   })
 
   test('remove subcommand automatically removes streamer when group is omitted and streamer is in one group', async () => {
@@ -228,4 +253,49 @@ describe('/twitch-notify', () => {
     const savedConfig = JSON.parse(fs.writeFileSync.mock.calls[0][1])
     expect(savedConfig.socials['9999'].youtube).toBe('https://youtube.com/user')
   })
+
+  test('autocomplete returns matching groups for group option', async () => {
+    const mockAutoInteraction = {
+      guildId: 'G123',
+      options: {
+        getFocused: jest.fn().mockReturnValue({ name: 'group', value: 'test' })
+      },
+      respond: jest.fn()
+    }
+
+    await twitchNotifyCmd.autocomplete(mockAutoInteraction)
+
+    expect(mockAutoInteraction.respond).toHaveBeenCalledWith([
+      expect.objectContaining({ name: expect.stringContaining('test_group'), value: 'test_group' })
+    ])
+  })
+
+  test('autocomplete returns matching streamer IDs for username option', async () => {
+    const mockAutoInteraction = {
+      guildId: 'G123',
+      options: {
+        getFocused: jest.fn().mockReturnValue({ name: 'username', value: '99' })
+      },
+      respond: jest.fn()
+    }
+
+    await twitchNotifyCmd.autocomplete(mockAutoInteraction)
+
+    expect(mockAutoInteraction.respond).toHaveBeenCalledWith([
+      expect.objectContaining({ name: '9999', value: '9999' })
+    ])
+  })
+
+  test('delete-group auto-resolves single guild group when group option is omitted', async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue('delete-group')
+    mockInteraction.member.permissions.has.mockReturnValue(true)
+    mockInteraction.options.getString.mockReturnValue(null)
+
+    await twitchNotifyCmd.execute(mockInteraction)
+
+    expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Successfully deleted group **test_group**')
+    }))
+  })
 })
+
