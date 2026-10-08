@@ -89,6 +89,27 @@ class System1Gatekeeper {
   }
 
   /**
+   * Calculate effective reaction threshold for a channel.
+   * If a reaction recently occurred, dynamically raises the threshold to reduce reaction
+   * frequency while still allowing truly exceptional messages (> 0.92-0.95) to react.
+   * Decay window is 3 minutes with up to +0.18 threshold boost immediately after a reaction.
+   * @param {string} channelId
+   * @returns {number}
+   */
+  getEffectiveReactionThreshold (channelId) {
+    const base = this.reactionThreshold
+    const last = this.lastReactionTimeByChannel.get(channelId) || 0
+    const elapsed = Date.now() - last
+    const decayWindowMs = 3 * 60 * 1000 // 3 minutes
+
+    if (elapsed < decayWindowMs) {
+      const penalty = 0.18 * (1 - (elapsed / decayWindowMs))
+      return Math.min(0.95, base + penalty)
+    }
+    return base
+  }
+
+  /**
    * Check if a channel is on reaction cooldown.
    * @param {string} channelId
    * @returns {boolean}
@@ -299,11 +320,12 @@ class System1Gatekeeper {
       }
 
       // Priority 3: High-confidence Reaction (non-intrusive emoji; can trigger alongside interject/insight or alone)
-      if (reactionProb >= this.reactionThreshold && !this.isReactionOnCooldown(channelId)) {
+      const effectiveReactionThreshold = this.getEffectiveReactionThreshold(channelId)
+      if (reactionProb >= effectiveReactionThreshold && !this.isReactionOnCooldown(channelId)) {
         this.lastReactionTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Reaction triggered in #${channelName} ` +
-          `(score: ${reactionProb.toFixed(2)} >= ${this.reactionThreshold}) for "${message.content.slice(0, 50)}"`
+          `(score: ${reactionProb.toFixed(2)} >= ${effectiveReactionThreshold.toFixed(2)}) for "${message.content.slice(0, 50)}"`
         )
         triggeredActions.push('react')
         // Execute asynchronously so gatekeeper returns immediately

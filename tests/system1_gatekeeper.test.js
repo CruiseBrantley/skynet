@@ -378,6 +378,60 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       expect(res).toMatchObject({ action: 'interject', score: 0.65 })
       expect(gatekeeper.lastInterjectTimeByChannel.has('c1')).toBe(true)
     })
+
+    test('dynamically raises reaction threshold immediately after a reaction and decays back', () => {
+      const channelId = 'c-dyn'
+      gatekeeper.reactionThreshold = 0.75
+
+      // Base threshold when no prior reactions
+      expect(gatekeeper.getEffectiveReactionThreshold(channelId)).toBe(0.75)
+
+      // Immediately after reaction (0s elapsed): penalty +0.18 -> 0.93
+      gatekeeper.lastReactionTimeByChannel.set(channelId, Date.now())
+      expect(gatekeeper.getEffectiveReactionThreshold(channelId)).toBeCloseTo(0.93, 2)
+
+      // Halfway through decay window (90s / 180s elapsed): penalty +0.09 -> 0.84
+      gatekeeper.lastReactionTimeByChannel.set(channelId, Date.now() - 90 * 1000)
+      expect(gatekeeper.getEffectiveReactionThreshold(channelId)).toBeCloseTo(0.84, 2)
+
+      // After decay window (181s elapsed): penalty decayed to 0 -> 0.75
+      gatekeeper.lastReactionTimeByChannel.set(channelId, Date.now() - 181 * 1000)
+      expect(gatekeeper.getEffectiveReactionThreshold(channelId)).toBe(0.75)
+    })
+
+    test('allows exceptional message to react even during dynamic decay window', async () => {
+      const channelId = 'c-high'
+      gatekeeper.reactionThreshold = 0.75
+      gatekeeper.lastReactionTimeByChannel.set(channelId, Date.now() - 1000) // ~1s ago, effective threshold ~0.93
+
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {},
+        channel: { id: channelId, name: 'general' },
+        content: 'HOLY SHIT THE ENTIRE SERVER CRASHED'
+      }
+
+      // Borderline score 0.80 (< 0.93) is ignored
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.80 },
+          interject: { noul: 0.10 }
+        }
+      })
+      const ignoredRes = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(ignoredRes.action).toBe('ignore')
+
+      // Exceptional score 0.95 (>= 0.93) triggers reaction without being blocked by a hard cooldown
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: { noul: 0.95 },
+          interject: { noul: 0.10 }
+        }
+      })
+      const triggeredRes = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(triggeredRes.action).toBe('react')
+    })
   })
 })
 

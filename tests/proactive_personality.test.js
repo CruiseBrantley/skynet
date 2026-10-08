@@ -128,6 +128,73 @@ describe('proactivePersonality (System 2 Soul & Emoji Selection)', () => {
       expect(emoji).toBe('💀')
       expect(mockReact).not.toHaveBeenCalled()
     })
+
+    test('skips reacting if message tells bot to chill out or stop reacting', async () => {
+      const mockReact = jest.fn().mockResolvedValue({})
+      const mockMessage = {
+        id: 'msg_chill',
+        content: 'ok skynet, chill the fuck out with the reactions',
+        author: { username: 'FireRaven' },
+        guild: mockGuild,
+        guildId: 'guild123',
+        channel: { id: 'c1', name: 'general' },
+        reactions: { cache: new Map() },
+        react: mockReact
+      }
+
+      const emoji = await selectProactiveEmoji(mockMessage)
+      expect(emoji).toBeNull()
+      expect(ollama.queryOllama).not.toHaveBeenCalled()
+      expect(mockReact).not.toHaveBeenCalled()
+    })
+
+    test('includes recent channel emojis in the prompt to encourage emoji variety', async () => {
+      const { resetRecentReactions } = require('../util/chat/proactivePersonality')
+      resetRecentReactions()
+
+      const mockReact = jest.fn().mockResolvedValue({})
+      const mockMessage1 = {
+        id: 'msg1',
+        content: 'first message',
+        author: { username: 'User' },
+        guild: mockGuild,
+        guildId: 'guild123',
+        channel: { id: 'c1', name: 'general' },
+        reactions: { cache: new Map() },
+        react: mockReact
+      }
+
+      ollama.queryOllama.mockResolvedValueOnce({
+        response: '<:kekw:1122334455>'
+      })
+
+      await selectProactiveEmoji(mockMessage1)
+
+      const mockMessage2 = {
+        id: 'msg2',
+        content: 'second message',
+        author: { username: 'User' },
+        guild: mockGuild,
+        guildId: 'guild123',
+        channel: { id: 'c1', name: 'general' },
+        reactions: { cache: new Map() },
+        react: mockReact
+      }
+
+      ollama.queryOllama.mockResolvedValueOnce({
+        response: '🔥'
+      })
+
+      await selectProactiveEmoji(mockMessage2)
+
+      expect(ollama.queryOllama).toHaveBeenLastCalledWith(
+        '/api/generate',
+        expect.objectContaining({
+          prompt: expect.stringContaining('Recently used reactions in this channel')
+        }),
+        0
+      )
+    })
   })
 
   describe('executeProactiveInterjection', () => {

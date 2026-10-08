@@ -42,6 +42,16 @@ function resolveEmojiForReaction (raw, guild) {
   return null
 }
 
+// In-memory rolling history of recent reacted emojis per channel (max 5 per channel)
+const recentReactionsByChannel = new Map()
+
+/**
+ * Reset recent reaction history (primarily for testing).
+ */
+function resetRecentReactions () {
+  recentReactionsByChannel.clear()
+}
+
 /**
  * Select a personality-driven emoji for an incoming Discord message using the large model.
  * @param {import('discord.js').Message} message - Triggering Discord message
@@ -52,6 +62,14 @@ async function selectProactiveEmoji (message, recentContext = null) {
   if (!message || !message.channel) return null
 
   try {
+    // Quick tone-deafness / anti-annoyance check:
+    // If the message is asking the bot to stop, chill, shut up, or complaining about bot reactions, bail out.
+    const contentLower = (message.content || '').toLowerCase()
+    if (/\b(chill\s*(out)?|stop\s+reacting|shut\s+up|annoying\s*(bot)?|leave\s+me\s+alone|fuck\s+off|stop\s+it)\b/i.test(contentLower)) {
+      logger.info(`proactivePersonality: Skipping reaction to message ${message.id} due to anti-annoyance filter.`)
+      return null
+    }
+
     let contextMessages = recentContext
     if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
       try {
@@ -69,6 +87,13 @@ async function selectProactiveEmoji (message, recentContext = null) {
         .join('\n')
     }
 
+    const channelId = message.channel.id
+    const channelHistory = recentReactionsByChannel.get(channelId) || []
+    let recentEmojisText = ''
+    if (channelHistory.length > 0) {
+      recentEmojisText = `\nRecently used reactions in this channel (avoid repeating unless exceptionally fitting; prefer variety): ${channelHistory.map(h => h.name || h.id).join(', ')}`
+    }
+
     const contextSnippet = Array.isArray(contextMessages) && contextMessages.length > 0
       ? contextMessages.slice(-8).map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
       : `${message.author?.username || 'User'}: ${message.content}`
@@ -84,14 +109,15 @@ Triggering Message from @${message.author?.username || 'User'}:
 "${message.content}"
 
 Available Custom Server Emojis:
-${customEmojisText}
+${customEmojisText}${recentEmojisText}
 
 Instructions:
 1. Pick the SINGLE MOST FITTING, WITTY, OR HYPE emoji that captures Skynet's personality.
 2. If a custom server emoji fits best, you may return the custom emoji tag <:name:id> or ID.
 3. Otherwise, return a standard Unicode emoji (e.g. 💀, 😂, 🔥, 🤔, 🫡, 🗿, etc.).
-4. If reacting would be tone-deaf, awkward, or inappropriate upon closer inspection, respond with NONE.
-5. Output ONLY the emoji or NONE. Do not provide explanation or markdown.
+4. VARIETY: Strongly avoid repeating recently used emojis. Bring fresh, contextual reactions instead of reusing the same emoji back-to-back.
+5. If reacting would be tone-deaf, awkward, or inappropriate upon closer inspection, respond with NONE.
+6. Output ONLY the emoji or NONE. Do not provide explanation or markdown.
 
 Emoji:`
 
@@ -129,6 +155,16 @@ Emoji:`
 
     await message.react(resolvedEmoji)
     logger.info(`proactivePersonality: Reacted with ${resolvedEmoji} to message ${message.id} in #${message.channel.name}.`)
+
+    // Record in recent reactions rolling buffer
+    const emojiEntry = {
+      id: resolvedEmoji,
+      name: guild?.emojis?.cache?.get(resolvedEmoji)?.name || resolvedEmoji,
+      timestamp: Date.now()
+    }
+    const updatedHistory = [...channelHistory, emojiEntry].slice(-5)
+    recentReactionsByChannel.set(channelId, updatedHistory)
+
     return resolvedEmoji
   } catch (err) {
     logger.warn(`proactivePersonality: Failed to select or apply proactive emoji: ${err.message}`)
@@ -324,5 +360,6 @@ async function executeProactiveInterjection (message, client, database) {
 module.exports = {
   resolveEmojiForReaction,
   selectProactiveEmoji,
-  executeProactiveInterjection
+  executeProactiveInterjection,
+  resetRecentReactions
 }
