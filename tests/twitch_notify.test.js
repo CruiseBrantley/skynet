@@ -182,6 +182,36 @@ describe('/twitch-notify', () => {
     expect(savedConfig.groups.some(g => g.name === 'test_group')).toBe(false)
   })
 
+  test('add subcommand resolves to single guild group when group is omitted', async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue('add')
+    mockInteraction.member.permissions.has.mockReturnValue(true)
+    mockInteraction.options.getString.mockImplementation(name => {
+      if (name === 'username') return 'new_streamer'
+      return null
+    })
+
+    axios.get.mockResolvedValueOnce({ data: { data: [{ id: '7777', display_name: 'AutoStreamer' }] } })
+
+    await twitchNotifyCmd.execute(mockInteraction)
+
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Successfully added **AutoStreamer** to group **test_group**'))
+  })
+
+  test('remove subcommand automatically removes streamer when group is omitted and streamer is in one group', async () => {
+    mockInteraction.options.getSubcommand.mockReturnValue('remove')
+    mockInteraction.member.permissions.has.mockReturnValue(true)
+    mockInteraction.options.getString.mockImplementation(name => {
+      if (name === 'username') return 'streamer'
+      return null
+    })
+
+    axios.get.mockResolvedValueOnce({ data: { data: [{ id: '9999', display_name: 'ExistingStreamer' }] } })
+
+    await twitchNotifyCmd.execute(mockInteraction)
+
+    expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.stringContaining('Successfully removed **ExistingStreamer** from group **test_group**'))
+  })
+
   test('social subcommand sets a link', async () => {
     mockInteraction.options.getSubcommand.mockReturnValue('social')
     mockInteraction.member.permissions.has.mockReturnValue(true)

@@ -58,20 +58,20 @@ module.exports = {
     .addSubcommand(subcommand =>
       subcommand
         .setName('add')
-        .setDescription('Add a streamer to an announcement group')
+        .setDescription('Add a streamer to announcement notifications')
         .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
-        .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setRequired(false))
         .addChannelOption(option =>
           option.setName('channel')
-            .setDescription('Announcement channel (Required for new groups)')
+            .setDescription('Announcement channel (defaults to current channel or group channel)')
             .addChannelTypes(ChannelType.GuildText))
         .addStringOption(option => option.setName('mention').setDescription('Custom mention (e.g. @everyone or a role ID)')))
     .addSubcommand(subcommand =>
       subcommand
         .setName('remove')
-        .setDescription('Remove a streamer from a group')
+        .setDescription('Remove a streamer from announcements')
         .addStringOption(option => option.setName('username').setDescription('Twitch username or ID').setRequired(true))
-        .addStringOption(option => option.setName('group').setDescription('Group name').setRequired(true)))
+        .addStringOption(option => option.setName('group').setDescription('Group name (optional)').setRequired(false)))
     .addSubcommand(subcommand =>
       subcommand
         .setName('social')
@@ -229,31 +229,61 @@ module.exports = {
     }
 
     const username = interaction.options.getString('username')?.toLowerCase()
-    const groupName = interaction.options.getString('group')
-
-    let group = config.groups.find(g => g.name === groupName && g.guild_id === guildId)
+    let groupName = interaction.options.getString('group')
 
     if (subcommand === 'add') {
       if (!username) return interaction.reply({ content: 'Username is required.', ephemeral: true })
       await interaction.deferReply()
       try {
-        const channel = interaction.options.getChannel('channel')
+        const channelOption = interaction.options.getChannel('channel')
+        const targetChannelId = channelOption ? channelOption.id : interaction.channelId
         const mention = interaction.options.getString('mention')
 
-        if (!group) {
-          if (!channel) {
-            return interaction.editReply(`New group "${groupName}" requires a channel! Please specify the \`channel\` option.`)
+        const guildGroups = config.groups.filter(g => g.guild_id === guildId)
+        let group = null
+
+        if (groupName) {
+          group = guildGroups.find(g => g.name === groupName)
+        } else if (channelOption) {
+          group = guildGroups.find(g => g.channel_id === channelOption.id)
+        } else {
+          // If no group and no channel specified, check current channel, or fallback to single group if only 1 exists
+          group = guildGroups.find(g => g.channel_id === interaction.channelId)
+          if (!group && guildGroups.length === 1) {
+            group = guildGroups[0]
           }
+        }
+
+        if (!group) {
+          // Auto-create group
+          const targetChannel = channelOption || interaction.channel
+          const defaultName = (targetChannel && targetChannel.name) ? targetChannel.name : 'announcements'
+          groupName = groupName || defaultName
+
+          // Ensure group name is unique in this guild if auto-generated
+          let uniqueName = groupName
+          let counter = 1
+          while (guildGroups.some(g => g.name === uniqueName)) {
+            uniqueName = `${groupName}_${counter++}`
+          }
+          groupName = uniqueName
+
           group = {
             name: groupName,
-            channel_id: channel.id,
+            channel_id: targetChannelId,
             guild_id: guildId,
             streamers: [],
             mention: mention !== null ? mention : '@everyone'
           }
           config.groups.push(group)
-        } else if (mention !== null) {
-          group.mention = mention
+        } else {
+          groupName = group.name
+          if (channelOption) {
+            group.channel_id = channelOption.id
+          }
+          if (mention !== null) {
+            group.mention = mention
+          }
         }
 
         const user = await getTwitchUser(username)
@@ -285,7 +315,7 @@ module.exports = {
 
     if (subcommand === 'remove') {
       if (!username) return interaction.reply({ content: 'Username is required.', ephemeral: true })
-      if (!group) {
+      if (groupName && !config.groups.some(g => g.name === groupName && g.guild_id === guildId)) {
         return interaction.reply({ content: `Group "${groupName}" not found in this server.`, ephemeral: true })
       }
 
@@ -294,6 +324,28 @@ module.exports = {
         const user = await getTwitchUser(username)
         if (!user) {
           return interaction.editReply(`Twitch user "${username}" not found.`)
+        }
+
+        const guildGroups = config.groups.filter(g => g.guild_id === guildId)
+        let group = null
+
+        if (groupName) {
+          group = guildGroups.find(g => g.name === groupName)
+          if (!group) {
+            return interaction.editReply(`Group "${groupName}" not found in this server.`)
+          }
+        } else {
+          // Resolve group containing this streamer
+          const matchingGroups = guildGroups.filter(g => g.streamers.includes(user.id))
+          if (matchingGroups.length === 0) {
+            return interaction.editReply(`"${user.display_name}" is not assigned to any announcement groups in this server.`)
+          } else if (matchingGroups.length === 1) {
+            group = matchingGroups[0]
+            groupName = group.name
+          } else {
+            const groupList = matchingGroups.map(g => `\`${g.name}\` (<#${g.channel_id}>)`).join(', ')
+            return interaction.editReply(`"${user.display_name}" is in multiple groups: ${groupList}. Please specify which \`group\` to remove them from.`)
+          }
         }
 
         const index = group.streamers.indexOf(user.id)

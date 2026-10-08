@@ -364,10 +364,12 @@ describe("Slash Command: /animelist", () => {
 
     expect(malClient.addAnime).toHaveBeenCalledWith(59088, { status: "watching" })
     expect(ActionExecutor.executeAction).not.toHaveBeenCalledWith("google_calendar", expect.anything(), expect.anything())
+    const expectedMonthStr = futureDate.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
+    const expectedYear = futureDate.getUTCFullYear()
     expect(mockInteraction.editReply).toHaveBeenCalledWith(expect.objectContaining({
       embeds: [expect.objectContaining({
         data: expect.objectContaining({
-          description: expect.stringContaining("Premiere date unconfirmed (Oct 2026)")
+          description: expect.stringContaining(`Premiere date unconfirmed (${expectedMonthStr} ${expectedYear})`)
         })
       })]
     }))
