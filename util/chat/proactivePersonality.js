@@ -62,14 +62,6 @@ async function selectProactiveEmoji (message, recentContext = null) {
   if (!message || !message.channel) return null
 
   try {
-    // Quick tone-deafness / anti-annoyance check:
-    // If the message is asking the bot to stop, chill, shut up, or complaining about bot reactions, bail out.
-    const contentLower = (message.content || '').toLowerCase()
-    if (/\b(chill\s*(out)?|stop\s+reacting|shut\s+up|annoying\s*(bot)?|leave\s+me\s+alone|fuck\s+off|stop\s+it)\b/i.test(contentLower)) {
-      logger.info(`proactivePersonality: Skipping reaction to message ${message.id} due to anti-annoyance filter.`)
-      return null
-    }
-
     let contextMessages = recentContext
     if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
       try {

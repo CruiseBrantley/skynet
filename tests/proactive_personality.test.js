@@ -129,25 +129,6 @@ describe('proactivePersonality (System 2 Soul & Emoji Selection)', () => {
       expect(mockReact).not.toHaveBeenCalled()
     })
 
-    test('skips reacting if message tells bot to chill out or stop reacting', async () => {
-      const mockReact = jest.fn().mockResolvedValue({})
-      const mockMessage = {
-        id: 'msg_chill',
-        content: 'ok skynet, chill the fuck out with the reactions',
-        author: { username: 'FireRaven' },
-        guild: mockGuild,
-        guildId: 'guild123',
-        channel: { id: 'c1', name: 'general' },
-        reactions: { cache: new Map() },
-        react: mockReact
-      }
-
-      const emoji = await selectProactiveEmoji(mockMessage)
-      expect(emoji).toBeNull()
-      expect(ollama.queryOllama).not.toHaveBeenCalled()
-      expect(mockReact).not.toHaveBeenCalled()
-    })
-
     test('includes recent channel emojis in the prompt to encourage emoji variety', async () => {
       const { resetRecentReactions } = require('../util/chat/proactivePersonality')
       resetRecentReactions()

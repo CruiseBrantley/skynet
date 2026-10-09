@@ -67,7 +67,7 @@ class System1Gatekeeper {
     this.insightCooldownMs = parseInt(process.env.GATEKEEPER_INSIGHT_COOLDOWN_MS, 10) || 0
 
     // High-confidence probability thresholds (0.0 - 1.0)
-    this.reactionThreshold = parseFloat(process.env.SYSTEM1_REACTION_THRESHOLD || process.env.VON_REACTION_THRESHOLD) || 0.75
+    this.reactionThreshold = parseFloat(process.env.SYSTEM1_REACTION_THRESHOLD || process.env.VON_REACTION_THRESHOLD) || 0.82
     this.interjectThreshold = parseFloat(process.env.SYSTEM1_INTERJECT_THRESHOLD || process.env.VON_INTERJECT_THRESHOLD) || 0.80
     this.insightThreshold = parseFloat(process.env.SYSTEM1_INSIGHT_THRESHOLD || process.env.VON_INSIGHT_THRESHOLD) || 0.85
 
@@ -245,10 +245,10 @@ class System1Gatekeeper {
         state,
         questions: {
           reaction: noul(
-            'Is this message funny, shocking, hype, or notable enough to warrant an emoji reaction?',
+            'Is this message especially funny, shocking, hype, or notable enough that reacting with an emoji is genuinely warranted and not excessive?',
             {
-              true: 'The message is humorous, exciting, surprising, or notable enough to warrant an emoji.',
-              false: 'The message is routine text, a direct command, or ordinary.'
+              true: 'The message has clear emotional punch, wit, excitement, shock, or notable value that strongly warrants an emoji.',
+              false: 'The message is casual chat, minor venting, routine conversational text, ordinary discussion, or reacting would be excessive.'
             }
           ),
           interject: noul(
