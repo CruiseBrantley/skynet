@@ -2,7 +2,7 @@ const { MessageFlags } = require('discord.js')
 const { jsonrepair } = require('jsonrepair')
 const logger = require('../../logger')
 
-const { COMMAND_REGEX } = require('./constants')
+const { COMMAND_REGEX, MUTATION_TOOLS } = require('./constants')
 const { createMockInteraction } = require('./createMockInteraction')
 const telemetry = require('../telemetry')
 const SelfHealingEngine = require('./SelfHealingEngine')
@@ -331,7 +331,7 @@ class AutonomousCommandProcessor {
               user: interaction.user
             }
             const result = await this.ActionExecutor.executeAction(rawCmdName, params, actionContext)
-            if (result.success) sharedState.primaryResponseUsed = true
+            if (result.success && MUTATION_TOOLS.has(rawCmdName)) sharedState.primaryResponseUsed = true
             const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output)
             actionResult = result.success ? (outputStr || '[SYSTEM: Action executed successfully.]') : `[SYSTEM: Action failed: ${result.error}]`
 

@@ -406,6 +406,10 @@ async function execute (interaction, database) {
 
       if (!interaction.showStatus && typeof interaction.editReply === 'function') {
         interaction.showStatus = async (text) => {
+          if (heartbeat && heartbeat.isActive()) {
+            await heartbeat.updateStatus(text)
+            return
+          }
           clearStatusInterval()
           heartbeat = createStatusHeartbeat(interaction, text)
           await heartbeat.start()

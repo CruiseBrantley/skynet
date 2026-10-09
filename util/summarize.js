@@ -42,7 +42,7 @@ function shouldSkipUrl (url) {
   return SKIP_PATTERNS.some(pattern => pattern.test(url))
 }
 
-async function fetchPageText (url, limit = 6000) {
+async function fetchPageText (url, limit = 6000, allowPuppeteer = true) {
   if (typeof url !== 'string') return null
 
   let targetUrl = url
@@ -79,7 +79,7 @@ async function fetchPageText (url, limit = 6000) {
 
   try {
     const response = await axios.get(targetUrl, {
-      timeout: 15000,
+      timeout: 6000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
@@ -90,7 +90,7 @@ async function fetchPageText (url, limit = 6000) {
     const html = response.data
     return parseHtmlToText(html, targetUrl)
   } catch (err) {
-    if (err.response?.status === 403 || err.response?.status === 401 || err.code === 'ECONNABORTED' || !err.response) {
+    if (allowPuppeteer && (err.response?.status === 403 || err.response?.status === 401 || err.code === 'ECONNABORTED' || !err.response)) {
       logger.info(`Axios failed for ${targetUrl}. Attempting Puppeteer...`)
       return await fetchViaPuppeteer(targetUrl, limit)
     }

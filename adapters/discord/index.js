@@ -392,9 +392,14 @@ class DiscordAdapter {
             streamToken.hasEdited = () => hasEdited
 
             const showStatusFunc = async (text) => {
-              clearStatusInterval()
               startTyping()
 
+              if (heartbeat && heartbeat.isActive()) {
+                await heartbeat.updateStatus(text)
+                return responseMessage
+              }
+
+              clearStatusInterval()
               const { createStatusHeartbeat } = require('../../util/chat/statusHeartbeat')
               const updateStatus = async (payload) => {
                 if (responseMessage) {

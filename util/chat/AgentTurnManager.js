@@ -7,29 +7,8 @@ const agentMemory = require('../AgentMemory')
 const SelfHealingEngine = require('./SelfHealingEngine')
 const DiscordResponder = require('./DiscordResponder')
 const { createMockInteraction } = require('./createMockInteraction')
-const { COMMAND_REGEX } = require('./constants')
+const { COMMAND_REGEX, MUTATION_TOOLS } = require('./constants')
 const gatekeeper = require('../System1Gatekeeper')
-
-const MUTATION_TOOLS = new Set([
-  'create_slash_command',
-  'deploy_slash_commands',
-  'manage_command',
-  'manage_triggers',
-  'manage_workflows',
-  'write_state',
-  'schedule_task',
-  'cancel_task',
-  'update_task',
-  'send_embed',
-  'send_message',
-  'send_poll',
-  'send_thread',
-  'send_gif',
-  'add_reaction',
-  'remove_reaction',
-  'remember',
-  'forget'
-])
 
 class AgentTurnManager {
   constructor ({ botName = 'Skynet', queryOllamaWithContext = null, system1Client = null } = {}) {
@@ -629,7 +608,7 @@ class AgentTurnManager {
       }
 
       const result = await ActionExecutor.executeAction(rawCmdName, args, actionContext)
-      if (result.success) sharedState.primaryResponseUsed = true
+      if (result.success && MUTATION_TOOLS.has(rawCmdName)) sharedState.primaryResponseUsed = true
 
       telemetry.trackCommandExecution({
         commandName: rawCmdName,
@@ -971,6 +950,44 @@ class AgentTurnManager {
           content: `[TOOL OBSERVATION for "${toolCall.name}"]:\n${sanitizedOutput}\n\nReview this result. If more tools are needed to fulfill the user's request, call them now. Otherwise, synthesize your complete response.`
         })
       }
+    }
+
+    // Forced Synthesis: If tools were executed without a visual action, but the turn loop finished without producing a final text response (e.g. step limit reached or model ended on a tool execution),
+    // force a dedicated synthesis step so the agent formulates a complete, grounded response from the observations.
+    if (!finalReplyContent && executedTools.length > 0 && !sharedState.visualActionExecuted) {
+      logger.info(`AgentTurnManager: Turn loop concluded without final reply (${executedTools.length} tools executed). Entering dedicated synthesis phase.`)
+      channelHistory.messages.push({
+        role: 'user',
+        content: '[SYSTEM DIRECTIVE: All requested actions and inspections are complete. You are now in the FINAL SYNTHESIS phase. Formulate a direct, grounded, and comprehensive response to the user based on the tool observations. Do not output any more tool calls or command tags.]'
+      })
+
+      if (typeof interaction.resetStream === 'function') {
+        interaction.resetStream()
+      } else if (typeof interaction.streamToken?.reset === 'function') {
+        interaction.streamToken.reset()
+      }
+
+      const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
+      const synthResponse = await queryFn(
+        [...channelHistory.messages],
+        { ...ollamaContext, tools: [], think: false },
+        this.botName,
+        null
+      )
+      finalReplyContent = (synthResponse?.message?.content || '').replace(COMMAND_REGEX, '').trim()
+      if (finalReplyContent) {
+        finalReplyContent = finalReplyContent
+          .replace(/\*.*(?:is thinking\.\.\.|is autonomously executing).*\*(\s*\(\d+s\))?/gi, '')
+          .replace(/^[•✓]\s+.*$/gm, '')
+          .trim()
+      }
+
+      if (!finalReplyContent) {
+        logger.warn('AgentTurnManager: Final synthesis failed to produce text content after tool executions. Supplying informative fallback.')
+        finalReplyContent = 'I completed the requested searches and investigations, but encountered an issue formulating the final summary. Please see recent progress or try rephrasing your question.'
+      }
+
+      channelHistory.messages.push({ role: 'assistant', content: finalReplyContent })
     }
 
     // Resolve @mentions back to <@ID> using persistent mention resolver

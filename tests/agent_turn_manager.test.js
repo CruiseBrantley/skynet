@@ -590,4 +590,71 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     )
     execSpy.mockRestore()
   })
+
+  test("executeTurn triggers forced synthesis when maxSteps is exhausted during tool execution", async () => {
+    const mockQuery = jest.fn()
+      // Step 1: Model calls read_state tool
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: '{"tool_calls": [{"name": "read_state", "arguments": {"key": "d4_patch"}}]}'
+        }
+      })
+      // Step 2: Model calls read_state again (exhausting maxSteps = 2)
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: '{"tool_calls": [{"name": "read_state", "arguments": {"key": "d4_season"}}]}'
+        }
+      })
+      // Forced Synthesis call (tools: [])
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: "Based on the state inspection, the latest D4 patch is 2.1.0 and season is Season of Hatred."
+        }
+      })
+
+    turnManager.queryOllamaWithContext = mockQuery
+
+    const channelHistory = {
+      messages: [
+        { role: "system", content: "System prompt" },
+        { role: "user", content: "What is the latest D4 patch and season?" }
+      ]
+    }
+
+    const result = await turnManager.executeTurn({
+      interaction: mockInteraction,
+      database: mockDatabase,
+      channelHistory,
+      ollamaContext: {},
+      maxSteps: 2
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.replyContent).toBe("Based on the state inspection, the latest D4 patch is 2.1.0 and season is Season of Hatred.")
+    expect(result.executedTools).toHaveLength(2)
+    // Verify tools: [] was passed to the forced synthesis query
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tools: [] }),
+      expect.anything(),
+      null
+    )
+  })
+
+  test("executeToolCall does not mark primaryResponseUsed for inspection tools like read_state", async () => {
+    const sharedState = { primaryResponseUsed: false }
+    const result = await turnManager.executeToolCall({
+      name: "read_state",
+      args: { key: "some_key" },
+      interaction: mockInteraction,
+      database: mockDatabase,
+      sharedState
+    })
+
+    expect(result.success).toBe(true)
+    expect(sharedState.primaryResponseUsed).toBe(false)
+  })
 })

@@ -92,15 +92,15 @@ module.exports = {
             })
           }
 
-          // Fetch full page text for the top 2 links in parallel
+          // Fetch full page text for top 2 links via fast HTTP (no heavy Puppeteer fallback)
           const pagePromises = searchResults.slice(0, 2).map(async (item) => {
             try {
               if (item.link && item.link.startsWith('http')) {
-                const text = await fetchPageText(item.link, 10000)
+                const text = await fetchPageText(item.link, 6000, false)
                 if (text && text.length > 200) {
                   return {
                     source: `Article: ${item.title} (${item.link})`,
-                    content: text.substring(0, 5000)
+                    content: text.substring(0, 3000)
                   }
                 }
               }
@@ -149,19 +149,19 @@ module.exports = {
       return `[SYSTEM: WEB RESEARCH FINDINGS FOR "${query}"]\nNo direct external web pages or articles were retrieved. Rely on deep internal model reasoning to answer the query thoroughly.`
     }
 
-    // 3. Local Model (5090 RTX / Qwen) Context Distillation & Fact Extraction
+    // 5. Context Distillation & Fact Extraction via Local Model
     const combinedRaw = contentSources.map(s => `[SOURCE: ${s.source}]\n${s.content}`).join('\n\n---\n\n')
 
     try {
       logger.info(`web_search: Distilling ${contentSources.length} sources via local model on 5090...`)
       const distillationPrompt = `Extract the key technical facts, dates, specifications, and details relevant to the query: "${query}" from the retrieved raw sources below.\n\n` +
-        `Raw Sources:\n${combinedRaw.substring(0, 10000)}\n\n` +
+        `Raw Sources:\n${combinedRaw.substring(0, 4000)}\n\n` +
         'Respond with a concise, factual bulleted summary citing the relevant sources. Do not include conversational filler.'
 
       const distillRes = await queryOllama('/api/generate', {
         prompt: distillationPrompt,
         options: {
-          num_predict: 800,
+          num_predict: 400,
           temperature: 0.2
         }
       })
