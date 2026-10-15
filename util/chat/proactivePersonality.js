@@ -2,9 +2,18 @@ const logger = require('../../logger')
 const { queryOllama } = require('../ollama')
 const { getBasePrompt } = require('../systemPrompt')
 
+const STANDARD_EMOJI_KEYWORDS = {
+  skull: '💀',
+  fire: '🔥',
+  facepalm: '🤦',
+  thinking: '🤔',
+  salute: '🫡',
+  eyes: '👀'
+}
+
 /**
  * Clean and resolve an emoji string returned by the model.
- * Handles custom emojis <:name:id> or :name: or unicode emojis.
+ * Handles custom emojis <:name:id> or :name: or bare name or unicode emojis.
  * @param {string} raw
  * @param {import('discord.js').Guild} guild
  * @returns {string|null} The resolved emoji string or ID, or null if NONE.
@@ -26,12 +35,17 @@ function resolveEmojiForReaction (raw, guild) {
     if (guild?.emojis?.cache?.has(cleaned)) return cleaned
   }
 
-  // Check for :name: pattern matching guild custom emojis
-  const nameMatch = cleaned.match(/^:([a-zA-Z0-9_]+):$/)
-  if (nameMatch && guild?.emojis?.cache) {
+  // Check for :name: or bare name pattern matching guild custom emojis
+  const cleanName = cleaned.replace(/^:|:$/g, '').toLowerCase()
+  if (guild?.emojis?.cache) {
     const emojis = Array.from(guild.emojis.cache.values())
-    const found = emojis.find(e => e.name?.toLowerCase() === nameMatch[1].toLowerCase())
+    const found = emojis.find(e => e.name?.toLowerCase() === cleanName)
     if (found) return found.id
+  }
+
+  // Check for standard emoji keyword mapping (e.g. "skull" -> 💀)
+  if (STANDARD_EMOJI_KEYWORDS[cleanName]) {
+    return STANDARD_EMOJI_KEYWORDS[cleanName]
   }
 
   // Fallback to standard unicode emoji or first character/emoji
@@ -58,39 +72,48 @@ function resetRecentReactions () {
  * @param {Array<object>} recentContext - Optional recent context messages
  * @returns {Promise<string|null>} The reacted emoji or null
  */
-async function selectProactiveEmoji (message, recentContext = null) {
+async function selectProactiveEmoji (message, recentContextOrEmojiChoice = null) {
   if (!message || !message.channel) return null
 
   try {
-    let contextMessages = recentContext
-    if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
-      try {
-        const fetched = await message.channel.messages.fetch({ limit: 8 })
-        contextMessages = Array.from(fetched.values()).reverse()
-      } catch (e) {}
-    }
-
     const guild = message.guild
-    let customEmojisText = 'None'
-    if (guild?.emojis?.cache?.size > 0) {
-      customEmojisText = [...guild.emojis.cache.values()]
-        .slice(0, 50)
-        .map(e => `- :${e.name}: (<:${e.name}:${e.id}>)`)
-        .join('\n')
-    }
-
     const channelId = message.channel.id
     const channelHistory = recentReactionsByChannel.get(channelId) || []
-    let recentEmojisText = ''
-    if (channelHistory.length > 0) {
-      recentEmojisText = `\nRecently used reactions in this channel (avoid repeating unless exceptionally fitting; prefer variety): ${channelHistory.map(h => h.name || h.id).join(', ')}`
+    let resolvedEmoji = null
+
+    // Fast-path: If an emoji choice string was directly passed (e.g. from System 1 single-pass decision),
+    // resolve directly! Bypasses the heavy generative LLM entirely (0ms LLM queueing, zero token waste).
+    if (typeof recentContextOrEmojiChoice === 'string') {
+      resolvedEmoji = resolveEmojiForReaction(recentContextOrEmojiChoice, guild)
     }
 
-    const contextSnippet = Array.isArray(contextMessages) && contextMessages.length > 0
-      ? contextMessages.slice(-8).map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
-      : `${message.author?.username || 'User'}: ${message.content}`
+    if (!resolvedEmoji) {
+      let contextMessages = Array.isArray(recentContextOrEmojiChoice) ? recentContextOrEmojiChoice : null
+      if ((!contextMessages || contextMessages.length === 0) && typeof message.channel.messages?.fetch === 'function') {
+        try {
+          const fetched = await message.channel.messages.fetch({ limit: 8 })
+          contextMessages = Array.from(fetched.values()).reverse()
+        } catch (e) {}
+      }
 
-    const prompt = `${getBasePrompt()}
+      let customEmojisText = 'None'
+      if (guild?.emojis?.cache?.size > 0) {
+        customEmojisText = [...guild.emojis.cache.values()]
+          .slice(0, 50)
+          .map(e => `- :${e.name}: (<:${e.name}:${e.id}>)`)
+          .join('\n')
+      }
+
+      let recentEmojisText = ''
+      if (channelHistory.length > 0) {
+        recentEmojisText = `\nRecently used reactions in this channel (avoid repeating unless exceptionally fitting; prefer variety): ${channelHistory.map(h => h.name || h.id).join(', ')}`
+      }
+
+      const contextSnippet = Array.isArray(contextMessages) && contextMessages.length > 0
+        ? contextMessages.slice(-8).map(m => `${m.author?.username || 'User'}: ${m.content}`).join('\n')
+        : `${message.author?.username || 'User'}: ${message.content}`
+
+      const prompt = `${getBasePrompt()}
 
 === TASK: PROACTIVE REACTION SELECTION ===
 You are choosing an emoji reaction for a message in #${message.channel.name || 'channel'}.
@@ -113,17 +136,18 @@ Instructions:
 
 Emoji:`
 
-    const result = await queryOllama('/api/generate', {
-      prompt,
-      options: { temperature: 0.2, num_predict: 15 }
-    }, 0)
+      const result = await queryOllama('/api/generate', {
+        prompt,
+        options: { temperature: 0.2, num_predict: 15 }
+      }, 0)
 
-    const rawResponse = result?.response || result?.message?.content || ''
-    const resolvedEmoji = resolveEmojiForReaction(rawResponse, guild)
+      const rawResponse = result?.response || result?.message?.content || ''
+      resolvedEmoji = resolveEmojiForReaction(rawResponse, guild)
 
-    if (!resolvedEmoji) {
-      logger.info(`proactivePersonality: Evaluator decided against reacting to message ${message.id} (response: "${rawResponse.trim()}").`)
-      return null
+      if (!resolvedEmoji) {
+        logger.info(`proactivePersonality: Evaluator decided against reacting to message ${message.id} (response: "${rawResponse.trim()}").`)
+        return null
+      }
     }
 
     // Check if the bot has already reacted with this emoji
@@ -349,9 +373,14 @@ async function executeProactiveInterjection (message, client, database) {
   }
 }
 
+function getRecentReactions (channelId) {
+  return recentReactionsByChannel.get(channelId) || []
+}
+
 module.exports = {
   resolveEmojiForReaction,
   selectProactiveEmoji,
   executeProactiveInterjection,
-  resetRecentReactions
+  resetRecentReactions,
+  getRecentReactions
 }

@@ -10,6 +10,18 @@ const { createMockInteraction } = require('./createMockInteraction')
 const { COMMAND_REGEX, MUTATION_TOOLS } = require('./constants')
 const gatekeeper = require('../System1Gatekeeper')
 
+const SENSITIVE_ACTIONS = new Set([
+  'host_exec',
+  'delete_message',
+  'manage_command',
+  'write_state',
+  'schedule_task',
+  'cancel_task',
+  'update_task',
+  'deploy_slash_commands',
+  'restart_bot'
+])
+
 class AgentTurnManager {
   constructor ({ botName = 'Skynet', queryOllamaWithContext = null, system1Client = null } = {}) {
     this.botName = botName || process.env.BOT_NAME || 'Skynet'
@@ -69,9 +81,17 @@ class AgentTurnManager {
     // System 1 Fast Semantic Evaluation (Model-Driven Decision Engine)
     if (this.system1Client && typeof this.system1Client.systemOne === 'function') {
       try {
-        const s1State = `[USER]:\n${userPrompt.slice(0, 400)}\n\n` +
-          `[TOOLS EXECUTED]:\n${executedNames}\n\n` +
-          `[ASSISTANT]:\n${trimmed.slice(0, 600)}`
+        const toolObservations = (channelHistory?.messages || [])
+          .filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.startsWith('[TOOL OBSERVATION'))
+          .map(m => m.content)
+          .join('\n\n')
+
+        let s1State = `[USER]:\n${userPrompt.slice(0, 400)}\n\n` +
+          `[TOOLS EXECUTED]:\n${executedNames}\n\n`
+        if (toolObservations) {
+          s1State += `[TOOL OBSERVATIONS]:\n${toolObservations.slice(0, 1500)}\n\n`
+        }
+        s1State += `[ASSISTANT]:\n${trimmed.slice(0, 600)}`
 
         const s1Questions = {
           intermediate_intent: {
@@ -92,12 +112,34 @@ class AgentTurnManager {
           }
         }
 
+        if (toolObservations) {
+          s1Questions.grounded = {
+            type: 'choice',
+            instructions: 'Is the assistant reply factually grounded in and supported by the tool observations, or does it hallucinate/contradict the evidence?',
+            criteria: {
+              grounded: 'The assistant reply is factually supported by and consistent with the tool observations.',
+              hallucinated: 'The assistant reply contradicts the tool observations, invents unsupported facts, or misrepresents findings.'
+            }
+          }
+        }
+
         const s1Res = await this.system1Client.systemOne({ state: s1State, questions: s1Questions, timeout: 5000 })
         const intermediateIntentProb = s1Res?.answers?.intermediate_intent?.noul
         const isSufficientProb = s1Res?.answers?.is_sufficient?.noul
+        const hallucinatedProb = s1Res?.answers?.grounded?.probabilities?.hallucinated
 
         if (typeof intermediateIntentProb === 'number') {
-          logger.info(`AgentTurnManager: System 1 evaluation: intermediate_intent=${intermediateIntentProb.toFixed(3)}, is_sufficient=${typeof isSufficientProb === 'number' ? isSufficientProb.toFixed(3) : 'N/A'}`)
+          logger.info(`AgentTurnManager: System 1 evaluation: intermediate_intent=${intermediateIntentProb.toFixed(3)}, is_sufficient=${typeof isSufficientProb === 'number' ? isSufficientProb.toFixed(3) : 'N/A'}${typeof hallucinatedProb === 'number' ? `, hallucinated=${hallucinatedProb.toFixed(3)}` : ''}`)
+
+          if (typeof hallucinatedProb === 'number' && hallucinatedProb >= 0.75) {
+            logger.warn(`AgentTurnManager: System 1 detected ungrounded/hallucinated reply (hallucinated=${hallucinatedProb.toFixed(3)} >= 0.75)`)
+            return {
+              isPending: true,
+              isSufficient: false,
+              reason: 'System 1 detected that the response is ungrounded or contradicts tool observations',
+              suggestedAction: 'Answer the user request using the exact facts and evidence found in the tool observations'
+            }
+          }
 
           if (intermediateIntentProb >= 0.70) {
             return {
@@ -745,6 +787,43 @@ class AgentTurnManager {
       await interaction.showStatus(`${this.botName} is thinking...`).catch(() => {})
     }
 
+    // Extract recent user prompt
+    const userPrompt = (channelHistory?.messages || [])
+      .filter(m => m.role === 'user' && typeof m.content === 'string')
+      .map(m => m.content)
+      .pop() || ''
+
+    // Phase 4: Fast-Path vs Slow-Path Routing
+    let isFastChat = false
+    if (!isProactive && availableToolsSchema.length > 0 && userPrompt && this.system1Client && typeof this.system1Client.systemOne === 'function') {
+      try {
+        const routeState = `[USER REQUEST]:\n${userPrompt.slice(0, 500)}`
+        const routeQuestions = {
+          route: {
+            type: 'choice',
+            instructions: 'Does this user message require searching files, running code, Discord management, or external tools, or is it a general conversation, greeting, opinion, or direct question answerable without tools?',
+            criteria: {
+              chat: 'General conversation, greeting, chit-chat, opinion, banter, or direct knowledge answerable without tool execution.',
+              tools: 'Requires inspecting files, running commands, reading system state, Discord actions, web search, or specialized tools.'
+            }
+          }
+        }
+        const routeRes = await this.system1Client.systemOne({ state: routeState, questions: routeQuestions, timeout: 3000 })
+        const chatProb = routeRes?.answers?.route?.probabilities?.chat
+        const toolsProb = routeRes?.answers?.route?.probabilities?.tools
+
+        if (typeof chatProb === 'number') {
+          logger.info(`AgentTurnManager: Fast-path route evaluation: chat=${chatProb.toFixed(3)}, tools=${typeof toolsProb === 'number' ? toolsProb.toFixed(3) : 'N/A'}`)
+          if (chatProb >= 0.85 || (typeof toolsProb === 'number' && toolsProb < 0.15)) {
+            isFastChat = true
+            logger.info('AgentTurnManager: Fast-path activated (pure conversation). Skipping tool schema on step 0.')
+          }
+        }
+      } catch (routeErr) {
+        logger.warn(`AgentTurnManager: Fast-path routing check bypassed: ${routeErr.message}`)
+      }
+    }
+
     for (let step = 0; step < maxSteps; step++) {
       logger.info(`AgentTurnManager: Executing turn step ${step + 1}/${maxSteps}`)
 
@@ -754,19 +833,26 @@ class AgentTurnManager {
         interaction.streamToken.reset()
       }
 
-      // Stream Isolation: During tool planning turns, isolate streaming from primary message
+      // Step 0 on fast-path: omit tool schema to avoid JSON catalog and grammar overhead
+      const stepTools = (step === 0 && isFastChat) ? [] : availableToolsSchema
+
+      // Stream Isolation: Suppress streaming during tool planning turns, but stream directly on fast-path
       const queryFn = this.queryOllamaWithContext || require('../ollama').queryOllamaWithContext
       const turnContext = {
         ...ollamaContext,
-        tools: availableToolsSchema,
+        tools: stepTools,
         ...(isProactive ? { num_predict: 80, think: false, isCodeTask: false } : {})
       }
+
+      const onToken = (step === 0 && isFastChat && typeof interaction.streamToken === 'function')
+        ? interaction.streamToken
+        : null
 
       const responseData = await queryFn(
         [...channelHistory.messages],
         turnContext,
         this.botName,
-        null // Suppress direct message streaming during planning/tool execution
+        onToken
       )
 
       if (!responseData || !responseData.message) {
@@ -915,6 +1001,42 @@ class AgentTurnManager {
           continue
         }
 
+        // Phase 3: Pre-Execution Guardrails for sensitive tools
+        if (SENSITIVE_ACTIONS.has(toolCall.name) && this.system1Client && typeof this.system1Client.systemOne === 'function') {
+          try {
+            const guardState = `[USER REQUEST]:\n${userPrompt.slice(0, 500)}\n\n` +
+              `[PROPOSED SENSITIVE ACTION]:\nTool: ${toolCall.name}\nArguments: ${JSON.stringify(toolCall.arguments)}`
+
+            const guardQuestions = {
+              safety: {
+                type: 'choice',
+                instructions: 'Does this sensitive tool execution safely and directly fulfill the user request, or is it dangerous, unintended, destructive, or unauthorized?',
+                criteria: {
+                  safe_and_intended: 'The action is safe, directly requested or clearly necessary to fulfill the user request.',
+                  dangerous_or_unintended: 'The action is dangerous, destructive, unintended, malicious, or exceeds the scope of the user request.'
+                }
+              }
+            }
+
+            const guardRes = await this.system1Client.systemOne({ state: guardState, questions: guardQuestions, timeout: 5000 })
+            const dangerousProb = guardRes?.answers?.safety?.probabilities?.dangerous_or_unintended
+
+            if (typeof dangerousProb === 'number') {
+              logger.info(`AgentTurnManager: Safety guardrail check for "${toolCall.name}": dangerous_or_unintended=${dangerousProb.toFixed(3)}`)
+              if (dangerousProb >= 0.75) {
+                logger.warn(`AgentTurnManager: Pre-execution guardrail blocked tool "${toolCall.name}": dangerous_or_unintended=${dangerousProb.toFixed(3)} >= 0.75`)
+                channelHistory.messages.push({
+                  role: 'user',
+                  content: `[TOOL OBSERVATION for "${toolCall.name}"]: Blocked by safety guardrail — execution was assessed as potentially dangerous or unintended (${(dangerousProb * 100).toFixed(1)}% confidence). Do not retry this action without explicit user confirmation.`
+                })
+                continue
+              }
+            }
+          } catch (guardErr) {
+            logger.warn(`AgentTurnManager: Safety guardrail check bypassed or unavailable: ${guardErr.message}`)
+          }
+        }
+
         executedSignatures.add(toolSig)
 
         tracker.startAction(toolCall.name, toolCall.arguments)
@@ -1036,5 +1158,7 @@ class AgentTurnManager {
     }
   }
 }
+
+AgentTurnManager.SENSITIVE_ACTIONS = SENSITIVE_ACTIONS
 
 module.exports = AgentTurnManager

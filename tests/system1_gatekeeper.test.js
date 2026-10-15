@@ -432,6 +432,76 @@ describe('System1Gatekeeper (Real-time System 1 Sentry)', () => {
       const triggeredRes = await gatekeeper.evaluateMessage(msg, mockClient, {})
       expect(triggeredRes.action).toBe('react')
     })
+
+    test('handles 3-way choice probabilities and passes selected emoji choice directly to selectProactiveEmoji', async () => {
+      const msg = {
+        author: { bot: false, id: 'user1' },
+        guildId: 'g1',
+        guild: {
+          emojis: {
+            cache: new Map([['e1', { id: 'e1', name: 'Bruh' }]])
+          }
+        },
+        channel: { id: 'c1', name: 'general' },
+        content: 'I just deleted prod database lol'
+      }
+
+      jest.spyOn(gatekeeper.client, 'systemOne').mockResolvedValueOnce({
+        answers: {
+          reaction: {
+            type: 'choice',
+            choice: 'warranted',
+            probabilities: { warranted: 0.89, banter: 0.10, unwarranted: 0.01 }
+          },
+          interject: {
+            type: 'choice',
+            choice: 'not_addressed',
+            probabilities: { addressed_to_bot: 0.02, conversational_mention: 0.05, not_addressed: 0.93 }
+          },
+          emoji: {
+            type: 'choice',
+            choice: 'Bruh'
+          }
+        }
+      })
+
+      const res = await gatekeeper.evaluateMessage(msg, mockClient, {})
+      expect(res).toMatchObject({ action: 'react', score: 0.89 })
+      await new Promise(resolve => setImmediate(resolve))
+      expect(proactivePersonality.selectProactiveEmoji).toHaveBeenCalledWith(msg, 'Bruh')
+    })
+
+    test('hydrates recent message reactions into evaluation state context', () => {
+      const channelMessagesCache = new Map()
+      channelMessagesCache.set('m1', {
+        id: 'm1',
+        content: 'That was crazy',
+        createdTimestamp: 1000,
+        author: { id: 'user2', username: 'Gamer' },
+        reactions: {
+          cache: new Map([
+            ['r1', { emoji: { name: '🔥' }, me: false }],
+            ['r2', { emoji: { name: 'Bruh' }, me: true }]
+          ])
+        }
+      })
+      channelMessagesCache.set('m2', {
+        id: 'm2',
+        content: 'totally agreed',
+        createdTimestamp: 2000,
+        author: { id: 'user1', username: 'sirian' }
+      })
+
+      const msg = {
+        id: 'm2',
+        content: 'totally agreed',
+        author: { id: 'user1' },
+        channel: { messages: { cache: channelMessagesCache } }
+      }
+
+      const state = gatekeeper.buildEvaluationState(msg, botId)
+      expect(state).toContain('[Reactions: 🔥, Bruh (by Skynet)]')
+    })
   })
 })
 

@@ -1,7 +1,7 @@
 const logger = require('../logger')
 const { isProactiveChannelAllowed } = require('./config_manager')
 const { isChannelInFlight } = require('./inFlightChannels')
-const { selectProactiveEmoji, executeProactiveInterjection } = require('./chat/proactivePersonality')
+const { selectProactiveEmoji, executeProactiveInterjection, getRecentReactions } = require('./chat/proactivePersonality')
 const { executeProactiveInsight } = require('./chat/proactiveInsight')
 
 function noul (instructions, criteria = null) {
@@ -13,6 +13,14 @@ function noul (instructions, criteria = null) {
     q.criteria = criteria
   }
   return q
+}
+
+function choice (instructions, criteria = {}) {
+  return {
+    type: 'choice',
+    instructions,
+    criteria
+  }
 }
 
 class System1Client {
@@ -214,7 +222,19 @@ class System1Gatekeeper {
           if (m.id !== message.id && content.length > 300) {
             content = content.slice(0, 300) + '...'
           }
-          return `[${author}]: ${content}`
+          let reactionsTag = ''
+          if (m.reactions?.cache && m.reactions.cache.size > 0) {
+            const rList = []
+            for (const r of m.reactions.cache.values()) {
+              const name = r.emoji?.name || 'emoji'
+              const byBot = r.me ? ' (by Skynet)' : ''
+              rList.push(`${name}${byBot}`)
+            }
+            if (rList.length > 0) {
+              reactionsTag = ` [Reactions: ${rList.join(', ')}]`
+            }
+          }
+          return `[${author}]: ${content}${reactionsTag}`
         }).join('\n')
       }
     } catch {
@@ -241,42 +261,85 @@ class System1Gatekeeper {
     try {
       const start = Date.now()
       const state = this.buildEvaluationState(message, botId)
+
+      // Build candidate emoji choices dynamically from custom guild emojis + standard fallbacks
+      const emojiCriteria = {}
+      const rawRecent = typeof getRecentReactions === 'function' ? getRecentReactions(channelId) : null
+      const channelRecent = Array.isArray(rawRecent) ? rawRecent : []
+      const recentNames = new Set(channelRecent.map(r => r?.name || r?.id).filter(Boolean))
+
+      if (message.guild?.emojis?.cache) {
+        const guildEmojis = Array.from(message.guild.emojis.cache.values()).slice(0, 50)
+        for (const emoji of guildEmojis) {
+          if (emoji.available !== false && !emoji.managed) {
+            const recentNote = recentNames.has(emoji.name) || recentNames.has(emoji.id)
+              ? ' (recently used in channel, prefer other options unless exceptionally fitting)'
+              : ''
+            emojiCriteria[emoji.name] = `Server custom emoji :${emoji.name}:${recentNote}`
+          }
+        }
+      }
+
+      const standardFallbacks = {
+        skull: 'Dead, wheezing, laughing at fatal mistake or absurdity (💀)',
+        fire: 'Hype, epic, lit, impressive achievement (🔥)',
+        facepalm: 'Regret, silly mistake, unamused disbelief (🤦)',
+        thinking: 'Curious, puzzling, questionable logic (🤔)',
+        salute: 'Respect, agreement, based (🫡)',
+        eyes: 'Spicy drama, shocking, notable gossip (👀)'
+      }
+
+      for (const [key, desc] of Object.entries(standardFallbacks)) {
+        if (!emojiCriteria[key]) {
+          const recentNote = recentNames.has(key) ? ' (recently used in channel, prefer other options unless exceptionally fitting)' : ''
+          emojiCriteria[key] = `${desc}${recentNote}`
+        }
+      }
+
       const res = await this.client.systemOne({
         state,
         questions: {
-          reaction: noul(
+          reaction: choice(
             'Is this message especially funny, shocking, hype, or notable enough that reacting with an emoji is genuinely warranted and not excessive?',
             {
-              true: 'The message has clear emotional punch, wit, excitement, shock, or notable value that strongly warrants an emoji.',
-              false: 'The message is casual chat, minor venting, routine conversational text, ordinary discussion, or reacting would be excessive.'
+              warranted: 'The message has clear emotional punch, standout wit, excitement, shock, or notable value that strongly warrants an emoji reaction.',
+              banter: 'The message is casual banter, dry humor, sarcasm, minor venting, or friendly chat where an emoji reaction is not strictly warranted.',
+              unwarranted: 'The message is routine conversational text, mundane discussion, or reacting would be tone-deaf or excessive.'
             }
           ),
-          interject: noul(
+          interject: choice(
             'Does the message address Skynet, command Skynet, or request a response from Skynet?',
             {
-              true: 'The user is talking directly to Skynet, answering Skynet, asking Skynet to do something, or requesting a response.',
-              false: 'The user is talking to other users or not addressing Skynet.'
+              addressed_to_bot: 'The user is talking directly to Skynet, answering Skynet, commanding Skynet, or requesting a response.',
+              conversational_mention: 'The user mentioned Skynet or AI in passing to other users, but is not commanding or asking Skynet to respond.',
+              not_addressed: 'The user is talking to other users and not addressing Skynet.'
             }
           ),
-          insight: noul(
+          insight: choice(
             'Does this message ask a question, describe a problem, or present an opportunity where the bot can assist with timely, helpful information without being obtrusive?',
             {
-              true: 'The user is seeking information or help that the bot can assist with in a timely, helpful way.',
-              false: 'The user is not seeking assistance or the bot should not interrupt.'
+              clear_help_needed: 'The user is seeking factual assistance, troubleshooting, or information that the bot can assist with in a timely, helpful way.',
+              rhetorical_or_casual: 'The user is asking a rhetorical question, casually chatting, or discussing a topic without needing bot intervention.',
+              no_help_needed: 'The user is not seeking assistance or the bot should not interrupt.'
             }
+          ),
+          emoji: choice(
+            'Select the single best fitting reaction emoji for this message from the available options:',
+            emojiCriteria
           )
         }
       })
 
       this._hasLoggedOffline = false
       const latencyMs = Date.now() - start
-      const reactionProb = res?.answers?.reaction?.noul ?? 0
-      const interjectProb = res?.answers?.interject?.noul ?? 0
-      const insightProb = res?.answers?.insight?.noul ?? 0
+      const reactionProb = res?.answers?.reaction?.probabilities?.warranted ?? (res?.answers?.reaction?.noul ?? 0)
+      const interjectProb = res?.answers?.interject?.probabilities?.addressed_to_bot ?? (res?.answers?.interject?.noul ?? 0)
+      const insightProb = res?.answers?.insight?.probabilities?.clear_help_needed ?? (res?.answers?.insight?.noul ?? 0)
+      const selectedEmojiChoice = res?.answers?.emoji?.choice || null
 
       logger.info(
         `System1Gatekeeper: #${channelName} evaluated in ${latencyMs}ms ` +
-        `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}, insight: ${insightProb.toFixed(2)}]`
+        `[reaction: ${reactionProb.toFixed(2)}, interject: ${interjectProb.toFixed(2)}, insight: ${insightProb.toFixed(2)}${selectedEmojiChoice ? `, emoji: ${selectedEmojiChoice}` : ''}]`
       )
 
       const triggeredActions = []
@@ -291,7 +354,7 @@ class System1Gatekeeper {
         this.lastInterjectTimeByChannel.set(channelId, Date.now())
         logger.info(
           `System1Gatekeeper: Interjection triggered in #${channelName} ` +
-          `(score: ${interjectProb.toFixed(2)} >= ${this.interjectThreshold}) for "${message.content.slice(0, 50)}"`
+          `(score: ${interjectProb.toFixed(2)} >= ${effectiveInterjectThreshold.toFixed(2)}) for "${message.content.slice(0, 50)}"`
         )
         interjected = true
         triggeredActions.push('interject')
@@ -328,9 +391,12 @@ class System1Gatekeeper {
           `(score: ${reactionProb.toFixed(2)} >= ${effectiveReactionThreshold.toFixed(2)}) for "${message.content.slice(0, 50)}"`
         )
         triggeredActions.push('react')
-        // Execute asynchronously so gatekeeper returns immediately
+        // Execute asynchronously so gatekeeper returns immediately - pass selectedEmojiChoice for fast-path
         setImmediate(() => {
-          Promise.resolve(selectProactiveEmoji(message)).catch(err => {
+          const promise = selectedEmojiChoice
+            ? selectProactiveEmoji(message, selectedEmojiChoice)
+            : selectProactiveEmoji(message)
+          Promise.resolve(promise).catch(err => {
             logger.error(`System1Gatekeeper: Proactive reaction error: ${err.message}`)
           })
         })

@@ -657,4 +657,226 @@ describe("AgentTurnManager - First-Principles ReAct Engine", () => {
     expect(result.success).toBe(true)
     expect(sharedState.primaryResponseUsed).toBe(false)
   })
+
+  test("evaluatePendingWork uses System 1 choice to reject hallucinated or ungrounded replies", async () => {
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          intermediate_intent: { noul: 0.05 },
+          is_sufficient: { noul: 0.90 },
+          grounded: {
+            probabilities: {
+              grounded: 0.08,
+              hallucinated: 0.92
+            }
+          }
+        }
+      })
+    }
+
+    const evalResult = await turnManager.evaluatePendingWork({
+      ollamaContext: {},
+      executedTools: [{ name: "web_search" }],
+      assistantText: "The weather in Camden is 95 degrees and sunny.",
+      channelHistory: {
+        messages: [
+          { role: "user", content: "What is the weather in Camden?" },
+          { role: "user", content: '[TOOL OBSERVATION for "web_search"]:\nCamden, AR: Currently 45°F, Overcast, 90% chance of rain.' }
+        ]
+      }
+    })
+
+    expect(evalResult.isSufficient).toBe(false)
+    expect(evalResult.isPending).toBe(true)
+    expect(evalResult.reason).toContain("ungrounded or contradicts tool observations")
+    expect(turnManager.system1Client.systemOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: expect.objectContaining({
+          grounded: expect.objectContaining({
+            type: "choice"
+          })
+        })
+      })
+    )
+  })
+
+  test("executeTurn blocks sensitive tool execution when System 1 guardrail detects dangerous_or_unintended", async () => {
+    const mockQuery = jest.fn()
+      // Step 1: Model tries to call host_exec with a dangerous command
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: '{"tool_calls": [{"name": "host_exec", "arguments": {"command": "rm -rf /"}}]}'
+        }
+      })
+      // Step 2: Model sees blocked observation and replies safely
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: "I cannot execute destructive file system deletions."
+        }
+      })
+      // Coordinator check
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: JSON.stringify({ is_sufficient: true })
+        }
+      })
+
+    turnManager.queryOllamaWithContext = mockQuery
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          safety: {
+            probabilities: {
+              safe_and_intended: 0.02,
+              dangerous_or_unintended: 0.98
+            }
+          }
+        }
+      })
+    }
+
+    const execSpy = jest.spyOn(ActionExecutor, "executeAction")
+
+    const channelHistory = {
+      messages: [
+        { role: "system", content: "System prompt" },
+        { role: "user", content: "delete the system" }
+      ]
+    }
+
+    const result = await turnManager.executeTurn({
+      interaction: mockInteraction,
+      database: mockDatabase,
+      channelHistory,
+      ollamaContext: {}
+    })
+
+    expect(result.success).toBe(true)
+    expect(execSpy).not.toHaveBeenCalled()
+    expect(result.executedTools).toHaveLength(0)
+    const blockedMsg = channelHistory.messages.find(m => typeof m.content === "string" && m.content.includes("Blocked by safety guardrail"))
+    expect(blockedMsg).toBeDefined()
+    execSpy.mockRestore()
+  })
+
+  test("executeTurn activates fast-path for pure conversational turns and omits tool catalog on step 0", async () => {
+    const mockQuery = jest.fn()
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: "Hello! How can I help you today?"
+        }
+      })
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: JSON.stringify({ is_sufficient: true })
+        }
+      })
+
+    turnManager.queryOllamaWithContext = mockQuery
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          route: {
+            probabilities: {
+              chat: 0.97,
+              tools: 0.03
+            }
+          }
+        }
+      })
+    }
+
+    const channelHistory = {
+      messages: [
+        { role: "system", content: "System prompt" },
+        { role: "user", content: "hey skynet how are you doing today?" }
+      ]
+    }
+
+    const streamToken = jest.fn()
+    streamToken.reset = jest.fn()
+    streamToken.hasEdited = jest.fn().mockReturnValue(false)
+    mockInteraction.streamToken = streamToken
+
+    const result = await turnManager.executeTurn({
+      interaction: mockInteraction,
+      database: mockDatabase,
+      channelHistory,
+      ollamaContext: {}
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.replyContent).toBe("Hello! How can I help you today?")
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({ tools: [] }),
+      expect.anything(),
+      streamToken
+    )
+  })
+
+  test("executeTurn keeps slow-path tools schema when System 1 classifies query as needing tools", async () => {
+    const mockQuery = jest.fn()
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: '{"tool_calls": [{"name": "read_state", "arguments": {"key": "test"}}]}'
+        }
+      })
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: "Here is the state."
+        }
+      })
+      .mockResolvedValueOnce({
+        message: {
+          role: "assistant",
+          content: JSON.stringify({ is_sufficient: true })
+        }
+      })
+
+    turnManager.queryOllamaWithContext = mockQuery
+    turnManager.system1Client = {
+      systemOne: jest.fn().mockResolvedValue({
+        answers: {
+          route: {
+            probabilities: {
+              chat: 0.05,
+              tools: 0.95
+            }
+          }
+        }
+      })
+    }
+
+    const channelHistory = {
+      messages: [
+        { role: "system", content: "System prompt" },
+        { role: "user", content: "read the state key test" }
+      ]
+    }
+
+    const result = await turnManager.executeTurn({
+      interaction: mockInteraction,
+      database: mockDatabase,
+      channelHistory,
+      ollamaContext: {}
+    })
+
+    expect(result.success).toBe(true)
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({ tools: expect.arrayContaining([expect.objectContaining({ type: "function" })]) }),
+      expect.anything(),
+      null
+    )
+  })
 })
