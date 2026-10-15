@@ -13,7 +13,7 @@ module.exports = {
 
     if (!channel || !channel.messages || typeof channel.messages.fetch !== 'function') {
       logger.warn('ActionExecutor: add_reaction invoked in an environment without Discord channel messages support (e.g. Web Chat).')
-      return { success: false, reason: 'Reactions are only available in active Discord channels.' }
+      return { success: false, reason: 'Reactions are only available in active Discord channels.', error: 'Reactions are only available in active Discord channels.' }
     }
 
     try {
@@ -27,6 +27,12 @@ module.exports = {
       }
 
       if (message) {
+        const botId = bot?.user?.id || bot?.client?.user?.id
+        if (botId && message.author?.id === botId && (/is thinking\.\.\./i.test(message.content || '') || /is autonomously executing/i.test(message.content || ''))) {
+          logger.warn(`ActionExecutor: add_reaction skipped reacting to bot's own thinking/status placeholder message ${message.id}`)
+          return { success: false, error: 'Cannot react to the bot\'s own transient thinking status message.' }
+        }
+
         await message.react(emoji)
         logger.info(`ActionExecutor: Added reaction ${emoji} to message ${message.id}`)
         return { success: true, messageId: message.id, emoji }

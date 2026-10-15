@@ -281,6 +281,28 @@ describe('Built-in Actions', () => {
       expect(mChannel.messages.fetch).toHaveBeenCalledWith('123')
       expect(mockMessage.react).toHaveBeenCalledWith('👍')
     })
+
+    test('refuses to react to bot\'s own thinking/status placeholder message', async () => {
+      const mockMessage = {
+        id: '999',
+        author: { id: 'bot123' },
+        content: '*Skynet is thinking...*',
+        react: jest.fn()
+      }
+      const mChannel = { messages: { fetch: jest.fn().mockResolvedValue(mockMessage) } }
+      const mockBot = { user: { id: 'bot123' } }
+      const result = await action.execute(mockBot, mChannel, { messageId: '999', emoji: '🔥' })
+      expect(mockMessage.react).not.toHaveBeenCalled()
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('transient thinking status message')
+    })
+
+    test('returns clean error if channel does not support message fetching', async () => {
+      const mChannel = { id: 'web_session' }
+      const result = await action.execute(null, mChannel, { messageId: '123', emoji: '👍' })
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('only available in active Discord channels')
+    })
   })
 
   // ─── remove_reaction ──────────────────────────────────────────────────────

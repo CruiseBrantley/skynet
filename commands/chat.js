@@ -242,7 +242,14 @@ async function execute (interaction, database) {
       let channelContext = 'Recent Channel Context:\n(No recent history available)'
       try {
         const recentMessages = await interaction.channel.messages.fetch({ limit: 20 })
-        channelContext = 'Recent Channel Context:\n' + recentMessages.map(m => {
+        const botId = interaction.client?.user?.id
+        const validMessages = [...recentMessages.values()].filter(m => {
+          if (botId && m.author?.id === botId && /is thinking\.\.\.|is autonomously executing/i.test(m.content || '')) {
+            return false
+          }
+          return true
+        })
+        channelContext = 'Recent Channel Context:\n' + validMessages.map(m => {
           mentionResolver.record(m.author.username, m.author.id, interaction.guildId)
           if (m.member?.nickname) mentionResolver.record(m.member.nickname, m.author.id, interaction.guildId)
 

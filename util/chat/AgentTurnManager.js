@@ -808,7 +808,7 @@ class AgentTurnManager {
             }
           }
         }
-        const routeRes = await this.system1Client.systemOne({ state: routeState, questions: routeQuestions, timeout: 3000 })
+        const routeRes = await this.system1Client.systemOne({ state: routeState, questions: routeQuestions, timeout: 6000 })
         const chatProb = routeRes?.answers?.route?.probabilities?.chat
         const toolsProb = routeRes?.answers?.route?.probabilities?.tools
 
