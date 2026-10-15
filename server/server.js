@@ -579,6 +579,7 @@ function setupServer (coreOrBot, database) {
         clientId: 'web',
         user: { id: isOwner ? process.env.OWNER_ID : (userId || 'guest_user'), username: authorName },
         channel: { id: `web_${profileId}`, name: `web_${profileId}` },
+        client: bot,
         isOwner,
         isDM: true,
         profileId

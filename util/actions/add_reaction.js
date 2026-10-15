@@ -11,6 +11,11 @@ module.exports = {
     const { messageId, emoji } = params
     if (!emoji) return
 
+    if (!channel || !channel.messages || typeof channel.messages.fetch !== 'function') {
+      logger.warn('ActionExecutor: add_reaction invoked in an environment without Discord channel messages support (e.g. Web Chat).')
+      return { success: false, reason: 'Reactions are only available in active Discord channels.' }
+    }
+
     try {
       let message
       // Handle placeholders or missing IDs by fetching the last message in the channel
@@ -24,6 +29,7 @@ module.exports = {
       if (message) {
         await message.react(emoji)
         logger.info(`ActionExecutor: Added reaction ${emoji} to message ${message.id}`)
+        return { success: true, messageId: message.id, emoji }
       } else {
         throw new Error('Could not find a message to react to in this channel.')
       }
